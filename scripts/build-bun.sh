@@ -57,7 +57,10 @@ echo "    build.ninja generated in $BUILD_DIR ($(wc -l < "$BUILD_DIR/build.ninja
 
 # ── Step 2: Build with ninja ────────────────────────────────────
 echo ">>> Step 2: Building Bun with ninja..."
-ln -sf "$BUN_SRC/build.zig" "$BUILD_DIR/build.zig"
+# Patch build.ninja: zig rules must run from BUN_SRC so zig resolves build.zig
+# imports relative to the source tree, not BUILD_DIR.
+sed -i 's|^  command = \(.*/stream\.ts zig.*\)|  command = cd '"$BUN_SRC"' \&\& \1|' "$BUILD_DIR/build.ninja"
+
 ninja -C "$BUILD_DIR" \
     -j"${JOBS:-2}" \
     bun \
