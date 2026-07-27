@@ -26,12 +26,13 @@ else
 fi
 
 # Apply Bun patches
-echo ">>> Applying Bun Android patches..."
-cd "$BUN_SRC"
-git checkout -- . 2>/dev/null || true  # Reset any previous patches
-git apply --stat "$REPO_ROOT/patches/bun/android-support.patch"
-git apply "$REPO_ROOT/patches/bun/android-support.patch"
-echo "    Bun android-support patch applied"
+echo ">>> Bun android-support.patch SKIPPED - all 3 hunks are already in Bun 1.3.14 upstream"
+echo "    (Verified against commit 0d9b296af33f2b851fcbf4df3e9ec89751734ba4)"
+# cd "$BUN_SRC"
+# git checkout -- . 2>/dev/null || true  # Reset any previous patches
+# git apply --stat "$REPO_ROOT/patches/bun/android-support.patch"
+# git apply "$REPO_ROOT/patches/bun/android-support.patch"
+# echo "    Bun android-support patch applied"
 
 # Apply build.zig compatibility fix for Zig 0.15.2 (no_link_obj removed)
 echo ">>> Applying build.zig compatibility fix for Zig 0.15.2..."
