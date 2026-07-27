@@ -27,6 +27,27 @@ if ! command -v clang-21 &>/dev/null; then
 fi
 echo "clang-21: $(clang-21 --version 2>/dev/null | head -1 || echo 'not found')"
 
+# Symlink NDK compiler-rt into clang-21's resource dir for Android linking
+echo "=== Setting up NDK compiler-rt symlinks for clang-21 ==="
+NDK_CLANG_VER="19"  # NDK r28 ships clang 19
+ANDROID_TRIPLE_DIR="aarch64-unknown-linux-android28"
+LLVM_CLANG_DIR="/usr/lib/llvm-21/lib/clang/21"
+LLVM_LIB_LINUX="${LLVM_CLANG_DIR}/lib/linux"
+LLVM_LIB_TRIPLE="${LLVM_CLANG_DIR}/lib/${ANDROID_TRIPLE_DIR}"
+NDK_PREBUILT="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64"
+NDK_CLANG_LIB="${NDK_PREBUILT}/lib/clang/${NDK_CLANG_VER}/lib/linux"
+
+if [ -d "$NDK_CLANG_LIB" ]; then
+  sudo mkdir -p "$LLVM_LIB_TRIPLE" "${LLVM_LIB_LINUX}/aarch64"
+  sudo ln -sf "${NDK_CLANG_LIB}/libclang_rt.builtins-aarch64-android.a" "${LLVM_LIB_TRIPLE}/libclang_rt.builtins.a"
+  sudo ln -sf "${NDK_CLANG_LIB}/aarch64/libunwind.a" "${LLVM_LIB_TRIPLE}/libunwind.a"
+  sudo ln -sf "${NDK_CLANG_LIB}/libclang_rt.builtins-aarch64-android.a" "${LLVM_LIB_LINUX}/libclang_rt.builtins-aarch64-android.a"
+  sudo ln -sf "${NDK_CLANG_LIB}/aarch64/libunwind.a" "${LLVM_LIB_LINUX}/aarch64/libunwind.a"
+  echo "    NDK compiler-rt symlinks created"
+else
+  echo "    WARNING: NDK runtime dir not found at $NDK_CLANG_LIB"
+fi
+
 # ── CMake 3.28+ ─────────────────────────────────────────────────
 if ! cmake --version 2>/dev/null | grep -q "3\.2[89]\|3\.[3-9]"; then
   echo "=== Installing CMake 3.28.6 ==="
