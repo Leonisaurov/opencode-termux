@@ -26,7 +26,8 @@ if (!fs.existsSync(ANDROID_BUN)) {
   process.exit(1)
 }
 
-process.chdir(OPENCODE_DIR)
+const opencodePkgDir = path.join(OPENCODE_DIR, "packages/opencode")
+process.chdir(opencodePkgDir)
 
 const VERSION = process.env.OPENCODE_VERSION || "1.3.13"
 const CHANNEL = process.env.OPENCODE_CHANNEL || "latest"
@@ -73,7 +74,7 @@ console.log("Generated models-snapshot.js")
 // Step 2: Load migrations
 console.log("\n=== Step 2: Loading migrations ===")
 const migrationDirs = (
-  await fs.promises.readdir(path.join(OPENCODE_DIR, "migration"), {
+  await fs.promises.readdir(path.join(OPENCODE_DIR, "packages/opencode/migration"), {
     withFileTypes: true,
   })
 )
@@ -83,7 +84,7 @@ const migrationDirs = (
 
 const migrations = await Promise.all(
   migrationDirs.map(async (name) => {
-    const file = path.join(OPENCODE_DIR, "migration", name, "migration.sql")
+    const file = path.join(OPENCODE_DIR, "packages/opencode/migration", name, "migration.sql")
     const sql = await Bun.file(file).text()
     const match = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/.exec(name)
     const timestamp = match
