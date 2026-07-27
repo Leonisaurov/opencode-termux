@@ -2,10 +2,31 @@ diff --git a/packages/core/src/zig/build.zig b/packages/core/src/zig/build.zig
 index 5a8bcb8..b1d4642 100644
 --- a/packages/core/src/zig/build.zig
 +++ b/packages/core/src/zig/build.zig
-@@ -273,6 +273,29 @@ fn buildTarget(
+@@ -182,17 +182,19 @@ fn addNativeAudioDependencies(
+     b: *std.Build,
+     artifact: *std.Build.Step.Compile,
+     target: std.Build.ResolvedTarget,
+     macos_sdk_path: ?[]const u8,
+ ) void {
+     addMiniaudioShim(b, artifact, target, macos_sdk_path);
+
+     switch (target.result.os.tag) {
+         .macos => addMacOSSystemLibraries(b, artifact, macos_sdk_path.?),
+         .linux => {
+-            artifact.linkSystemLibrary("dl");
+-            artifact.linkSystemLibrary("pthread");
++            if (target.result.abi != .android) {
++                artifact.linkSystemLibrary("dl");
++                artifact.linkSystemLibrary("pthread");
++            }
+         },
+         else => {},
+     }
+ }
+@@ -273,6 +275,29 @@ fn buildTarget(
          .linkage = .dynamic,
      });
- 
+
 +    // On Android, the .so must have NEEDED libc.so so dlopen can resolve
 +    // symbols like getauxval. Zig doesn't bundle Android libc, so we directly
 +    // add the NDK sysroot's libc.so stub as a link input.

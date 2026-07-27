@@ -43,6 +43,7 @@ if [ ! -d "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64" ]; then
 fi
 echo "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_PATH"
 echo "NDK: $(ls "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android"*clang 2>/dev/null | head -1)"
+echo "ANDROID_NDK_ROOT=${ANDROID_NDK_HOME}" >> "$GITHUB_ENV"
 
 # ── Rust + Android target ───────────────────────────────────────
 if ! command -v rustup &>/dev/null; then
