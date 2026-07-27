@@ -119,8 +119,8 @@ echo "Zig: $(${WORK_DIR}/zig-${ZIG_VERSION}/zig version 2>/dev/null)"
 
 # ── Bun host ────────────────────────────────────────────────────
 if [ ! -f "$HOME/.bun/bin/bun" ]; then
-  echo "=== Installing Bun host v1.3.2 ==="
-  curl -fsSL https://bun.sh/install | bash -s "bun-v1.3.2"
+  echo "=== Installing Bun host v1.3.14 ==="
+  curl -fsSL https://bun.sh/install | bash -s "bun-v1.3.14"
 fi
 echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
 export PATH="$HOME/.bun/bin:$PATH"
