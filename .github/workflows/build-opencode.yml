@@ -23,7 +23,7 @@ permissions:
   contents: write
 
 env:
-  BUN_VERSION: "1.2.13"
+  BUN_VERSION: "1.3.14"
   OPENCODE_VERSION: "1.3.13"
   ANDROID_API: "24"
   ANDROID_NDK_VERSION: "28.1.13356709"
