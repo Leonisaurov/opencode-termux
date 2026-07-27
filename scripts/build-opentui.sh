@@ -41,6 +41,15 @@ fi
 
 OPENTUI_ZIG_DIR="$OPENTUI_SRC/packages/core/src/zig"
 
+# Disable Zig's native libc provision for Android (linkLibC triggers it).
+# We provide NDK libc.so via addObjectFile in the patch above, so we must
+# prevent Zig from trying to supply its own libc (bionic is not bundled).
+echo ">>> Patching linkLibC() to skip on Android..."
+sed -i '/^    artifact\.linkLibC();$/c\
+    if (target.result.abi != .android and target.result.abi != .androideabi) {\
+        artifact.linkLibC();\
+    }' "$OPENTUI_ZIG_DIR/build.zig"
+
 if [ ! -f "$OPENTUI_ZIG_DIR/build.zig" ]; then
     echo "ERROR: build.zig not found at $OPENTUI_ZIG_DIR"
     exit 1
