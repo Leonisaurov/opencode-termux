@@ -116,7 +116,7 @@ try {
 }
 console.log(`Parser worker: ${parserWorkerResolved}`)
 
-const workerPath = "./src/cli/cmd/tui/worker.ts"
+const workerPath = "./src/cli/tui/worker.ts"
 
 const bunfsRoot = "/$bunfs/root/"
 const workerRelativePath = path.relative(OPENCODE_DIR, parserWorkerResolved).replaceAll("\\", "/")
