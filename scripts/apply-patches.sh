@@ -25,13 +25,24 @@ else
     echo ">>> Bun source already exists at $BUN_SRC"
 fi
 
-# Apply Bun patch
+# Apply Bun patches
 echo ">>> Applying Bun Android patches..."
 cd "$BUN_SRC"
 git checkout -- . 2>/dev/null || true  # Reset any previous patches
 git apply --stat "$REPO_ROOT/patches/bun/android-support.patch"
 git apply "$REPO_ROOT/patches/bun/android-support.patch"
-echo "    Bun patches applied successfully"
+echo "    Bun android-support patch applied"
+
+# Apply build.zig compatibility patch for Zig 0.15.2 (no_link_obj removed)
+if [ -f "$REPO_ROOT/patches/bun/build-zig-no-link-obj.patch" ]; then
+    echo ">>> Applying build.zig compatibility patch..."
+    if git apply --stat "$REPO_ROOT/patches/bun/build-zig-no-link-obj.patch" >/dev/null 2>&1; then
+        git apply "$REPO_ROOT/patches/bun/build-zig-no-link-obj.patch"
+        echo "    build.zig patch applied successfully"
+    else
+        echo "    build.zig patch already applied or not needed"
+    fi
+fi
 
 # --- Clone WebKit ---
 if [ ! -d "$WEBKIT_SRC/.git" ]; then
