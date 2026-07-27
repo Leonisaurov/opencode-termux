@@ -17,6 +17,16 @@ sudo apt-get install -y -qq ninja-build python3 ruby perl git curl wget unzip \
   xz-utils zip build-essential pkg-config libxml2-dev libxslt1-dev \
   golang-go autoconf automake libtool 2>&1 | tail -5
 
+# ── LLVM/Clang 21 (required by Bun 1.3.14 configure) ────────────
+echo "=== Installing LLVM/Clang 21 ==="
+if ! command -v clang-21 &>/dev/null; then
+  wget -q https://apt.llvm.org/llvm.sh -O /tmp/llvm.sh
+  chmod +x /tmp/llvm.sh
+  sudo /tmp/llvm.sh 21 all -qq 2>&1 | tail -3 || true
+  rm -f /tmp/llvm.sh
+fi
+echo "clang-21: $(clang-21 --version 2>/dev/null | head -1 || echo 'not found')"
+
 # ── CMake 3.28+ ─────────────────────────────────────────────────
 if ! cmake --version 2>/dev/null | grep -q "3\.2[89]\|3\.[3-9]"; then
   echo "=== Installing CMake 3.28.6 ==="

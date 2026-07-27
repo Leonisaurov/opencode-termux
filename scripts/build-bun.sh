@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
-# Cross-compile Bun for Android aarch64 using zig build (Bun 1.3.14+)
+# Cross-compile Bun for Android aarch64 using Bun's build.ts (Bun 1.3.14+)
 #
 # Usage: ./scripts/build-bun.sh
 #
-# Bun 1.3.14 replaced CMake+Ninja with a build.zig-based system.
-# This script runs zig build directly with Android cross-compilation flags.
+# Bun 1.3.14 replaced CMake+Ninja with a build.zig + scripts/build.ts system.
+# This script uses the host bun to run scripts/build.ts which handles:
+#   1. Code generation (ZigGeneratedClasses.zig, etc.)
+#   2. Zig compilation via build.zig
+#   3. C++ compilation via NDK clang
+#   4. Final linking into the bun binary
 #
 # Prerequisites:
 #   - Android NDK installed (ANDROID_NDK_HOME)
 #   - Zig 0.15.2+ in PATH or ZIG_BIN set
 #   - WebKit pre-built in WEBKIT_OUTPUT (scripts/build-webkit.sh)
+#   - Host bun installed (for running scripts/build.ts)
 
 set -euo pipefail
 
@@ -17,6 +22,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/env.sh"
 
 ZIG_BIN="${ZIG_BIN:-zig}"
+HOST_BUN="${HOST_BUN:-$(command -v bun || echo "$HOME/.bun/bin/bun")}"
 NDK_SYSROOT="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
 
 echo "=== Building Bun v${BUN_VERSION} for Android aarch64 ==="
@@ -27,112 +33,84 @@ if [ ! -d "$BUN_SRC" ]; then
     exit 1
 fi
 
+if [ ! -f "$ZIG_BIN" ]; then
+    echo "ERROR: Zig binary not found at $ZIG_BIN. Set ZIG_BIN or install Zig."
+    exit 1
+fi
+
+if [ ! -x "$HOST_BUN" ]; then
+    echo "ERROR: Host bun not found. Set HOST_BUN or install bun."
+    exit 1
+fi
+
 if [ ! -d "$WEBKIT_OUTPUT/lib" ]; then
     echo "ERROR: WebKit not built. Run scripts/build-webkit.sh first."
     exit 1
 fi
 
-# Zig version check
-echo ">>> Zig version: $("$ZIG_BIN" version 2>/dev/null || echo 'not found')"
+echo "    Zig:      $("$ZIG_BIN" version 2>/dev/null)"
+echo "    Host bun: $($HOST_BUN --version 2>/dev/null)"
 
 # Set up Zig cache directories
 echo ">>> Setting up Zig cache directories..."
 rm -rf "$BUN_BUILD/cache/zig" "$BUN_SRC/.zig-cache"
-mkdir -p "$BUN_BUILD/cache/zig/local"
-mkdir -p "$BUN_BUILD/cache/zig/global"
+mkdir -p "$BUN_BUILD/cache/zig/local" "$BUN_BUILD/cache/zig/global"
 ln -sfn "$BUN_BUILD/cache/zig/local" "$BUN_SRC/.zig-cache"
 echo "    Symlinked $BUN_SRC/.zig-cache -> $BUN_BUILD/cache/zig/local"
 
-# Create install prefix
 mkdir -p "$BUN_BUILD"
 
 cd "$BUN_SRC"
 
-# Step 1: Generate codegen files using host bun
-echo ">>> Generating codegen files using host bun..."
-HOST_BUN="${HOST_BUN:-$(command -v bun || echo "$HOME/.bun/bin/bun")}"
-if [ ! -x "$HOST_BUN" ]; then
-    echo "ERROR: host bun not found. Install bun or set HOST_BUN."
-    exit 1
-fi
-echo "    Host bun: $($HOST_BUN --version 2>/dev/null || echo 'unknown')"
+# Bun's build.ts expects zig at vendor/zig/zig — symlink our zig there
+echo ">>> Setting up Zig binary for Bun's build system..."
+mkdir -p "$BUN_SRC/vendor/zig"
+ln -sf "$ZIG_BIN" "$BUN_SRC/vendor/zig/zig"
+echo "    Symlinked $ZIG_BIN -> $BUN_SRC/vendor/zig/zig"
 
-# Install root dependencies (needed for codegen scripts)
-echo ">>> Installing root dependencies..."
-cd "$BUN_SRC"
-$HOST_BUN install --frozen-lockfile 2>&1 || $HOST_BUN install 2>&1 || true
+# Build using Bun's build.ts — this generates codegen, compiles Zig and C++,
+# and links the final binary.
+echo ">>> Building Bun for Android using build.ts..."
+echo "    This will generate codegen, compile Zig + C++, and link."
+echo ""
 
-# Run configure-only to generate codegen files.
-# This uses host bun to run all codegen scripts and generate build.ninja.
-echo ">>> Running configure step to generate codegen files..."
-cd "$BUN_SRC"
 WEBKIT_PATH="$WEBKIT_OUTPUT" \
-WEBKIT_LOCAL=ON \
-$HOST_BUN run scripts/build.ts --configure-only \
-    --os=linux --arch=aarch64 --abi=android \
+"$HOST_BUN" run scripts/build.ts \
+    --profile=release \
+    --os=linux \
+    --arch=aarch64 \
+    --abi=android \
     --buildDir="$BUN_BUILD" \
-    --androidNdk="$ANDROID_NDK_HOME" \
     --webkit=local \
     --mode=full \
-    2>&1 || echo "    Configure exited $? (may be expected for cross-compile)"
-
-# The codegen files should now exist in $BUN_BUILD/codegen/
-CODEGEN_DIR="$BUN_BUILD/codegen"
-echo ">>> Codegen dir: $CODEGEN_DIR"
-ls -la "$CODEGEN_DIR" 2>/dev/null | head -10 || echo "    (codegen dir not found)"
-
-# Step 2: Build Bun Zig code with zig build
-echo ">>> Building Bun with Zig (target: aarch64-linux-android, optimize: ReleaseFast)..."
-cd "$BUN_SRC"
-"$ZIG_BIN" build \
-    -Dtarget=aarch64-linux-android \
-    -Doptimize=ReleaseFast \
-    -Dandroid_ndk_sysroot="$NDK_SYSROOT" \
-    -Dversion="${BUN_VERSION}" \
-    -Dsha="$(git rev-parse HEAD 2>/dev/null || echo '0000000000000000000000000000000000000000')" \
-    -Dcodegen_path="$CODEGEN_DIR" \
-    --cache-dir "$BUN_BUILD/cache/zig" \
-    --global-cache-dir "$BUN_BUILD/cache/zig/global" \
-    --prefix "$BUN_BUILD" \
+    --androidNdk="$ANDROID_NDK_HOME" \
+    -j"$JOBS" \
     2>&1
 
 echo ""
-echo ">>> Zig build step complete. Checking for outputs..."
-find "$BUN_BUILD" -type f -name "bun*" -o -name "*.o" 2>/dev/null | head -20
+echo ">>> Build step complete. Checking for binary..."
 
-# The zig build obj step produces bun-zig.o or bun.o
-# Look for an executable or object to copy
-BUN_ARTIFACT=""
-for candidate in "$BUN_BUILD/bin/bun" "$BUN_BUILD/bun" "$BUN_BUILD/lib/bun-zig.o" "$BUN_BUILD/lib/bun.o"; do
+# The built binary is at $BUN_BUILD/bun or $BUN_BUILD/bun-profile
+BUN_BINARY=""
+for candidate in "$BUN_BUILD/bun" "$BUN_BUILD/bun-profile"; do
     if [ -f "$candidate" ]; then
-        BUN_ARTIFACT="$candidate"
+        BUN_BINARY="$candidate"
         break
     fi
 done
 
-if [ -z "$BUN_ARTIFACT" ]; then
-    echo "WARNING: Expected artifact not found. Searching entire prefix..."
-    find "$BUN_BUILD" -type f 2>/dev/null | head -30
-    # Fall back to checking zig-out if --prefix didn't install there
-    if [ -d "$BUN_SRC/zig-out" ]; then
-        echo "    Checking zig-out directory..."
-        find "$BUN_SRC/zig-out" -type f 2>/dev/null | head -20
-        BUN_ARTIFACT="$(find "$BUN_SRC/zig-out" -type f -name "bun*" 2>/dev/null | head -1)"
-    fi
-fi
-
-if [ -z "$BUN_ARTIFACT" ]; then
-    echo "ERROR: Bun artifact not found after build"
+if [ -z "$BUN_BINARY" ]; then
+    echo "ERROR: Bun binary not found after build"
+    find "$BUN_BUILD" -maxdepth 2 -type f -executable 2>/dev/null | head -20
     exit 1
 fi
 
-# Copy to the expected location for downstream scripts
+# Copy to expected location
 mkdir -p "$WORK_DIR/bun-build"
-cp "$BUN_ARTIFACT" "$WORK_DIR/bun-build/bun"
+cp "$BUN_BINARY" "$WORK_DIR/bun-build/bun"
 
 echo ""
 echo "=== Bun build complete ==="
-echo "Artifact: $BUN_ARTIFACT"
-echo "Binary:   $WORK_DIR/bun-build/bun"
-echo "Size:     $(du -h "$WORK_DIR/bun-build/bun" | cut -f1)"
+echo "Binary: $WORK_DIR/bun-build/bun"
+echo "Size:   $(du -h "$WORK_DIR/bun-build/bun" | cut -f1)"
 file "$WORK_DIR/bun-build/bun"
