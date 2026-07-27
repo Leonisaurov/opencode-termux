@@ -520,7 +520,7 @@ index cb2762f..07e666e 100644
              );
              if (lim.cur < target) {
 diff --git a/src/resolver/resolver.zig b/src/resolver/resolver.zig
-index 71c9530..c3d96c0 100644
+index 71c9530..69debf3 100644
 --- a/src/resolver/resolver.zig
 +++ b/src/resolver/resolver.zig
 @@ -2752,11 +2752,12 @@ pub const Resolver = struct {
@@ -560,7 +560,7 @@ index 71c9530..c3d96c0 100644
  
          // Start at the top.
 -        while (queue_slice.len > 0) {
-+        'queue_loop: while (queue_slice.len > 0) {
++        queue_loop: while (queue_slice.len > 0) {
              var queue_top = queue_slice[queue_slice.len - 1];
 -            defer top_parent = queue_top.result;
 +            defer parent_result = queue_top.result;
