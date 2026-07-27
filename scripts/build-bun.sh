@@ -68,13 +68,18 @@ mkdir -p "$BUN_SRC/vendor/zig"
 ln -sf "$ZIG_BIN" "$BUN_SRC/vendor/zig/zig"
 echo "    Symlinked $ZIG_BIN -> $BUN_SRC/vendor/zig/zig"
 
+# Bun's build.ts expects WebKit source at vendor/WebKit/ or $BUN_WEBKIT_PATH
+echo ">>> Setting up WebKit source for build system..."
+mkdir -p "$BUN_SRC/vendor"
+ln -sfn "$WEBKIT_SRC" "$BUN_SRC/vendor/WebKit"
+echo "    Symlinked $WEBKIT_SRC -> $BUN_SRC/vendor/WebKit"
+
 # Build using Bun's build.ts — this generates codegen, compiles Zig and C++,
 # and links the final binary.
 echo ">>> Building Bun for Android using build.ts..."
 echo "    This will generate codegen, compile Zig + C++, and link."
 echo ""
 
-BUN_WEBKIT_PATH="$WEBKIT_OUTPUT" \
 "$HOST_BUN" run scripts/build.ts \
     --profile=release \
     --os=linux \
