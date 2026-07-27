@@ -50,7 +50,7 @@ echo ">>> Building with Zig (target: aarch64-linux-android)..."
 cd "$OPENTUI_ZIG_DIR"
 
 "$ZIG_BIN" build \
-    -Dtarget="aarch64-linux-android${ANDROID_API}" \
+    -Dtarget="aarch64-linux-android.${ANDROID_API}" \
     -Doptimize=ReleaseSafe \
     --search-prefix "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr" \
     --prefix . 2>&1
