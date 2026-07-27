@@ -74,7 +74,7 @@ echo ">>> Building Bun for Android using build.ts..."
 echo "    This will generate codegen, compile Zig + C++, and link."
 echo ""
 
-WEBKIT_PATH="$WEBKIT_OUTPUT" \
+BUN_WEBKIT_PATH="$WEBKIT_OUTPUT" \
 "$HOST_BUN" run scripts/build.ts \
     --profile=release \
     --os=linux \
