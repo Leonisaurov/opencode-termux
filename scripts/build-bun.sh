@@ -72,12 +72,21 @@ echo ">>> Running configure step..."
 echo ">>> Running codegen targets with ninja..."
 NINJA_BUILD_DIR="$BUN_BUILD/release"
 if [ -f "$NINJA_BUILD_DIR/build.ninja" ]; then
-    ninja -C "$NINJA_BUILD_DIR" \
+    NINJA_DIR="$NINJA_BUILD_DIR"
+elif [ -f "$BUN_BUILD/build.ninja" ]; then
+    NINJA_DIR="$BUN_BUILD"
+else
+    NINJA_DIR=""
+fi
+
+if [ -n "$NINJA_DIR" ]; then
+    echo "    Found build.ninja in $NINJA_DIR"
+    ninja -C "$NINJA_DIR" \
         -j"${JOBS:-2}" \
         codegen \
         2>&1
 else
-    echo "WARNING: build.ninja not found in $NINJA_BUILD_DIR, trying alternative paths..."
+    echo "WARNING: build.ninja not found in $BUN_BUILD/release or $BUN_BUILD, searching..."
     find "$BUN_BUILD" -name "build.ninja" 2>/dev/null | head -5
 fi
 
