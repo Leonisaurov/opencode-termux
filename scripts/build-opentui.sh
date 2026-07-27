@@ -3,9 +3,10 @@
 #
 # Usage: ./scripts/build-opentui.sh
 #
-# OpenCode's TUI renderer (@opentui/core) uses a native Zig library.
-# The upstream build targets aarch64-linux (musl), which fails on Android
-# because getauxval cannot be resolved. We build for aarch64-linux-android.
+# Strategy:
+#   Build with Zig's aarch64-linux-musl target (Zig bundles musl libc natively,
+#   no libc provision issues). Then patch the .so with patchelf to add
+#   NEEDED libc.so so Android's dlopen() can resolve symbols like getauxval.
 
 set -euo pipefail
 
@@ -24,50 +25,28 @@ else
     echo ">>> opentui source exists at $OPENTUI_SRC"
 fi
 
-# Apply Android libc linking patch
-# Without this patch, the .so won't have NEEDED: libc.so, and Android's
-# dlopen() will fail because it can't resolve symbols like getauxval.
-OPENTUI_PATCH="$REPO_ROOT/patches/opentui/android-libc-link.patch"
-if [ -f "$OPENTUI_PATCH" ]; then
-    echo ">>> Applying opentui Android patch..."
-    cd "$OPENTUI_SRC"
-    if ! git apply --check "$OPENTUI_PATCH" 2>/dev/null; then
-        echo "    Patch already applied or does not apply cleanly, skipping"
-    else
-        git apply "$OPENTUI_PATCH"
-        echo "    Patch applied successfully"
-    fi
-fi
-
 OPENTUI_ZIG_DIR="$OPENTUI_SRC/packages/core/src/zig"
-
-# Disable Zig's native libc provision for Android (linkLibC triggers it).
-# We provide NDK libc.so via addObjectFile in the patch above, so we must
-# prevent Zig from trying to supply its own libc (bionic is not bundled).
-echo ">>> Patching linkLibC() to skip on Android..."
-sed -i '/^    artifact\.linkLibC();$/c\
-    if (target.result.abi != .android and target.result.abi != .androideabi) {\
-        artifact.linkLibC();\
-    }' "$OPENTUI_ZIG_DIR/build.zig"
 
 if [ ! -f "$OPENTUI_ZIG_DIR/build.zig" ]; then
     echo "ERROR: build.zig not found at $OPENTUI_ZIG_DIR"
     exit 1
 fi
 
-echo ">>> Building with Zig (target: aarch64-linux-android)..."
+# Build with Zig's native musl target (Zig provides musl libc with no
+# Android/bionic provision issues). We use aarch64-linux-musl which is
+# explicitly listed in opentui's SUPPORTED_TARGETS.
+echo ">>> Building with Zig (target: aarch64-linux-musl)..."
 cd "$OPENTUI_ZIG_DIR"
 
 "$ZIG_BIN" build \
-    -Dtarget="aarch64-linux-android.${ANDROID_API}" \
+    -Dtarget=aarch64-linux-musl \
     -Doptimize=ReleaseSafe \
-    --search-prefix "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr" \
     --prefix . 2>&1
 
 # The build.zig installs to dest_dir="../lib/{output_name}" relative to
 # the --prefix dir.  With --prefix=. (= OPENTUI_ZIG_DIR), the .so ends
-# up one directory above: packages/core/src/lib/aarch64-linux-android/
-LIBOPENTUI="$OPENTUI_ZIG_DIR/../lib/aarch64-linux-android/libopentui.so"
+# up one directory above: packages/core/src/lib/aarch64-linux-musl/
+LIBOPENTUI="$OPENTUI_ZIG_DIR/../lib/aarch64-linux-musl/libopentui.so"
 if [ ! -f "$LIBOPENTUI" ]; then
     echo "ERROR: libopentui.so not found"
     echo "  Expected at: $LIBOPENTUI"
@@ -76,11 +55,40 @@ if [ ! -f "$LIBOPENTUI" ]; then
     exit 1
 fi
 
+# Ensure patchelf is available for NEEDED patching
+echo ">>> Ensuring patchelf is available..."
+if ! command -v patchelf &>/dev/null; then
+    sudo apt-get update -qq && sudo apt-get install -y -qq patchelf
+fi
+
+# The musl build produces a .so without NEEDED libc.so (musl is statically
+# linked). Android's dlopen() requires libc.so to be a DT_NEEDED entry so it
+# can resolve symbols. Add it with patchelf.
+echo ">>> Patching DT_NEEDED for Android compatibility..."
+CURRENT_NEEDED=$(readelf -d "$LIBOPENTUI" 2>/dev/null | grep NEEDED)
+
+# Remove glibc-style libdl, libpthread, librt (musl bundles into libc)
+for lib in libdl.so.2 libpthread.so.0 librt.so.1; do
+    if echo "$CURRENT_NEEDED" | grep -q "$lib"; then
+        echo "    Removing NEEDED $lib"
+        patchelf --remove-needed "$lib" "$LIBOPENTUI"
+    fi
+done
+
+# Add NEEDED libc.so if not already present
+if ! echo "$CURRENT_NEEDED" | grep -q "libc.so"; then
+    echo "    Adding NEEDED libc.so"
+    patchelf --add-needed "libc.so" "$LIBOPENTUI"
+fi
+
 echo ""
 echo "=== libopentui.so build complete ==="
 echo "Output: $LIBOPENTUI"
 echo "Size: $(du -h "$LIBOPENTUI" | cut -f1)"
 file "$LIBOPENTUI"
+echo ""
+echo "DT_NEEDED entries:"
+readelf -d "$LIBOPENTUI" 2>/dev/null | grep NEEDED
 
 # Verify the .so has NEEDED: libc.so (required for Android dlopen)
 if readelf -d "$LIBOPENTUI" 2>/dev/null | grep -q "NEEDED.*libc.so"; then
@@ -88,7 +96,6 @@ if readelf -d "$LIBOPENTUI" 2>/dev/null | grep -q "NEEDED.*libc.so"; then
 else
     echo "ERROR: libopentui.so is missing NEEDED: libc.so dependency"
     echo "       Android dlopen() will fail without this."
-    echo "       Ensure ANDROID_NDK_HOME is set and the opentui patch was applied."
     readelf -d "$LIBOPENTUI" 2>/dev/null | grep NEEDED || echo "       (no NEEDED entries found)"
     exit 1
 fi
