@@ -15,7 +15,7 @@ echo "=== Installing system packages ==="
 sudo apt-get update -qq
 sudo apt-get install -y -qq ninja-build python3 ruby perl git curl wget unzip \
   xz-utils zip build-essential pkg-config libxml2-dev libxslt1-dev \
-  golang-go autoconf automake libtool 2>&1 | tail -5
+  golang-go autoconf automake libtool libzstd-dev 2>&1 | tail -5
 
 # ── LLVM/Clang 21 (required by Bun 1.3.14 configure) ────────────
 echo "=== Installing LLVM/Clang 21 ==="
