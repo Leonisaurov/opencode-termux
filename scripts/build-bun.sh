@@ -57,22 +57,38 @@ ln -sf "$ZIG_BIN" vendor/zig/zig
 mkdir -p vendor
 ln -sfn "$WEBKIT_SRC" vendor/WebKit
 
-# Step 1: Generate codegen files via configure-only
-echo ">>> Running configure step to generate codegen..."
-$HOST_BUN run scripts/build.ts --configure-only \
+# Step 1: Generate build.ninja via configure-only
+echo ">>> Running configure step..."
+"$HOST_BUN" run scripts/build.ts --configure-only \
     --profile=release \
     --os=linux --arch=aarch64 --abi=android \
     --buildDir="$BUN_BUILD" \
     --webkit=local \
     --mode=full \
     --androidNdk="$ANDROID_NDK_HOME" \
-    2>&1 || echo "    Configure finished (codegen should exist)"
+    2>&1
 
-CODEGEN_DIR="$BUN_BUILD/codegen"
+# Step 2: Run codegen targets with ninja
+echo ">>> Running codegen targets with ninja..."
+NINJA_BUILD_DIR="$BUN_BUILD/release"
+if [ -f "$NINJA_BUILD_DIR/build.ninja" ]; then
+    ninja -C "$NINJA_BUILD_DIR" \
+        -j"${JOBS:-2}" \
+        codegen \
+        2>&1
+else
+    echo "WARNING: build.ninja not found in $NINJA_BUILD_DIR, trying alternative paths..."
+    find "$BUN_BUILD" -name "build.ninja" 2>/dev/null | head -5
+fi
+
+# Step 3: Build Zig object using zig build
+CODEGEN_DIR=$(find "$BUN_BUILD" -name "ZigGeneratedClasses.zig" -exec dirname {} \; 2>/dev/null | head -1)
+if [ -z "$CODEGEN_DIR" ]; then
+    echo "ERROR: ZigGeneratedClasses.zig not found after codegen step"
+    exit 1
+fi
+
 echo ">>> Codegen dir: $CODEGEN_DIR"
-ls -la "$CODEGEN_DIR/" 2>/dev/null | head -5 || echo "    (no codegen dir)"
-
-# Step 2: Build Zig object using zig build
 echo ">>> Building Bun Zig object..."
 "$ZIG_BIN" build obj \
     -Dtarget=aarch64-linux-android \
