@@ -84,9 +84,14 @@ if [ -z "$BUN_BINARY" ]; then
     exit 1
 fi
 
-# Copy to expected location
-mkdir -p "$WORK_DIR/bun-build"
-cp "$BUN_BINARY" "$WORK_DIR/bun-build/bun"
+# Copy to expected location (if not already there)
+if [ "$BUN_BINARY" != "$WORK_DIR/bun-build/bun" ]; then
+    mkdir -p "$WORK_DIR/bun-build"
+    cp "$BUN_BINARY" "$WORK_DIR/bun-build/bun"
+    echo "    Copied to $WORK_DIR/bun-build/bun"
+else
+    echo "    Binary already at target location: $WORK_DIR/bun-build/bun"
+fi
 
 echo ""
 echo "=== Bun build complete ==="
