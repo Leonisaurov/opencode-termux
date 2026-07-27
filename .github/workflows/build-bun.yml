@@ -33,11 +33,10 @@ jobs:
         run: |
           echo "=== Downloading Bun ${BUN_VERSION} official Android build ==="
           cd /tmp
-          curl -fsSL "https://bun.sh/download/${BUN_VERSION}/linux-aarch64-android" -o bun.zip
+          curl -fsSL "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-aarch64-android.zip" -o bun.zip
           unzip -q bun.zip
-          ls -la
-          # Find the bun binary in the extracted files
-          find . -name "bun" -type f -exec cp {} "${WORK_DIR}/bun-build/bun" \;
+          # El zip contiene una carpeta bun-linux-aarch64-android/ con el binario
+          cp bun-linux-aarch64-android/bun "${WORK_DIR}/bun-build/bun"
 
           if [ ! -f "${WORK_DIR}/bun-build/bun" ]; then
             echo "ERROR: bun binary not found in download"
