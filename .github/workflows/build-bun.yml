@@ -102,6 +102,13 @@ jobs:
           file "$BUN_BINARY"
           readelf -h "$BUN_BINARY" | grep -E "Machine|Class"
 
+      - name: Upload Bun binary as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bun-android-aarch64-${{ env.BUN_VERSION }}
+          path: ${{ env.WORK_DIR }}/bun-build/bun
+          if-no-files-found: error
+
       - name: Cleanup intermediate files
         if: always()
         run: |

@@ -94,6 +94,15 @@ jobs:
         run: |
           source scripts/env.sh && ./scripts/build-tinycc.sh
 
+      - name: Upload core build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-android-artifacts
+          path: |
+            ${{ env.WORK_DIR }}/deps-android/prefix
+            ${{ env.WORK_DIR }}/webkit-android
+          if-no-files-found: error
+
       - name: Cleanup intermediate files
         if: always()
         run: |
