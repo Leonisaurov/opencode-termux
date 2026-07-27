@@ -33,15 +33,25 @@ git apply --stat "$REPO_ROOT/patches/bun/android-support.patch"
 git apply "$REPO_ROOT/patches/bun/android-support.patch"
 echo "    Bun android-support patch applied"
 
-# Apply build.zig compatibility patch for Zig 0.15.2 (no_link_obj removed)
-if [ -f "$REPO_ROOT/patches/bun/build-zig-no-link-obj.patch" ]; then
-    echo ">>> Applying build.zig compatibility patch..."
-    if git apply --stat "$REPO_ROOT/patches/bun/build-zig-no-link-obj.patch" >/dev/null 2>&1; then
-        git apply "$REPO_ROOT/patches/bun/build-zig-no-link-obj.patch"
-        echo "    build.zig patch applied successfully"
-    else
-        echo "    build.zig patch already applied or not needed"
-    fi
+# Apply build.zig compatibility fix for Zig 0.15.2 (no_link_obj removed)
+echo ">>> Applying build.zig compatibility fix for Zig 0.15.2..."
+cd "$BUN_SRC"
+if grep -q "no_link_obj" build.zig; then
+    python3 -c "
+import re
+with open('build.zig', 'r') as f:
+    content = f.read()
+old = '    obj.no_link_obj = opts.os != .windows and !opts.no_llvm;'
+new = '''    if (@hasField(@TypeOf(obj.*), \"no_link_obj\")) {
+        obj.no_link_obj = opts.os != .windows and !opts.no_llvm;
+    }'''
+content = content.replace(old, new, 1)
+with open('build.zig', 'w') as f:
+    f.write(content)
+"
+    echo "    build.zig no_link_obj fix applied"
+else
+    echo "    build.zig no_link_obj fix already applied or not needed"
 fi
 
 # --- Clone WebKit ---

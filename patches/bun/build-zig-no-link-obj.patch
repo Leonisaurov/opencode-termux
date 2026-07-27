@@ -1,20 +1,7 @@
-diff --git a/build.zig b/build.zig
-index 1b3eae9..2186131 100644
 --- a/build.zig
 +++ b/build.zig
-@@ -861,11 +861,13 @@ fn configureObj(b: *Build, opts: *BunBuildOptions, obj: *Compile) void {
-     obj.use_llvm = !opts.no_llvm;
-     obj.use_lld = if (opts.os == .mac or opts.os == .linux) false else !opts.no_llvm;
-     if (opts.lto) {
--        obj.lto = .full;
-+        obj.lto = @as(std.builtin.LtoMode, .full);
-         obj.use_lld = true;
-     }
- 
--    obj.no_link_obj = opts.os != .windows and !opts.no_llvm;
+@@ -1,3 +1,6 @@
 +    if (@hasField(@TypeOf(obj.*), "no_link_obj")) {
 +        obj.no_link_obj = opts.os != .windows and !opts.no_llvm;
 +    }
- 
-     if (@hasField(Build.Module, "sanitize_address")) {
-         if (opts.enable_asan and !enableFastBuild(b)) {
+-    obj.no_link_obj = opts.os != .windows and !opts.no_llvm;
