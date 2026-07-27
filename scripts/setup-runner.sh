@@ -41,22 +41,23 @@ if [ ! -d "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64" ]; then
   mv /tmp/ndk-extract/android-ndk-r28b/* "$ANDROID_NDK_HOME/"
   rm -rf /tmp/ndk.zip /tmp/ndk-extract
 
-  # ── Bionic stubs (dl, pthread, rt, util están en libc.so en Android) ──
-  echo "=== Creating Bionic library stubs ==="
-  SYSROOT_LIB="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib"
-  for lib in libdl.so libpthread.so librt.so libutil.so; do
-    if [ ! -f "${SYSROOT_LIB}/${lib}" ]; then
-      echo 'INPUT(-lc)' > "${SYSROOT_LIB}/${lib}"
-      echo "  Created stub: ${SYSROOT_LIB}/${lib}"
-    fi
-  done
-  for lib in libdl.a libpthread.a librt.a libutil.a; do
-    if [ ! -f "${SYSROOT_LIB}/${lib}" ]; then
-      echo 'INPUT(-lc)' > "${SYSROOT_LIB}/${lib}"
-      echo "  Created stub: ${SYSROOT_LIB}/${lib}"
-    fi
-  done
 fi
+
+# ── Bionic stubs (dl, pthread, rt, util están en libc.so en Android) ──
+echo "=== Creating Bionic library stubs ==="
+SYSROOT_LIB="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib"
+for lib in libdl.so libpthread.so librt.so libutil.so; do
+  if [ ! -f "${SYSROOT_LIB}/${lib}" ]; then
+    echo 'INPUT(-lc)' > "${SYSROOT_LIB}/${lib}"
+    echo "  Created stub: ${SYSROOT_LIB}/${lib}"
+  fi
+done
+for lib in libdl.a libpthread.a librt.a libutil.a; do
+  if [ ! -f "${SYSROOT_LIB}/${lib}" ]; then
+    echo 'INPUT(-lc)' > "${SYSROOT_LIB}/${lib}"
+    echo "  Created stub: ${SYSROOT_LIB}/${lib}"
+  fi
+done
 echo "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_PATH"
 echo "NDK: $(ls "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android"*clang 2>/dev/null | head -1)"
 echo "ANDROID_NDK_ROOT=${ANDROID_NDK_HOME}" >> "$GITHUB_ENV"
