@@ -43,7 +43,7 @@ if [ ! -d "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64" ]; then
 
   # ── Bionic stubs (dl, pthread, rt, util están en libc.so en Android) ──
   echo "=== Creating Bionic library stubs ==="
-  SYSROOT_LIB="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/${ANDROID_API}"
+  SYSROOT_LIB="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib"
   for lib in libdl.so libpthread.so librt.so libutil.so; do
     if [ ! -f "${SYSROOT_LIB}/${lib}" ]; then
       echo 'INPUT(-lc)' > "${SYSROOT_LIB}/${lib}"
