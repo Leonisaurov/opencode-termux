@@ -520,7 +520,7 @@ index cb2762f..07e666e 100644
              );
              if (lim.cur < target) {
 diff --git a/src/resolver/resolver.zig b/src/resolver/resolver.zig
-index 71c9530..69debf3 100644
+index 71c9530..84c572f 100644
 --- a/src/resolver/resolver.zig
 +++ b/src/resolver/resolver.zig
 @@ -2752,11 +2752,12 @@ pub const Resolver = struct {
@@ -581,7 +581,7 @@ index 71c9530..69debf3 100644
 +                    error.EACCES, error.PermissionDenied => {
 +                        if (!is_target_dir) {
 +                            parent_result = missing_parent_result;
-+                            continue :'queue_loop;
++                            continue :queue_loop;
 +                        }
 +                        r.dir_cache.markNotFound(queue_top.result);
 +                        const cached_dir_entry_result = rfs.entries.getOrPut(queue_top.unsafe_path) catch unreachable;
