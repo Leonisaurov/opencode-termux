@@ -16,6 +16,7 @@ env:
   ANDROID_NDK_VERSION: "28.1.13356709"
   ICU_VERSION: "75.1"
   ZIG_VERSION: "0.15.2"
+  WEBKIT_COMMIT: "017930ebf915121f8f593bef61cbbca82d78132d"
   JOBS: "2"
   WORK_DIR: "${{ github.workspace }}/build"
   ANDROID_NDK_HOME: "${{ github.workspace }}/android-ndk"
@@ -55,6 +56,7 @@ jobs:
         run: |
           echo "bun_patch_hash=$(sha256sum patches/bun/android-support.patch | cut -c1-16)" >> $GITHUB_OUTPUT
           echo "zig_patch_hash=$(sha256sum patches/zig/posix-android-sigaction.patch | cut -c1-16)" >> $GITHUB_OUTPUT
+          echo "webkit_patch_hash=$(sha256sum patches/webkit/android-support.patch | cut -c1-16)" >> $GITHUB_OUTPUT
 
       # ── Restore ICU (build if missing, ~5 min) ────────────────
       - name: Cache ICU build
@@ -74,7 +76,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.WORK_DIR }}/webkit-android
-          key: webkit-android-*
+          key: webkit-android-${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}
           fail-on-cache-miss: true
 
       # ── Build Bun ─────────────────────────────────────────────
