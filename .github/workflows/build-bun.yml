@@ -1,0 +1,108 @@
+name: Build Bun
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'patches/bun/**'
+      - 'patches/zig/**'
+      - 'scripts/build-bun.sh'
+      - 'scripts/env.sh'
+      - 'scripts/setup-runner.sh'
+
+env:
+  BUN_VERSION: "1.2.13"
+  ANDROID_API: "24"
+  ANDROID_NDK_VERSION: "28.1.13356709"
+  ICU_VERSION: "75.1"
+  ZIG_VERSION: "0.15.2"
+  JOBS: "2"
+  WORK_DIR: "${{ github.workspace }}/build"
+  ANDROID_NDK_HOME: "${{ github.workspace }}/android-ndk"
+
+jobs:
+  build-bun:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create work directory
+        run: mkdir -p "$WORK_DIR"
+
+      # ── Restore cached toolchain ──────────────────────────────
+      - name: Cache Android NDK
+        id: cache-ndk
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.ANDROID_NDK_HOME }}
+          key: android-ndk-${{ env.ANDROID_NDK_VERSION }}
+
+      - name: Cache Zig
+        id: cache-zig
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+          key: zig-${{ env.ZIG_VERSION }}
+
+      # ── Install everything else ───────────────────────────────
+      - name: Install build dependencies
+        run: source scripts/setup-runner.sh
+
+      # ── Patch hashes ──────────────────────────────────────────
+      - name: Compute patch hashes
+        id: hashes
+        run: |
+          echo "bun_patch_hash=$(sha256sum patches/bun/android-support.patch | cut -c1-16)" >> $GITHUB_OUTPUT
+          echo "zig_patch_hash=$(sha256sum patches/zig/posix-android-sigaction.patch | cut -c1-16)" >> $GITHUB_OUTPUT
+
+      # ── Restore ICU (build if missing, ~5 min) ────────────────
+      - name: Cache ICU build
+        id: cache-icu
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.WORK_DIR }}/deps-android/prefix
+          key: icu-android-${{ env.ICU_VERSION }}-${{ env.ANDROID_API }}
+
+      - name: Build ICU (if needed)
+        if: steps.cache-icu.outputs.cache-hit != 'true'
+        run: |
+          source scripts/env.sh && ./scripts/build-icu.sh
+
+      # ── Restore WebKit (required — run build-core first) ──────
+      - name: Restore WebKit build
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.WORK_DIR }}/webkit-android
+          key: webkit-android-*
+          fail-on-cache-miss: true
+
+      # ── Build Bun ─────────────────────────────────────────────
+      - name: Cache Bun binary
+        id: cache-bun
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.WORK_DIR }}/bun-build/bun
+          key: bun-android-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}
+
+      - name: Clone, patch, and build Bun
+        if: steps.cache-bun.outputs.cache-hit != 'true'
+        run: |
+          source scripts/env.sh
+          ./scripts/apply-patches.sh
+          ./scripts/build-bun.sh
+
+      - name: Verify Bun binary
+        run: |
+          BUN_BINARY="${WORK_DIR}/bun-build/bun"
+          ls -lh "$BUN_BINARY"
+          file "$BUN_BINARY"
+          readelf -h "$BUN_BINARY" | grep -E "Machine|Class"
+
+      - name: Cleanup intermediate files
+        if: always()
+        run: |
+          rm -rf "${WORK_DIR}/bun-src" "${WORK_DIR}/icu-src"
+          rm -rf "${WORK_DIR}/icu-host-build" "${WORK_DIR}/icu-android-build"
+          rm -rf "${WORK_DIR}/bun-build/cache/zig"
+          df -h .
