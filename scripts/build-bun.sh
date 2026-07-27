@@ -60,6 +60,8 @@ echo ">>> Step 2: Building Bun with ninja..."
 # Patch build.ninja: zig rules must run from BUN_SRC so zig resolves build.zig
 # imports relative to the source tree, not BUILD_DIR.
 sed -i 's|^  command = \(.*/stream\.ts zig.*\)|  command = cd '"$BUN_SRC"' \&\& \1|' "$BUILD_DIR/build.ninja"
+# Patch build.ninja: replace /usr/bin/strip with NDK llvm-strip for ARM64 bin
+sed -i "s|/usr/bin/strip|${NDK_TOOLCHAIN}/bin/llvm-strip|g" "$BUILD_DIR/build.ninja"
 
 ninja -C "$BUILD_DIR" \
     -j"${JOBS:-2}" \
