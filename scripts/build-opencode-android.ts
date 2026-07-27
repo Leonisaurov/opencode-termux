@@ -110,10 +110,9 @@ const plugin = createSolidTransformPlugin()
 
 let parserWorkerResolved: string
 try {
-  parserWorkerResolved = require.resolve("@opentui/core/parser.worker.js")
+  parserWorkerResolved = require.resolve("@opentui/core/parser.worker")
 } catch {
-  // Fallback: look in OPENCODE_DIR/node_modules (after root bun install)
-  parserWorkerResolved = path.resolve(OPENCODE_DIR, "node_modules/@opentui/core/parser.worker.js")
+  parserWorkerResolved = path.resolve(OPENCODE_DIR, "node_modules/@opentui/core/src/lib/tree-sitter/parser.worker.ts")
 }
 console.log(`Parser worker: ${parserWorkerResolved}`)
 
