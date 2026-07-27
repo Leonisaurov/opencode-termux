@@ -57,7 +57,8 @@ echo "    build.ninja generated in $BUILD_DIR ($(wc -l < "$BUILD_DIR/build.ninja
 
 # ── Step 2: Build with ninja ────────────────────────────────────
 echo ">>> Step 2: Building Bun with ninja..."
-cd "$BUN_SRC" && ninja -f "$BUILD_DIR/build.ninja" \
+ln -sf "$BUN_SRC/build.zig" "$BUILD_DIR/build.zig"
+ninja -C "$BUILD_DIR" \
     -j"${JOBS:-2}" \
     bun \
     2>&1
