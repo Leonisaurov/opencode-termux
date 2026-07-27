@@ -48,13 +48,51 @@ mkdir -p "$BUN_BUILD"
 
 cd "$BUN_SRC"
 
+# Step 1: Generate codegen files using host bun
+echo ">>> Generating codegen files using host bun..."
+HOST_BUN="${HOST_BUN:-$(command -v bun || echo "$HOME/.bun/bin/bun")}"
+if [ ! -x "$HOST_BUN" ]; then
+    echo "ERROR: host bun not found. Install bun or set HOST_BUN."
+    exit 1
+fi
+echo "    Host bun: $($HOST_BUN --version 2>/dev/null || echo 'unknown')"
+
+# Install root dependencies (needed for codegen scripts)
+echo ">>> Installing root dependencies..."
+cd "$BUN_SRC"
+$HOST_BUN install --frozen-lockfile 2>&1 || $HOST_BUN install 2>&1 || true
+
+# Run configure-only to generate codegen files.
+# This uses host bun to run all codegen scripts and generate build.ninja.
+echo ">>> Running configure step to generate codegen files..."
+cd "$BUN_SRC"
+WEBKIT_PATH="$WEBKIT_OUTPUT" \
+WEBKIT_LOCAL=ON \
+$HOST_BUN run scripts/build.ts --configure-only \
+    --os=linux --arch=aarch64 --abi=android \
+    --buildDir="$BUN_BUILD" \
+    --androidNdk="$ANDROID_NDK_HOME" \
+    --webkit=local \
+    --mode=full \
+    2>&1 || echo "    Configure exited $? (may be expected for cross-compile)"
+
+# The codegen files should now exist in $BUN_BUILD/codegen/
+CODEGEN_DIR="$BUN_BUILD/codegen"
+echo ">>> Codegen dir: $CODEGEN_DIR"
+ls -la "$CODEGEN_DIR" 2>/dev/null | head -10 || echo "    (codegen dir not found)"
+
+# Step 2: Build Bun Zig code with zig build
 echo ">>> Building Bun with Zig (target: aarch64-linux-android, optimize: ReleaseFast)..."
+cd "$BUN_SRC"
 "$ZIG_BIN" build \
     -Dtarget=aarch64-linux-android \
     -Doptimize=ReleaseFast \
     -Dandroid_ndk_sysroot="$NDK_SYSROOT" \
     -Dversion="${BUN_VERSION}" \
     -Dsha="$(git rev-parse HEAD 2>/dev/null || echo '0000000000000000000000000000000000000000')" \
+    -Dcodegen_path="$CODEGEN_DIR" \
+    --cache-dir "$BUN_BUILD/cache/zig" \
+    --global-cache-dir "$BUN_BUILD/cache/zig/global" \
     --prefix "$BUN_BUILD" \
     2>&1
 
