@@ -170,7 +170,7 @@ section injection.
 | `zig-0.15.2` | Zig estándar ~300 MB |
 | `icu-android-75.1-24` | ICU cross-compilado |
 | `webkit-android-<commit>-<patch_hash>` | WebKit build |
-| `bun-android-1.3.14-<7_hashes>` | Binario Bun ARM64 ~88 MB |
+| `bun-android-1.3.14-<8_hashes>` | Binario Bun ARM64 ~88 MB |
 | `bun-host-1.3.14` | Host bun x86_64 ~737 MB |
 | `opentui-android` | libopentui.so ARM64 |
 

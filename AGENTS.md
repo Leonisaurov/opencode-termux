@@ -20,7 +20,7 @@ build-opencode.yml ──→ OpenCode binary + packages (~5 min)
 ### build-bun.yml
 - Cross-compila Bun 1.3.14 para Android ARM64 via `scripts/build.ts` → `build.ninja` → `ninja`
 - Aplica parches de `patches/` ANTES del build
-- Cache key incluye SHA256 de los 7 parches activos
+- Cache key incluye SHA256 de los 8 parches activos
 
 ### build-opencode.yml
 - Consume Android Bun del caché de build-bun.yml (`fail-on-cache-miss: true`)
@@ -68,6 +68,7 @@ El parche `patches/bun/android-standalone-raw-append.patch` añade ese fallback 
 | `patches/bun/android-standalone-raw-append.patch` | ✅ ACTIVO | `apply-patches.sh` | inject() raw append + fromExecutable() fallback |
 | `patches/bun/android-global-shebang-fix.patch` | ✅ ACTIVO | `apply-patches.sh` | Fix shebangs (`node`→`bun`) en global install |
 | `patches/bun/android-global-transitive-deps.patch` | ✅ ACTIVO | `apply-patches.sh` | Fix transitive deps + resolver + standalone en global install |
+| `patches/bun/android-preserve-symlinks-global.patch` | ✅ ACTIVO | `apply-patches.sh` | Preserva symlinks en scripts globales para que `__filename` no se resuelva al cache |
 | `patches/webkit/android-support.patch` | ✅ ACTIVO | `apply-patches.sh` | JSC Android: polling traps, aligned_alloc |
 | `patches/zig/posix-android-sigaction.patch` | 🔄 APLICADO POR BUILD | `build-bun.sh` (implícito) | Al vendor/zig/ que Bun descarga |
 | `patches/bun/build-zig-no-link-obj.patch` | 📎 REFERENCIA | Inline con sed+python3 | Solo documentación, el parche real es inline |
@@ -91,7 +92,7 @@ El parche `patches/bun/android-standalone-raw-append.patch` añade ese fallback 
 | `zig-0.15.2` | Zig estándar ~300 MB | no |
 | `icu-android-75.1-24` | ICU cross-compilado | no |
 | `webkit-android-<commit>-<patch_hash>` | WebKit build | **sí** |
-| `bun-android-1.3.14-<7_hashes>` | Binario Bun ~88 MB | no |
+| `bun-android-1.3.14-<8_hashes>` | Binario Bun ~88 MB | no |
 | `bun-host-1.3.14` | Host bun ~737 MB | no |
 | `opentui-android` | libopentui.so | no |
 
