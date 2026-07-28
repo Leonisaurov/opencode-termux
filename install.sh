@@ -335,6 +335,18 @@ STUBEOF
     cp "$bun_bin" "${stub_dir}/bin/bun"
     chmod +x "${stub_dir}/bin/bun"
 
+    # Create a symlink from cache/bun.lock -> ../global/bun.lock
+    # This allows Bun's module resolution to find the global lockfile
+    # when running globally installed scripts from the cache directory.
+    # Without this, scripts in cache/bunli@*/dist/cli.js walk up looking
+    # for bun.lock but never reach install/global/bun.lock.
+    local cache_bunlock="${HOME}/.bun/install/cache/bun.lock"
+    local global_bunlock="${HOME}/.bun/install/global/bun.lock"
+    if [ -f "$global_bunlock" ] && [ ! -f "$cache_bunlock" ] && [ ! -L "$cache_bunlock" ]; then
+        ln -s "../global/bun.lock" "$cache_bunlock" 2>/dev/null && \
+            info "  Symlink cache/bun.lock -> ../global/bun.lock creado"
+    fi
+
     info "Stub @oven/bun-linux-aarch64-android instalado en: ${stub_dir}"
     info "  require.resolve() desde cache/bun@*@@@1/ lo encontrará via node_modules/ walking up"
 }
