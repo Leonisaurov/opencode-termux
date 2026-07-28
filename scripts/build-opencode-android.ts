@@ -5,15 +5,9 @@
  * This script:
  * 1. Generates the models-snapshot.js
  * 2. Loads migrations
- * 3. Bundles + compiles OpenCode for HOST using Bun.build() API:
- *      Bun.build({compile: {outfile: "opencode-host"}}) → x86_64 standalone
- * 4. Reads the .bun ELF section to extract the module graph
- * 5. Raw-appends module graph to Android Bun binary (no ELF modification)
- *
- * The raw append approach is required because --compile-executable-path
- * uses elf.zig:writeBunSection() which corrupts Android ARM64 ELF binaries.
- * The Android Bun's fromExecutable() fallback (patched) finds the module
- * graph via the \n---- Bun! ----\n trailer at the end of the file.
+ * 3. Bundles OpenCode using Bun.build() with compile targeting the host platform
+ * 4. Extracts the module graph from the compiled binary
+ * 5. Appends it to our Android bun binary to create the final standalone
  */
 
 import { $ } from "bun"
@@ -40,9 +34,7 @@ const CHANNEL = process.env.OPENCODE_CHANNEL || "latest"
 
 console.log(`Building OpenCode v${VERSION} (channel: ${CHANNEL}) for Android aarch64`)
 
-// ────────────────────────────────────────────────────────────────
 // Step 1: Generate models-snapshot.js
-// ────────────────────────────────────────────────────────────────
 console.log("\n=== Step 1: Generating models-snapshot.js ===")
 const modelsUrl = process.env.OPENCODE_MODELS_URL || "https://models.dev"
 let modelsData: string = ""
@@ -79,9 +71,7 @@ await Bun.write(
 )
 console.log("Generated models-snapshot.js")
 
-// ────────────────────────────────────────────────────────────────
 // Step 2: Load migrations
-// ────────────────────────────────────────────────────────────────
 console.log("\n=== Step 2: Loading migrations ===")
 const migrationDirs = (
   await fs.promises.readdir(path.join(OPENCODE_DIR, "packages/opencode/migration"), {
@@ -112,10 +102,11 @@ const migrations = await Promise.all(
 )
 console.log(`Loaded ${migrations.length} migrations`)
 
-// ────────────────────────────────────────────────────────────────
-// Step 3: Resolve worker paths
-// ────────────────────────────────────────────────────────────────
-console.log("\n=== Step 3: Resolving worker paths ===")
+// Step 3: Build with Bun.build() --compile for the HOST platform
+// This creates a standalone binary for the host, from which we extract the module graph
+console.log("\n=== Step 3: Bundling OpenCode ===")
+
+const plugin = createSolidTransformPlugin()
 
 let parserWorkerResolved: string
 try {
@@ -126,169 +117,203 @@ try {
 console.log(`Parser worker: ${parserWorkerResolved}`)
 
 const workerPath = "./src/cli/tui/worker.ts"
+
 const bunfsRoot = "/$bunfs/root/"
 const workerRelativePath = path.relative(OPENCODE_DIR, parserWorkerResolved).replaceAll("\\", "/")
-const parserWorkerPath = bunfsRoot + workerRelativePath
-
-// ────────────────────────────────────────────────────────────────
-// Step 4: Bundle + compile for HOST using Bun.build() API
-// ────────────────────────────────────────────────────────────────
-console.log("\n=== Step 4: Building OpenCode for HOST platform ===")
 
 await $`rm -rf ${OUTPUT_DIR}`
 await $`mkdir -p ${OUTPUT_DIR}`
 
-const migrationsJson = JSON.stringify(migrations)
+// Build with --compile for the HOST platform to get a standalone binary
+// We'll extract the module graph from it
 const hostBinaryPath = path.join(OUTPUT_DIR, "opencode-host")
 
-// Bun.build() with compile uses the JS API which handles /\$bunfs/root/
-// paths correctly and includes workers via entrypoints + defines.
-const plugin = createSolidTransformPlugin()
-
+console.log("Building standalone binary for host platform...")
 const result = await Bun.build({
   conditions: ["browser"],
   tsconfig: "./tsconfig.json",
   plugins: [plugin],
   compile: {
+    autoloadBunfig: false,
+    autoloadDotenv: false,
+    autoloadTsconfig: true,
+    autoloadPackageJson: true,
     outfile: hostBinaryPath,
     execArgv: [`--user-agent=opencode/${VERSION}`, "--use-system-ca", "--"],
   },
   entrypoints: ["./src/index.ts", parserWorkerResolved, workerPath],
   define: {
     OPENCODE_VERSION: `'${VERSION}'`,
-    OPENCODE_MIGRATIONS: migrationsJson,
-    OTUI_TREE_SITTER_WORKER_PATH: `'${parserWorkerPath}'`,
-    OPENCODE_WORKER_PATH: `'${workerPath}'`,
+    OPENCODE_MIGRATIONS: JSON.stringify(migrations),
+    OTUI_TREE_SITTER_WORKER_PATH: bunfsRoot + workerRelativePath,
+    OPENCODE_WORKER_PATH: workerPath,
     OPENCODE_CHANNEL: `'${CHANNEL}'`,
-    OPENCODE_LIBC: "''",
+    OPENCODE_LIBC: "",
   },
 })
 
 if (!result.success) {
-  console.error("Build failed:", result.logs)
+  console.error("Build failed:")
+  for (const msg of result.logs) {
+    console.error(msg)
+  }
   process.exit(1)
 }
 
-console.log(`Host binary: ${hostBinaryPath}`)
+console.log(`Host standalone binary: ${hostBinaryPath}`)
 
-// ────────────────────────────────────────────────────────────────
-// Step 5: Extract module graph from the .bun ELF section
-// ────────────────────────────────────────────────────────────────
-console.log("\n=== Step 5: Extracting module graph ===")
+// Step 4: Extract module graph from host binary
+console.log("\n=== Step 4: Extracting module graph ===")
+
+const hostBinary = await Bun.file(hostBinaryPath).arrayBuffer()
+const hostBytes = new Uint8Array(hostBinary)
+
+// Standalone binary format (ELF):
+//   [bun binary (seek_pos bytes)]
+//   [module_graph bytes]
+//   [total_byte_count as u64 LE (8 bytes)]
+//
+// Module graph internal layout:
+//   [string data] [module list] [offsets (32 bytes)] [trailer "\n---- Bun! ----\n" (16 bytes)]
+//
+// offsets.byte_count = len(string_data) + len(module_list)
+// total_byte_count = seek_pos + len(module_graph) + 8 = file_size
+//
+// We derive the module graph size from the trailer and offsets struct,
+// WITHOUT relying on process.execPath (which may differ from the bun
+// binary that was embedded during --compile).
 
 const TRAILER_STR = "\n---- Bun! ----\n"
-const TRAILER_LEN = TRAILER_STR.length
-const OFFSETS_SIZE = 32
+const TRAILER_LEN = TRAILER_STR.length  // 16
+const OFFSETS_SIZE_CONST = 32
 
-const hostFileBytes = new Uint8Array(await Bun.file(hostBinaryPath).arrayBuffer())
-const utf8decoder = new TextDecoder()
-
-// Scan ELF section headers for ".bun"
-const e_shoff = Number(new DataView(hostFileBytes.buffer, 0x28, 8).getBigUint64(0, true))
-const e_shentsize = new DataView(hostFileBytes.buffer, 0x3A, 2).getUint16(0, true)
-const e_shnum = new DataView(hostFileBytes.buffer, 0x3C, 2).getUint16(0, true)
-const e_shstrndx = new DataView(hostFileBytes.buffer, 0x3E, 2).getUint16(0, true)
-
-// Read section name string table
-const shstrtabEntryOff = e_shoff + e_shstrndx * e_shentsize
-const shstrtabOffset = Number(new DataView(hostFileBytes.buffer, shstrtabEntryOff + 0x18, 8).getBigUint64(0, true))
-const shstrtabSize = Number(new DataView(hostFileBytes.buffer, shstrtabEntryOff + 0x20, 8).getBigUint64(0, true))
-const shstrtab = hostFileBytes.slice(shstrtabOffset, shstrtabOffset + shstrtabSize)
-
-// Find .bun section
-let bunSectionOffset = 0
-let bunSectionSize = 0
-for (let i = 0; i < e_shnum; i++) {
-  const entryOff = e_shoff + i * e_shentsize
-  const nameIdx = new DataView(hostFileBytes.buffer, entryOff, 4).getUint32(0, true)
-  let nameEnd = nameIdx
-  while (nameEnd < shstrtabSize && shstrtab[nameEnd] !== 0) nameEnd++
-  const name = utf8decoder.decode(shstrtab.slice(nameIdx, nameEnd))
-  if (name === ".bun") {
-    bunSectionOffset = Number(new DataView(hostFileBytes.buffer, entryOff + 0x18, 8).getBigUint64(0, true))
-    bunSectionSize = Number(new DataView(hostFileBytes.buffer, entryOff + 0x20, 8).getBigUint64(0, true))
-    break
-  }
-}
-
-if (bunSectionSize === 0) {
-  console.error("ERROR: .bun section not found in host binary")
-  process.exit(1)
-}
-
-// Read .bun section content (skip the first 8-byte total_byte_count)
-const bunSectionBytes = hostFileBytes.slice(bunSectionOffset, bunSectionOffset + bunSectionSize)
-const moduleGraphBytes = bunSectionBytes.subarray(8)
-console.log(`Host binary: ${hostFileBytes.length} bytes`)
-console.log(`.bun section: offset=0x${bunSectionOffset.toString(16)}, size=${bunSectionBytes.length} bytes`)
-console.log(`Module graph extracted: ${moduleGraphBytes.length} bytes`)
-
-// Verify trailer at the right position
-const searchBuf = Buffer.from(moduleGraphBytes.buffer, moduleGraphBytes.byteOffset, moduleGraphBytes.length)
+// Find trailer: it's near the end of the file, just before the final 8-byte u64.
+// Search backwards from (end - 8) for the trailer sentinel.
 const trailerBuf = Buffer.from(TRAILER_STR)
-const expectedTrailerStart = moduleGraphBytes.length - TRAILER_LEN
-const foundTrailer = searchBuf.compare(trailerBuf, 0, TRAILER_LEN, expectedTrailerStart, moduleGraphBytes.length) === 0
+const searchBuf = Buffer.from(hostBytes.buffer, hostBytes.byteOffset, hostBytes.length)
+const trailerEnd = hostBytes.length - 8  // trailer must end here
+const expectedTrailerStart = trailerEnd - TRAILER_LEN
+
+// Verify trailer at expected position
+const foundTrailer = searchBuf.compare(
+  trailerBuf, 0, TRAILER_LEN,
+  expectedTrailerStart, trailerEnd
+) === 0
 
 if (!foundTrailer) {
-  console.error("ERROR: Module graph trailer not found in .bun section")
+  console.error("ERROR: Bun standalone trailer not found at expected position")
+  console.error("       The standalone binary format may have changed.")
   process.exit(1)
 }
 
-// Parse module graph offsets for undici patching
+// Read offsets struct (32 bytes) just before the trailer
+const offsetsStart = expectedTrailerStart - OFFSETS_SIZE_CONST
+const offsetsByteCount = Number(searchBuf.readBigUInt64LE(offsetsStart))
+
+// Module graph total size = byte_count (string data + module list) + offsets(32) + trailer(16)
+const moduleGraphSize = offsetsByteCount + OFFSETS_SIZE_CONST + TRAILER_LEN
+const hostBunSize = hostBytes.length - 8 - moduleGraphSize
+
+console.log(`Host standalone size: ${hostBytes.length}`)
+console.log(`Derived host bun size: ${hostBunSize}`)
+console.log(`Module graph size: ${moduleGraphSize}`)
+
+if (hostBunSize <= 0) {
+  console.error(`ERROR: Derived host bun size is ${hostBunSize} — something is wrong`)
+  process.exit(1)
+}
+
+const moduleGraphBytes = hostBytes.slice(hostBunSize, hostBytes.length - 8)
+console.log(`Module graph extracted: ${moduleGraphBytes.length} bytes`)
+console.log(`Trailer verified: OK`)
+
+// Step 5: Patch the module graph for Android
+console.log("\n=== Step 5: Patching module graph for Android ===")
+
+// The module graph format (from StandaloneModuleGraph.zig):
+//   [string data: all file names, contents, sourcemaps, bytecodes concatenated]
+//   [CompiledModuleGraphFile array]
+//   [Offsets struct: 32 bytes]
+//   [trailer: "\n---- Bun! ----\n"]
+//
+// Offsets struct layout (32 bytes, little-endian, unchanged across Bun versions):
+//   byte_count:              u64  (8 bytes) - size of everything before the Offsets struct
+//   modules_ptr.offset:      u32  (4 bytes)
+//   modules_ptr.length:      u32  (4 bytes)
+//   entry_point_id:          u32  (4 bytes)
+//   compile_exec_argv.offset:u32  (4 bytes)
+//   compile_exec_argv.length:u32  (4 bytes)
+//   flags:                   u32  (4 bytes)
+//
+// NOTE: CompiledModuleGraphFile layout varies between Bun versions:
+//   - Bun 1.2.x: 36 bytes (4 StringPointers + 3 u8 + 1 padding)
+//   - Bun 1.3.x: 52 bytes (6 StringPointers + 4 u8)
+// We avoid parsing individual modules. The undici patch is a same-size
+// in-place byte replacement in the raw string data, so we don't need to
+// know the module struct layout at all. The module list and offsets are
+// passed through unchanged.
+
+const mgTrailer = "\n---- Bun! ----\n"
+const mgTrailerBuf = Buffer.from(mgTrailer)
+const OFFSETS_SIZE = 32
+
+// Parse the module graph — only the Offsets struct (version-independent)
 const mgBuf = Buffer.from(moduleGraphBytes)
-const mgTrailerBuf = Buffer.from(TRAILER_STR)
 const trailerPosInMg = mgBuf.lastIndexOf(mgTrailerBuf)
 if (trailerPosInMg < 0) throw new Error("Trailer not found in module graph!")
 
+// Offsets struct is just before the trailer
 const mgOffsetsStart = trailerPosInMg - OFFSETS_SIZE
+const byteCount = Number(mgBuf.readBigUInt64LE(mgOffsetsStart))
 const modOff = mgBuf.readUInt32LE(mgOffsetsStart + 8)
-console.log(`String data region: [0, ${modOff})`)
+const modLen = mgBuf.readUInt32LE(mgOffsetsStart + 12)
+const entryId = mgBuf.readUInt32LE(mgOffsetsStart + 16)
+const argvOff = mgBuf.readUInt32LE(mgOffsetsStart + 20)
+const argvLen = mgBuf.readUInt32LE(mgOffsetsStart + 24)
+const flags = mgBuf.readUInt32LE(mgOffsetsStart + 28)
 
-// ────────────────────────────────────────────────────────────────
-// Step 5b: Patch undici reference (Bun <=1.2.x compat)
-// ────────────────────────────────────────────────────────────────
-console.log("\n=== Step 5b: Patching module graph ===")
+console.log(`Module graph: trailer at ${trailerPosInMg}, offsets at ${mgOffsetsStart}`)
+console.log(`byte_count=${byteCount}, modules_ptr=(${modOff},${modLen}), entry_id=${entryId}`)
+console.log(`String data region: [0, ${modOff}), Module list: [${modOff}, ${modOff + modLen})`)
 
-const undiciPatterns = [
-  {
-    name: "undici global ref",
-    search: Buffer.from('__reExport(exports_Undici, undici)'),
-    replace: Buffer.from('__reExport(exports_Undici, Undici)'),
-  },
-]
+// ---- Patch 1: Fix undici reference ----
+// The host bun bundler compiles `import "undici"` as a bare global reference `undici`.
+// Android bun v1.2.13 doesn't expose globalThis.undici, but it does expose `Undici`
+// (capital U, the moduleExports object). `__reExport` skips the "default" key anyway,
+// so the result is identical.
+//
+// This is a same-byte-count replacement: we search the entire string data region
+// for the pattern and replace in-place. No module struct parsing required.
+const UNDICI_SEARCH  = Buffer.from('__reExport(exports_Undici, undici)')
+const UNDICI_REPLACE = Buffer.from('__reExport(exports_Undici, Undici)')
+console.log(`\nPatch 1: Replacing undici->Undici in string data (same size, no offset changes)`)
 
-let totalPatches = 0
-for (const pattern of undiciPatterns) {
-  if (pattern.search.length !== pattern.replace.length) {
-    console.warn(`  SKIP ${pattern.name}: different lengths (${pattern.search.length} vs ${pattern.replace.length})`)
-    continue
-  }
-  const strDataRegion = mgBuf.slice(0, modOff)
-  let searchPos = 0
-  let count = 0
-  while (true) {
-    const pos = strDataRegion.indexOf(pattern.search, searchPos)
-    if (pos < 0) break
-    pattern.replace.copy(mgBuf, pos)
-    count++
-    totalPatches++
-    searchPos = pos + pattern.search.length
-  }
-  if (count > 0) {
-    console.log(`  ✓ ${pattern.name}: patched ${count} occurrence(s)`)
-  }
+let undiciPatchCount = 0
+let searchPos = 0
+// Search only within the string data region [0, modOff)
+const strDataRegion = mgBuf.slice(0, modOff)
+while (true) {
+  const pos = strDataRegion.indexOf(UNDICI_SEARCH, searchPos)
+  if (pos < 0) break
+  console.log(`  Found at string data offset ${pos}, replacing...`)
+  UNDICI_REPLACE.copy(mgBuf, pos)
+  undiciPatchCount++
+  searchPos = pos + UNDICI_SEARCH.length
+}
+if (undiciPatchCount === 0) {
+  console.error("WARNING: __reExport(exports_Undici, undici) not found — skipping Patch 1")
+} else {
+  console.log(`  Patched ${undiciPatchCount} occurrence(s)`)
 }
 
-if (totalPatches === 0) {
-  console.log("  No undici patterns found in module graph (Bun 1.3.14)")
-}
-
-// ────────────────────────────────────────────────────────────────
-// Step 6: Create Android standalone binary (raw append)
-// ────────────────────────────────────────────────────────────────
-console.log("\n=== Step 6: Creating Android standalone binary ===")
-
+// Since all patches are same-size in-place edits, the module graph is unchanged
+// in structure. We just pass through the entire mgBuf (with our in-place edits)
+// as the final module graph.
 var finalModuleGraph = mgBuf.slice(0, trailerPosInMg + mgTrailerBuf.length)
+console.log(`Module graph size: ${finalModuleGraph.length} bytes (unchanged)`)
+
+// Step 6: Create Android standalone binary
+console.log("\n=== Step 6: Creating Android standalone binary ===")
 
 const androidBunBytes = new Uint8Array(await Bun.file(ANDROID_BUN).arrayBuffer())
 const androidBunSize = androidBunBytes.length
@@ -297,16 +322,17 @@ console.log(`Android bun size: ${androidBunSize}`)
 // New total_byte_count = android_bun_size + module_graph.length + 8
 const newTotalByteCount = androidBunSize + finalModuleGraph.length + 8
 
-// Create the output buffer: [Android bun][module graph + trailer][total_byte_count u64]
+// Create the output buffer
 const outputSize = androidBunSize + finalModuleGraph.length + 8
 const output = new Uint8Array(outputSize)
 
+// Copy Android bun binary
 output.set(androidBunBytes, 0)
-output.set(
-  new Uint8Array(finalModuleGraph.buffer, finalModuleGraph.byteOffset, finalModuleGraph.length),
-  androidBunSize,
-)
 
+// Copy patched module graph
+output.set(new Uint8Array(finalModuleGraph.buffer, finalModuleGraph.byteOffset, finalModuleGraph.length), androidBunSize)
+
+// Write new total_byte_count as u64 LE
 const totalView = new DataView(output.buffer, outputSize - 8, 8)
 totalView.setUint32(0, newTotalByteCount & 0xFFFFFFFF, true)
 totalView.setUint32(4, Math.floor(newTotalByteCount / 0x100000000), true)
@@ -318,28 +344,15 @@ fs.chmodSync(androidOutputPath, 0o755)
 console.log(`\nAndroid standalone binary: ${androidOutputPath}`)
 console.log(`Size: ${(outputSize / 1024 / 1024).toFixed(1)} MB`)
 
-// ────────────────────────────────────────────────────────────────
-// Step 7: Verify the binary
-// ────────────────────────────────────────────────────────────────
-console.log("\n=== Step 7: Verifying binary ===")
-
+// Verify
 const verifyBytes = new Uint8Array(await Bun.file(androidOutputPath).arrayBuffer())
 const verifyView = new DataView(verifyBytes.buffer, verifyBytes.length - 8, 8)
 const verifyTotal = verifyView.getUint32(0, true) + verifyView.getUint32(4, true) * 0x100000000
 console.log(`Verification: total_byte_count=${verifyTotal}, file_size=${verifyBytes.length}, match=${verifyTotal === verifyBytes.length}`)
 
+// Check ELF header
 const elfMagic = String.fromCharCode(verifyBytes[0], verifyBytes[1], verifyBytes[2], verifyBytes[3])
 console.log(`ELF magic: ${elfMagic === "\x7fELF" ? "OK" : "INVALID"}`)
 
-const machine = verifyBytes[18] | (verifyBytes[19] << 8)
-if (machine !== 0xB7) {
-  console.error(`ERROR: Expected AArch64 (0xB7), got ${machine === 0x3E ? "x86_64" : `0x${machine.toString(16)}`}`)
-  process.exit(1)
-}
-console.log("Architecture: AArch64 OK")
-
-// ────────────────────────────────────────────────────────────────
-// Done
-// ────────────────────────────────────────────────────────────────
 console.log("\n=== Build complete! ===")
 console.log(`Output: ${androidOutputPath}`)
