@@ -158,7 +158,7 @@ console.log("Running: bun build --compile --compile-executable-path=<android-bun
 const buildArgs = [
   "bun", "build", "--compile",
   `--compile-executable-path=${ANDROID_BUN}`,
-  "--target=bun-linux-arm64-android",
+
   `--plugin=${pluginFileName}`,
   "--conditions=browser",
   `--tsconfig=./tsconfig.json`,
@@ -189,6 +189,52 @@ if (proc.exitCode !== 0) {
   console.error(`Build failed with exit code ${proc.exitCode}`)
   process.exit(proc.exitCode ?? 1)
 }
+
+// ────────────────────────────────────────────────────────────────
+// Step 4b: Patch undici reference for Android
+// Android bun doesn't expose globalThis.undici (lowercase), but
+// does expose Undici (capital U). The host bun generates module
+// graph with `undici` reference, so we need to fix it post-compile.
+// This is a same-byte-count replacement in the binary output.
+// ────────────────────────────────────────────────────────────────
+console.log("\n=== Step 4b: Patching undici reference ===")
+
+const binaryBuffer = await Bun.file(androidOutputPath).arrayBuffer()
+const binaryBytes = new Uint8Array(binaryBuffer)
+
+const SEARCH_PATTERN = '__reExport(exports_Undici, undici)'
+const REPLACE_PATTERN = '__reExport(exports_Undici, Undici)'
+
+const searchEncoded = Buffer.from(SEARCH_PATTERN)
+const replaceEncoded = Buffer.from(REPLACE_PATTERN)
+
+if (searchEncoded.length !== replaceEncoded.length) {
+  console.error("ERROR: Search and replace patterns must be the same length")
+  process.exit(1)
+}
+
+const searchBuf = Buffer.from(binaryBytes.buffer, binaryBytes.byteOffset, binaryBytes.length)
+let patchCount = 0
+let searchPos = 0
+
+while (true) {
+  const pos = searchBuf.indexOf(searchEncoded, searchPos)
+  if (pos < 0) break
+  replaceEncoded.copy(searchBuf, pos)
+  patchCount++
+  searchPos = pos + searchEncoded.length
+}
+
+if (patchCount === 0) {
+  console.warn("WARNING: undici pattern not found - binary may still crash on Android")
+  console.warn(`  Searched for: ${SEARCH_PATTERN}`)
+} else {
+  console.log(`  Patched ${patchCount} occurrence(s) of undici→Undici`)
+}
+
+// Write patched binary
+await Bun.write(androidOutputPath, binaryBytes)
+console.log("Undici patch applied to binary")
 
 console.log(`\nCross-compile output: ${androidOutputPath}`)
 
