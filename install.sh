@@ -247,6 +247,9 @@ install_bun() {
     # ── Install target runtime cache ──
     install_bun_target || true
 
+    # ── Install @oven/bun-linux-aarch64-android stub ──
+    install_bun_stub || true
+
     # Verificar
     if command -v bun &>/dev/null; then
         local version
@@ -285,6 +288,58 @@ install_bun_target() {
     else
         warn "El target runtime no parece ser ARM64"
     fi
+}
+
+# ── Install @oven/bun-linux-aarch64-android stub ──
+# This prevents the 'bun' npm package's postinstall script from failing
+# when packages like 'bunli' depend on 'bun'.
+# The postinstall tries to download @oven/bun-linux-aarch64-android
+# from npm, which doesn't exist for Android ARM64.
+install_bun_stub() {
+    info "Instalando stub npm para @oven/bun-linux-aarch64-android..."
+
+    local bun_bin="$INSTALL_PREFIX/bin/bun"
+    if [ ! -f "$bun_bin" ]; then
+        warn "Bun binary not found at $bun_bin, skipping stub creation"
+        return 1
+    fi
+
+    local cache_dir="${HOME}/.bun/install/cache"
+    local scope_dir="${cache_dir}/@oven"
+    local pkg_version="${BUN_VERSION:-1.3.14}"
+    local pkg_dir="${scope_dir}/bun-linux-aarch64-android"
+    local versioned_dir="${pkg_dir}@${pkg_version}@@@1"
+
+    # Create versioned directory structure
+    mkdir -p "${versioned_dir}/bin"
+
+    # Create package.json for the stub
+    cat > "${versioned_dir}/package.json" << STUBEOF
+{
+  "name": "@oven/bun-linux-aarch64-android",
+  "version": "${pkg_version}",
+  "os": ["android"],
+  "cpu": ["arm64"],
+  "bin": {
+    "bun": "bin/bun"
+  }
+}
+STUBEOF
+
+    # Copy bun binary
+    cp "$bun_bin" "${versioned_dir}/bin/bun"
+    chmod +x "${versioned_dir}/bin/bun"
+
+    # Create non-versioned alias symlink for faster lookup
+    if [ -d "$pkg_dir" ] && [ ! -L "$pkg_dir" ]; then
+        rm -rf "$pkg_dir"
+    fi
+    ln -sf "bun-linux-aarch64-android@${pkg_version}@@@1" "$pkg_dir" 2>/dev/null || {
+        # Fallback: copy package.json if symlink fails
+        cp "${versioned_dir}/package.json" "${pkg_dir}/package.json" 2>/dev/null
+    }
+
+    info "Stub @oven/bun-linux-aarch64-android instalado en: ${versioned_dir}"
 }
 
 setup_bun_config() {
