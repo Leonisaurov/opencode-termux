@@ -74,11 +74,11 @@ echo "    Created $PACMAN_NAME"
 # ==========================================
 echo ">>> Creating deb package..."
 DEB_STAGING="$PKG_DIR/deb-staging"
-mkdir -p "$DEB_STAGING/data/data/data/com.termux/files/usr/bin"
+mkdir -p "$DEB_STAGING/data/data/com.termux/files/usr/bin"
 mkdir -p "$DEB_STAGING/DEBIAN"
 
-cp "$OPENCODE_BINARY" "$DEB_STAGING/data/data/data/com.termux/files/usr/bin/opencode"
-chmod 755 "$DEB_STAGING/data/data/data/com.termux/files/usr/bin/opencode"
+cp "$OPENCODE_BINARY" "$DEB_STAGING/data/data/com.termux/files/usr/bin/opencode"
+chmod 755 "$DEB_STAGING/data/data/com.termux/files/usr/bin/opencode"
 
 # Create control file
 INSTALLED_SIZE=$((BINARY_SIZE / 1024))
