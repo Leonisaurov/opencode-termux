@@ -65,6 +65,9 @@ jobs:
               echo '=== Enable LD_PRELOAD for /usr/bin/env ==='
               export LD_PRELOAD=/data/data/com.termux/files/usr/lib/libtermux-exec.so
 
+              echo '=== Symlink node → bun ==='
+              ln -sf /data/data/com.termux/files/usr/bin/bun /data/data/com.termux/files/usr/bin/node
+
               echo '=== Verify Bun ==='
               bun --version
 
