@@ -70,7 +70,7 @@ index c9d5ab8..a9d3362 100644
                  // ELF section approach: find .bun section and expand it
                  const input_result = bun.sys.File.readToEnd(.{ .handle = cloned_executable_fd }, bun.default_allocator);
                  if (input_result.err) |err| {
-@@ -1301,19 +1351,79 @@ pub const StandaloneModuleGraph = struct {
+@@ -1301,19 +1351,78 @@ pub const StandaloneModuleGraph = struct {
          }
 
          if (comptime Environment.isLinux or Environment.isFreeBSD) {
