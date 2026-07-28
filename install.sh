@@ -291,10 +291,13 @@ install_bun_target() {
 }
 
 # ── Install @oven/bun-linux-aarch64-android stub ──
-# This prevents the 'bun' npm package's postinstall script from failing
-# when packages like 'bunli' depend on 'bun'.
-# The postinstall tries to download @oven/bun-linux-aarch64-android
-# from npm, which doesn't exist for Android ARM64.
+# The 'bun' npm package's postinstall script does:
+#   1. require('@oven/bun-linux-aarch64-android')
+#   2. If fail → npm install @oven/bun-linux-aarch64-android
+#   3. If fail → error
+#
+# By placing the stub in global node_modules/, step 1 succeeds
+# and it never tries to download from npm.
 install_bun_stub() {
     info "Instalando stub npm para @oven/bun-linux-aarch64-android..."
 
@@ -304,17 +307,15 @@ install_bun_stub() {
         return 1
     fi
 
-    local cache_dir="${HOME}/.bun/install/cache"
-    local scope_dir="${cache_dir}/@oven"
+    local global_node_modules="${HOME}/.bun/install/global/node_modules"
+    local stub_dir="${global_node_modules}/@oven/bun-linux-aarch64-android"
     local pkg_version="${BUN_VERSION:-1.3.14}"
-    local pkg_dir="${scope_dir}/bun-linux-aarch64-android"
-    local versioned_dir="${pkg_dir}@${pkg_version}@@@1"
 
-    # Create versioned directory structure
-    mkdir -p "${versioned_dir}/bin"
+    # Create directory structure
+    mkdir -p "${stub_dir}/bin"
 
-    # Create package.json for the stub
-    cat > "${versioned_dir}/package.json" << STUBEOF
+    # Create package.json
+    cat > "${stub_dir}/package.json" << STUBEOF
 {
   "name": "@oven/bun-linux-aarch64-android",
   "version": "${pkg_version}",
@@ -326,20 +327,11 @@ install_bun_stub() {
 }
 STUBEOF
 
-    # Copy bun binary
-    cp "$bun_bin" "${versioned_dir}/bin/bun"
-    chmod +x "${versioned_dir}/bin/bun"
+    # Copy bun binary (not symlink - require() needs real file)
+    cp "$bun_bin" "${stub_dir}/bin/bun"
+    chmod +x "${stub_dir}/bin/bun"
 
-    # Create non-versioned alias symlink for faster lookup
-    if [ -d "$pkg_dir" ] && [ ! -L "$pkg_dir" ]; then
-        rm -rf "$pkg_dir"
-    fi
-    ln -sf "bun-linux-aarch64-android@${pkg_version}@@@1" "$pkg_dir" 2>/dev/null || {
-        # Fallback: copy package.json if symlink fails
-        cp "${versioned_dir}/package.json" "${pkg_dir}/package.json" 2>/dev/null
-    }
-
-    info "Stub @oven/bun-linux-aarch64-android instalado en: ${versioned_dir}"
+    info "Stub @oven/bun-linux-aarch64-android instalado en: ${stub_dir}"
 }
 
 setup_bun_config() {
