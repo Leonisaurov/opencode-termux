@@ -61,7 +61,7 @@ jobs:
               chmod +x /data/data/com.termux/files/usr/bin/bun
 
               echo '=== Fix /usr/bin/env ==='
-              ln -sf /data/data/com.termux/files/usr/bin/env /usr/bin/env
+              mkdir -p /usr/bin && ln -sf /data/data/com.termux/files/usr/bin/env /usr/bin/env
 
               echo '=== Verify Bun ==='
               bun --version
