@@ -190,9 +190,9 @@ const e_shnum = new DataView(hostFileBytes.buffer, 0x3C, 2).getUint16(0, true)
 const e_shstrndx = new DataView(hostFileBytes.buffer, 0x3E, 2).getUint16(0, true)
 
 // Read section name string table
-const shstrtabEntry = 0x28 + e_shstrndx * e_shentsize
-const shstrtabOffset = Number(new DataView(hostFileBytes.buffer, e_shoff + shstrtabEntry + 0x18, 8).getBigUint64(0, true))
-const shstrtabSize = Number(new DataView(hostFileBytes.buffer, e_shoff + shstrtabEntry + 0x20, 8).getBigUint64(0, true))
+const shstrtabEntryOff = e_shoff + e_shstrndx * e_shentsize
+const shstrtabOffset = Number(new DataView(hostFileBytes.buffer, shstrtabEntryOff + 0x18, 8).getBigUint64(0, true))
+const shstrtabSize = Number(new DataView(hostFileBytes.buffer, shstrtabEntryOff + 0x20, 8).getBigUint64(0, true))
 const shstrtab = hostFileBytes.slice(shstrtabOffset, shstrtabOffset + shstrtabSize)
 
 // Find .bun section
