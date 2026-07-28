@@ -23,7 +23,7 @@ index 0c171c7..83443af 100644
                  bun.options.defaultLoaders.get(path.name.ext) orelse .tsx;
              if (loader.canBeRunByBun() or loader == .html or loader == .md) {
                  log("Resolved to: `{s}`", .{path.text});
-+                if (!ctx.args.preserve_symlinks and strings.contains(path.text, "/install/global/node_modules/")) {
++                if (ctx.args.preserve_symlinks != true and strings.contains(path.text, "/install/global/node_modules/")) {
 +                    ctx.args.preserve_symlinks = true;
 +                    const preserve_symlinks = this_transpiler.resolver.opts.preserve_symlinks;
 +                    defer this_transpiler.resolver.opts.preserve_symlinks = preserve_symlinks;
