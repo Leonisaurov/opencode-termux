@@ -168,64 +168,45 @@ console.log("\n=== Step 4: Extracting module graph ===")
 const hostBinary = await Bun.file(hostBinaryPath).arrayBuffer()
 const hostBytes = new Uint8Array(hostBinary)
 
-// Standalone binary format (ELF):
-//   [bun binary (seek_pos bytes)]
-//   [module_graph bytes]
-//   [total_byte_count as u64 LE (8 bytes)]
-//
-// Module graph internal layout:
-//   [string data] [module list] [offsets (32 bytes)] [trailer "\n---- Bun! ----\n" (16 bytes)]
-//
-// offsets.byte_count = len(string_data) + len(module_list)
-// total_byte_count = seek_pos + len(module_graph) + 8 = file_size
-//
-// We derive the module graph size from the trailer and offsets struct,
-// WITHOUT relying on process.execPath (which may differ from the bun
-// binary that was embedded during --compile).
+// Read .bun section via ELF section headers
+const utf8decoder = new TextDecoder()
+const e_shoff = Number(new DataView(hostBytes.buffer, 0x28, 8).getBigUint64(0, true))
+const e_shentsize = new DataView(hostBytes.buffer, 0x3A, 2).getUint16(0, true)
+const e_shnum = new DataView(hostBytes.buffer, 0x3C, 2).getUint16(0, true)
+const e_shstrndx = new DataView(hostBytes.buffer, 0x3E, 2).getUint16(0, true)
 
-const TRAILER_STR = "\n---- Bun! ----\n"
-const TRAILER_LEN = TRAILER_STR.length  // 16
-const OFFSETS_SIZE_CONST = 32
+// Read section name string table
+const shstrtabEntryOff = e_shoff + e_shstrndx * e_shentsize
+const shstrtabOffset = Number(new DataView(hostBytes.buffer, shstrtabEntryOff + 0x18, 8).getBigUint64(0, true))
+const shstrtabSize = Number(new DataView(hostBytes.buffer, shstrtabEntryOff + 0x20, 8).getBigUint64(0, true))
+const shstrtab = hostBytes.slice(shstrtabOffset, shstrtabOffset + shstrtabSize)
 
-// Find trailer: it's near the end of the file, just before the final 8-byte u64.
-// Search backwards from (end - 8) for the trailer sentinel.
-const trailerBuf = Buffer.from(TRAILER_STR)
-const searchBuf = Buffer.from(hostBytes.buffer, hostBytes.byteOffset, hostBytes.length)
-const trailerEnd = hostBytes.length - 8  // trailer must end here
-const expectedTrailerStart = trailerEnd - TRAILER_LEN
+// Find .bun section
+let bunSectionOffset = 0
+let bunSectionSize = 0
+for (let i = 0; i < e_shnum; i++) {
+  const entryOff = e_shoff + i * e_shentsize
+  const nameIdx = new DataView(hostBytes.buffer, entryOff, 4).getUint32(0, true)
+  let nameEnd = nameIdx
+  while (nameEnd < shstrtabSize && shstrtab[nameEnd] !== 0) nameEnd++
+  const name = utf8decoder.decode(shstrtab.slice(nameIdx, nameEnd))
+  if (name === ".bun") {
+    bunSectionOffset = Number(new DataView(hostBytes.buffer, entryOff + 0x18, 8).getBigUint64(0, true))
+    bunSectionSize = Number(new DataView(hostBytes.buffer, entryOff + 0x20, 8).getBigUint64(0, true))
+    break
+  }
+}
 
-// Verify trailer at expected position
-const foundTrailer = searchBuf.compare(
-  trailerBuf, 0, TRAILER_LEN,
-  expectedTrailerStart, trailerEnd
-) === 0
-
-if (!foundTrailer) {
-  console.error("ERROR: Bun standalone trailer not found at expected position")
-  console.error("       The standalone binary format may have changed.")
+if (bunSectionSize === 0) {
+  console.error("ERROR: .bun section not found in host binary")
   process.exit(1)
 }
 
-// Read offsets struct (32 bytes) just before the trailer
-const offsetsStart = expectedTrailerStart - OFFSETS_SIZE_CONST
-const offsetsByteCount = Number(searchBuf.readBigUInt64LE(offsetsStart))
+const bunSectionBytes = hostBytes.slice(bunSectionOffset, bunSectionOffset + bunSectionSize)
+const moduleGraphBytes = bunSectionBytes.subarray(8) // skip u64 payload_len
 
-// Module graph total size = byte_count (string data + module list) + offsets(32) + trailer(16)
-const moduleGraphSize = offsetsByteCount + OFFSETS_SIZE_CONST + TRAILER_LEN
-const hostBunSize = hostBytes.length - 8 - moduleGraphSize
-
-console.log(`Host standalone size: ${hostBytes.length}`)
-console.log(`Derived host bun size: ${hostBunSize}`)
-console.log(`Module graph size: ${moduleGraphSize}`)
-
-if (hostBunSize <= 0) {
-  console.error(`ERROR: Derived host bun size is ${hostBunSize} — something is wrong`)
-  process.exit(1)
-}
-
-const moduleGraphBytes = hostBytes.slice(hostBunSize, hostBytes.length - 8)
+console.log(`Host binary: ${hostBytes.length} bytes, .bun section at 0x${bunSectionOffset.toString(16)}, size=${bunSectionBytes.length} bytes`)
 console.log(`Module graph extracted: ${moduleGraphBytes.length} bytes`)
-console.log(`Trailer verified: OK`)
 
 // Step 5: Patch the module graph for Android
 console.log("\n=== Step 5: Patching module graph for Android ===")
