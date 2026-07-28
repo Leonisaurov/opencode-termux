@@ -51,7 +51,10 @@ jobs:
       - name: Install deps and compile
         run: |
           cd "$WORK_DIR/opencode-src/packages/opencode"
-          bun install
+          # tree-sitter-bash confuses ARM64 Linux with Android
+          # Skip postinstall scripts to avoid node-gyp NDK requirement
+          bun install --ignore-scripts
+          # tree-sitter bindings are optional for OpenCode
           bun build --compile \
             --conditions browser \
             --define "OPENCODE_VERSION='${{ env.OPENCODE_VERSION }}'" \
