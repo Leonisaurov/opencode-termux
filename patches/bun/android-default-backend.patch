@@ -1,0 +1,24 @@
+From: opencode-termux
+Date: 2026-07-27
+Subject: [PATCH] Change default install backend to symlink on Android
+
+On Android/Termux, the default "hardlink" backend fails with EACCES
+because Android's filesystem (F2FS/EXT4 via /data/) doesn't fully
+support cross-directory hardlinks for app sandboxes.
+
+Using "symlink" as default makes Bun work out of the box on Termux
+without requiring --backend=symlink or wrapper scripts.
+
+diff --git a/src/install/PackageInstall.zig b/src/install/PackageInstall.zig
+index 2175244..7cd513e 100644
+--- a/src/install/PackageInstall.zig
++++ b/src/install/PackageInstall.zig
+@@ -371,6 +371,8 @@ pub const PackageInstall = struct {
+ 
+     pub var supported_method: Method = if (Environment.isMac)
+         Method.clonefile
++    else if (Environment.isAndroid)
++        Method.symlink
+     else
+         Method.hardlink;
+ 

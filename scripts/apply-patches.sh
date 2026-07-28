@@ -55,6 +55,13 @@ else
     echo "    build.zig no_link_obj fix already applied or not needed"
 fi
 
+# Apply default backend symlink fix for Android/Termux
+echo ">>> Applying default backend symlink fix for Android..."
+cd "$BUN_SRC"
+git apply --stat "$REPO_ROOT/patches/bun/android-default-backend.patch"
+git apply "$REPO_ROOT/patches/bun/android-default-backend.patch"
+echo "    Default backend symlink fix applied"
+
 # Apply PR #31198 fix (CouldntReadCurrentDirectory on Android/Termux)
 echo ">>> Applying PR #31198 fix for CouldntReadCurrentDirectory..."
 cd "$BUN_SRC"

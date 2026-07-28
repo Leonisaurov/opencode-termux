@@ -16,13 +16,22 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-info()  { echo -e "${GREEN}[✓]${NC} $1"; }
-warn()  { echo -e "${YELLOW}[!]${NC} $1"; }
-error() { echo -e "${RED}[✗]${NC} $1"; }
+info()  { echo -e "${GREEN}[✓]${NC} $1" >&2; }
+warn()  { echo -e "${YELLOW}[!]${NC} $1" >&2; }
+error() { echo -e "${RED}[✗]${NC} $1" >&2; }
+
+check_arch() {
+    local file_info
+    file_info=$(file "$1" 2>/dev/null || echo "")
+    if ! echo "$file_info" | grep -q "ARM aarch64\|AArch64\|aarch64"; then
+        return 1
+    fi
+    return 0
+}
 
 # ── Help ────────────────────────────────────────────────────────────
 show_help() {
-    cat << 'EOF'
+    cat << EOF
 opencode-termux Installer v$VERSION
 
 USO:
@@ -32,7 +41,7 @@ OPCIONES:
     --just bun         Instala solo Bun
     --just opencode    Instala solo OpenCode (futuro)
     --all              Instala todo (default)
-    --prefix <path>    Directorio de instalación (default: $PREFIX)
+    --prefix <path>    Directorio de instalación (default: \$PREFIX)
     --version          Muestra versión
     --help             Muestra esta ayuda
 
@@ -132,13 +141,29 @@ download_bun() {
     local tmp_dir
     tmp_dir="$(mktemp -d)"
 
-    cd "$SCRIPT_DIR"
-    if ! gh run download --repo Leonisaurov/opencode-termux \
+    # Obtener el run ID del último exitoso (solo de nuestra branch)
+    local run_id
+    run_id=$(gh run list --repo Leonisaurov/opencode-termux \
         --workflow build-bun.yml \
+        --status success \
+        --branch update-v1.18.6 \
         --limit 1 \
+        --json databaseId \
+        -q '.[0].databaseId' 2>/dev/null) || true
+
+    if [ -z "$run_id" ] || [ "$run_id" = "null" ]; then
+        rm -rf "$tmp_dir"
+        error "No se encontró ningún workflow exitoso reciente de build-bun.yml"
+        error "Ejecuta: gh workflow run build-bun.yml --ref update-v1.18.6"
+        return 1
+    fi
+
+    info "Descargando artifact del run #${run_id}..."
+    if ! gh run download "$run_id" \
+        --repo Leonisaurov/opencode-termux \
         --dir "$tmp_dir" 2>/dev/null; then
         rm -rf "$tmp_dir"
-        error "No se pudo descargar el artifact. ¿Hay un workflow exitoso reciente?"
+        error "No se pudo descargar el artifact del run #${run_id}"
         return 1
     fi
 
@@ -151,8 +176,21 @@ download_bun() {
     fi
 
     chmod +x "$bun_bin"
-    echo "$bun_bin"
+
+    # Verificar nombre del artifact esperado
+    local artifact_name
+    artifact_name=$(basename "$(find "$tmp_dir" -maxdepth 1 -type d 2>/dev/null | tail -1)" 2>/dev/null || echo "")
+    if [ -n "$artifact_name" ] && [[ "$artifact_name" != "bun-android-aarch64"* ]]; then
+        warn "Artifact inesperado: '$artifact_name' (se esperaba bun-android-aarch64-*)"
+    fi
+
+    # Copiar a ubicación estable antes de limpiar
+    local dest="$SCRIPT_DIR/.bun-artifact/bun-downloaded"
+    mkdir -p "$(dirname "$dest")"
+    cp "$bun_bin" "$dest"
+    chmod +x "$dest"
     rm -rf "$tmp_dir"
+    echo "$dest"
     return 0
 }
 
@@ -166,7 +204,9 @@ install_bun() {
     if [ -z "$bun_bin" ]; then
         warn "No se encontró binario local de Bun."
         if command -v gh &>/dev/null; then
-            bun_bin=$(download_bun) || true
+            if ! bun_bin=$(download_bun); then
+                bun_bin=""
+            fi
         else
             error "No hay 'gh' disponible. Opciones:"
             error "  1. Instala gh: pkg install gh && gh auth login"
@@ -180,23 +220,25 @@ install_bun() {
         return 1
     fi
 
-    # Verificar que es ARM64
-    local file_info
-    file_info=$(file "$bun_bin" 2>/dev/null || echo "")
-    if ! echo "$file_info" | grep -q "ARM aarch64\|AArch64"; then
-        warn "El binario no parece ser ARM64: $file_info"
+    if ! check_arch "$bun_bin"; then
+        warn "El binario no parece ser ARM64"
     fi
 
-    # Preguntar antes de sobrescribir
     if [ -f "$INSTALL_PREFIX/bin/bun" ]; then
         local old_version
         old_version=$("$INSTALL_PREFIX/bin/bun" --version 2>/dev/null || echo "?")
-        warn "Ya existe Bun v$old_version en $INSTALL_PREFIX/bin/bun"
-        echo -n "¿Sobrescribir? [s/N] "
-        read -r resp
-        if [ "$resp" != "s" ] && [ "$resp" != "S" ]; then
-            info "Instalación cancelada."
-            return 0
+        if [ -t 0 ]; then
+            # Modo interactivo — preguntar
+            warn "Ya existe Bun v$old_version en $INSTALL_PREFIX/bin/bun"
+            echo -n "¿Sobrescribir? [s/N] " >&2
+            read -r resp
+            if [ "$resp" != "s" ] && [ "$resp" != "S" ]; then
+                info "Instalación cancelada."
+                return 0
+            fi
+        else
+            # Modo no interactivo — sobrescribir automáticamente
+            info "Reemplazando Bun v$old_version con nueva versión"
         fi
     fi
 
@@ -212,8 +254,24 @@ install_bun() {
         warn "Bun instalado pero no encontrado en PATH. ¿Está $INSTALL_PREFIX/bin en tu PATH?"
     fi
 
-    # Limpiar binario temporal (solo si fue descargado, no si era local)
-    # (el binario local queda donde estaba)
+    # Config global: backend copyfile para Android
+    setup_bun_config
+}
+
+setup_bun_config() {
+    local config_file="$HOME/.bunfig.toml"
+    if [ -f "$config_file" ]; then
+        info ".bunfig.toml ya existe, no se modifica"
+        return 0
+    fi
+    cat > "$config_file" << 'EOF'
+# Configuración global de Bun para Android/Termux
+# El backend "copyfile" es necesario porque hardlink falla
+# en el filesystem de Android (EACCES)
+[install]
+backend = "copyfile"
+EOF
+    info ".bunfig.toml creado con backend=copyfile"
 }
 
 # ── Main ────────────────────────────────────────────────────────────
