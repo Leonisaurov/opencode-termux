@@ -1,5 +1,5 @@
 diff --git a/src/standalone_graph/StandaloneModuleGraph.zig b/src/standalone_graph/StandaloneModuleGraph.zig
-index c9d5ab8..d02234b 100644
+index c9d5ab8..164db21 100644
 --- a/src/standalone_graph/StandaloneModuleGraph.zig
 +++ b/src/standalone_graph/StandaloneModuleGraph.zig
 @@ -873,6 +873,56 @@ pub const StandaloneModuleGraph = struct {
@@ -59,14 +59,13 @@ index c9d5ab8..d02234b 100644
                  // ELF section approach: find .bun section and expand it
                  const input_result = bun.sys.File.readToEnd(.{ .handle = cloned_executable_fd }, bun.default_allocator);
                  if (input_result.err) |err| {
-@@ -1301,19 +1351,78 @@ pub const StandaloneModuleGraph = struct {
+@@ -1301,19 +1351,97 @@ pub const StandaloneModuleGraph = struct {
          }
  
          if (comptime Environment.isLinux or Environment.isFreeBSD) {
 -            const elf_bytes = ELF.getData() orelse return null;
 -            if (elf_bytes.len < @sizeOf(Offsets) + trailer.len) {
 -                Output.debugWarn("bun standalone module graph is too small to be valid", .{});
--                return null;
 +            // ── Try ELF .bun section first ──
 +            if (ELF.getData()) |elf_bytes| {
 +                if (elf_bytes.len >= @sizeOf(Offsets) + trailer.len) {
@@ -77,9 +76,7 @@ index c9d5ab8..d02234b 100644
 +                        return try fromBytesAlloc(allocator, @constCast(elf_bytes), offsets);
 +                    }
 +                }
-             }
--            const elf_bytes_slice = elf_bytes[elf_bytes.len - @sizeOf(Offsets) - trailer.len ..];
--            const trailer_bytes = elf_bytes[elf_bytes.len - trailer.len ..][0..trailer.len];
++            }
 +
 +            // ── Fallback: raw-append mode ──
 +            // The module graph may be appended at the end of the file
@@ -88,16 +85,22 @@ index c9d5ab8..d02234b 100644
 +            // for the trailer.
 +            const self_exe = bun.selfExePath() catch {
 +                Output.debugWarn("bun standalone: failed to get self path", .{});
-+                return null;
+                 return null;
 +            };
 +
-+            const file = std.fs.openFileAbsolute(self_exe, .{ .mode = .read_only }) catch {
-+                Output.debugWarn("bun standalone: failed to open self", .{});
-+                return null;
++            const self_exe_fd = switch (bun.sys.open(self_exe, bun.O.RDONLY, 0)) {
++                .result => |fd| fd,
++                .err => |_| {
++                    Output.debugWarn("bun standalone: failed to open self", .{});
++                    return null;
++                },
 +            };
-+            defer file.close();
++            defer self_exe_fd.close();
 +
-+            const file_size = file.getEndPos() catch return null;
++            const file_size = switch (Syscall.fstat(self_exe_fd)) {
++                .result => |stat| @as(u64, @intCast(stat.size)),
++                .err => |_| return null,
++            };
 +
 +            // Need at least: [Offsets(32) + trailer(16) + u64(8)] = 56 bytes past module graph
 +            if (file_size < @sizeOf(Offsets) + trailer.len + 8) return null;
@@ -106,15 +109,25 @@ index c9d5ab8..d02234b 100644
 +            const tail_size = @sizeOf(Offsets) + trailer.len + 8;
 +            const tail_offset = file_size - tail_size;
 +            const tail_buf = try allocator.alloc(u8, tail_size);
-+            defer allocator.free(tail_buf);
 +
-+            file.seekTo(tail_offset) catch return null;
-+            file.readAll(tail_buf) catch return null;
++            switch (Syscall.pread(self_exe_fd, tail_buf, @intCast(tail_offset))) {
++                .result => |read_bytes| if (read_bytes != tail_size) {
++                    allocator.free(tail_buf);
++                    return null;
++                },
++                .err => |_| {
++                    allocator.free(tail_buf);
++                    return null;
++                },
+             }
+-            const elf_bytes_slice = elf_bytes[elf_bytes.len - @sizeOf(Offsets) - trailer.len ..];
+-            const trailer_bytes = elf_bytes[elf_bytes.len - trailer.len ..][0..trailer.len];
 +
 +            // Check trailer (16 bytes before the last 8)
 +            const trailer_bytes = tail_buf[tail_buf.len - 8 - trailer.len .. tail_buf.len - 8];
              if (!bun.strings.eqlComptime(trailer_bytes, trailer)) {
                  Output.debugWarn("bun standalone module graph has invalid trailer", .{});
++                allocator.free(tail_buf);
                  return null;
              }
 -            const offsets = std.mem.bytesAsValue(Offsets, elf_bytes_slice).*;
@@ -125,22 +138,27 @@ index c9d5ab8..d02234b 100644
 +            const offsets = std.mem.bytesAsValue(Offsets, offsets_bytes).*;
 +
 +            // Read total byte count (last 8 bytes)
-+            const total_byte_count = std.mem.readInt(u64, @as(*const [8]u8, @ptrCast(&tail_buf[tail_buf.len - 8])), .little);
++            const total_byte_count = std.mem.readInt(u64, @as(*const [8]u8, @ptrCast(tail_buf[tail_buf.len - 8 ..].ptr)), .little);
++            allocator.free(tail_buf);
 +
 +            // The module graph starts at (total_byte_count - 8 - module_graph_size)
-+            // where module_graph_size = offsets.byte_count + @sizeOf(Offsets) + trailer.len
 +            const module_graph_size = offsets.byte_count + @sizeOf(Offsets) + trailer.len;
++            if (total_byte_count < 8 + module_graph_size) return null;
 +            const module_graph_offset = total_byte_count - 8 - module_graph_size;
-+
 +            if (module_graph_offset >= file_size) return null;
 +
 +            // Read the full module graph
-+            file.seekTo(module_graph_offset) catch return null;
 +            const full_data = try allocator.alloc(u8, module_graph_size);
-+            file.readAll(full_data) catch {
-+                allocator.free(full_data);
-+                return null;
-+            };
++            switch (Syscall.pread(self_exe_fd, full_data, @intCast(module_graph_offset))) {
++                .result => |read_bytes| if (read_bytes != module_graph_size) {
++                    allocator.free(full_data);
++                    return null;
++                },
++                .err => |_| {
++                    allocator.free(full_data);
++                    return null;
++                },
++            }
 +
 +            return try fromBytesAlloc(allocator, full_data, offsets);
          }
