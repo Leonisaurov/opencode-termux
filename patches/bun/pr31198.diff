@@ -14,7 +14,7 @@ diff --git a/src/resolver/resolver.zig b/src/resolver/resolver.zig
 index 71c9530..d1d8cec 100644
 --- a/src/resolver/resolver.zig
 +++ b/src/resolver/resolver.zig
-@@ -2859,10 +2859,12 @@ pub const Resolver = struct {
+@@ -2859,10 +2859,11 @@ pub const Resolver = struct {
          var _safe_path: ?string = null;
  
          // Start at the top.
