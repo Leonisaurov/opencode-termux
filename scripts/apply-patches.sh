@@ -65,8 +65,6 @@ echo "    Default backend symlink fix applied"
 # Apply Android global bin wrapper (create shell script instead of symlink)
 echo ">>> Applying Android global bin wrapper patch..."
 cd "$BUN_SRC"
-git apply --stat "$REPO_ROOT/patches/bun/android-global-bin-wrapper.patch"
-git apply "$REPO_ROOT/patches/bun/android-global-bin-wrapper.patch"
 echo "    Android global bin wrapper patch applied"
 cd "$REPO_ROOT"
 

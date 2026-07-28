@@ -60,7 +60,6 @@ jobs:
           echo "zig_patch_hash=$(sha256sum patches/zig/posix-android-sigaction.patch | cut -c1-16)" >> $GITHUB_OUTPUT
           echo "android_backend_hash=$(sha256sum patches/bun/android-default-backend.patch | cut -c1-16)" >> $GITHUB_OUTPUT
           echo "raw_append_hash=$(sha256sum patches/bun/android-standalone-raw-append.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
-          echo "global_bin_hash=$(sha256sum patches/bun/android-global-bin-wrapper.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
           echo "webkit_patch_hash=$(sha256sum patches/webkit/android-support.patch | cut -c1-16)" >> $GITHUB_OUTPUT
 
       # ── Restore ICU (build if missing, ~5 min) ────────────────
@@ -90,7 +89,6 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.WORK_DIR }}/bun-build/bun
-          key: bun-android-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.bun_pr_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}-${{ steps.hashes.outputs.android_backend_hash }}-${{ steps.hashes.outputs.raw_append_hash }}-${{ steps.hashes.outputs.global_bin_hash }}
 
       - name: Clone, patch, and build Bun
         if: steps.cache-bun.outputs.cache-hit != 'true'
