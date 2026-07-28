@@ -19,7 +19,6 @@ index 71c9530..d1d8cec 100644
  
          // Start at the top.
 -        while (queue_slice.len > 0) {
-+        const missing_parent_result = top_parent;
 +        var parent_result = top_parent;
 +        queue_loop: while (queue_slice.len > 0) {
              var queue_top = queue_slice[queue_slice.len - 1];
