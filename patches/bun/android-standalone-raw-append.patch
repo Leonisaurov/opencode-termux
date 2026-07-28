@@ -97,8 +97,7 @@ index c9d5ab8..a9d3362 100644
 +            // (e.g., Android cross-compiled binaries where ELF section
 +            // injection is not used). Read the file directly and check
 +            // for the trailer.
-+            var self_exe_buf: bun.PathBuffer = undefined;
-+            const self_exe = bun.selfExePath(&self_exe_buf) catch {
++            const self_exe = bun.selfExePath() catch {
 +                Output.debugWarn("bun standalone: failed to get self path", .{});
 +                return null;
 +            };
