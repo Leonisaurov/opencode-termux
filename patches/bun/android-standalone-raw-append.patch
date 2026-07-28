@@ -1,0 +1,61 @@
+diff --git a/src/standalone_graph/StandaloneModuleGraph.zig b/src/standalone_graph/StandaloneModuleGraph.zig
+index c9d5ab8..3bd1bba 100644
+--- a/src/standalone_graph/StandaloneModuleGraph.zig
++++ b/src/standalone_graph/StandaloneModuleGraph.zig
+@@ -873,6 +873,56 @@ pub const StandaloneModuleGraph = struct {
+                 return cloned_executable_fd;
+             },
+             .linux, .freebsd => {
++                // Android ARM64 binaries use a different ELF layout due to
++                // cross-compilation (NDK toolchain, specific sections).
++                // ELF section injection (.bun section) corrupts them.
++                // Use raw byte append instead (same as the 'else' fallback).
++                if (target.libc == .android) {
++                    var total_byte_count: usize = undefined;
++                    const seek_position_android = @as(u64, @intCast(brk: {
++                        const fstat = switch (Syscall.fstat(cloned_executable_fd)) {
++                            .result => |res| res,
++                            .err => |err| {
++                                Output.prettyErrorln("{f}", .{err});
++                                cleanup(zname, cloned_executable_fd);
++                                return bun.invalid_fd;
++                            },
++                        };
++                        break :brk @max(fstat.size, 0);
++                    }));
++
++                    total_byte_count = seek_position_android + bytes.len + 8;
++
++                    switch (Syscall.setFileOffset(cloned_executable_fd, seek_position_android)) {
++                        .err => |err| {
++                            Output.prettyErrorln(
++                                "{f}\nwhile seeking to end of temporary file (pos: {d})",
++                                .{ err, seek_position_android },
++                            );
++                            cleanup(zname, cloned_executable_fd);
++                            return bun.invalid_fd;
++                        },
++                        else => {},
++                    }
++
++                    var remain = bytes;
++                    while (remain.len > 0) {
++                        switch (Syscall.write(cloned_executable_fd, remain)) {
++                            .result => |written| remain = remain[written..],
++                            .err => |err| {
++                                Output.prettyErrorln("<r><red>error<r><d>:<r> failed to write to temporary file\n{f}", .{err});
++                                cleanup(zname, cloned_executable_fd);
++                                return bun.invalid_fd;
++                            },
++                        }
++                    }
++
++                    _ = Syscall.write(cloned_executable_fd, std.mem.asBytes(&total_byte_count));
++                    if (comptime !Environment.isWindows) {
++                        _ = bun.c.fchmod(cloned_executable_fd.native(), 0o777);
++                    }
++                    return cloned_executable_fd;
++                }
+                 // ELF section approach: find .bun section and expand it
+                 const input_result = bun.sys.File.readToEnd(.{ .handle = cloned_executable_fd }, bun.default_allocator);
+                 if (input_result.err) |err| {

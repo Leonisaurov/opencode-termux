@@ -69,6 +69,13 @@ git apply --stat "$REPO_ROOT/patches/bun/pr31198.diff"
 git apply "$REPO_ROOT/patches/bun/pr31198.diff"
 echo "    PR #31198 fix applied"
 
+# Apply Android standalone raw-append patch (inject() corrupts ELF on Android)
+echo ">>> Applying Android standalone raw-append patch..."
+cd "$BUN_SRC"
+git apply --stat "$REPO_ROOT/patches/bun/android-standalone-raw-append.patch"
+git apply "$REPO_ROOT/patches/bun/android-standalone-raw-append.patch"
+echo "    Android standalone raw-append patch applied"
+
 # --- Clone WebKit ---
 if [ ! -d "$WEBKIT_SRC/.git" ]; then
     echo ">>> Cloning WebKit at commit ${WEBKIT_COMMIT}..."
