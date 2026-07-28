@@ -201,15 +201,15 @@ const TRAILER_LEN = TRAILER_STR.length  // 16
 const OFFSETS_SIZE = 32
 
 // ELF64 header offsets
-const e_shoff = Number(new DataView(hostFileBytes.buffer, 0x28, 8).getBigUInt64LE(0))
+const e_shoff = Number(new DataView(hostFileBytes.buffer, 0x28, 8).getBigUint64(0, true))
 const e_shentsize = new DataView(hostFileBytes.buffer, 0x3A, 2).getUint16(0, true)
 const e_shnum = new DataView(hostFileBytes.buffer, 0x3C, 2).getUint16(0, true)
 const e_shstrndx = new DataView(hostFileBytes.buffer, 0x3E, 2).getUint16(0, true)
 
 // Read section name string table
 const shstrtabEntryOff = e_shoff + e_shstrndx * e_shentsize
-const shstrtabOffset = Number(new DataView(hostFileBytes.buffer, shstrtabEntryOff + 0x18, 8).getBigUInt64LE(0))
-const shstrtabSize = Number(new DataView(hostFileBytes.buffer, shstrtabEntryOff + 0x20, 8).getBigUInt64LE(0))
+const shstrtabOffset = Number(new DataView(hostFileBytes.buffer, shstrtabEntryOff + 0x18, 8).getBigUint64(0, true))
+const shstrtabSize = Number(new DataView(hostFileBytes.buffer, shstrtabEntryOff + 0x20, 8).getBigUint64(0, true))
 const shstrtab = new Uint8Array(hostFileBytes.buffer, shstrtabOffset, shstrtabSize)
 const utf8decoder = new TextDecoder()
 
@@ -224,8 +224,8 @@ for (let i = 0; i < e_shnum; i++) {
   while (nameEnd < shstrtabSize && shstrtab[nameEnd] !== 0) nameEnd++
   const name = utf8decoder.decode(shstrtab.slice(nameIdx, nameEnd))
   if (name === ".bun") {
-    bunSectionOffset = Number(new DataView(hostFileBytes.buffer, entryOff + 0x18, 8).getBigUInt64LE(0))
-    bunSectionSize = Number(new DataView(hostFileBytes.buffer, entryOff + 0x20, 8).getBigUInt64LE(0))
+    bunSectionOffset = Number(new DataView(hostFileBytes.buffer, entryOff + 0x18, 8).getBigUint64(0, true))
+    bunSectionSize = Number(new DataView(hostFileBytes.buffer, entryOff + 0x20, 8).getBigUint64(0, true))
     break
   }
 }
