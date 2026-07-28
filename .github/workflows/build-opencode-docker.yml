@@ -60,8 +60,8 @@ jobs:
               cp /bun/bun /data/data/com.termux/files/usr/bin/bun
               chmod +x /data/data/com.termux/files/usr/bin/bun
 
-              echo '=== Install termux-exec for /usr/bin/env ==='
-              apt-get update -qq && apt-get install -y -qq termux-exec
+              echo '=== Install coreutils for /usr/bin/env ==='
+              apt-get update -qq && apt-get install -y -qq coreutils
 
               echo '=== Verify Bun ==='
               bun --version
