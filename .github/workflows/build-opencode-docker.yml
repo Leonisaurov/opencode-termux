@@ -60,6 +60,9 @@ jobs:
               apt-get update -qq && apt-get install -y -qq \
                 termux-exec python3 nodejs build-essential binutils git
 
+              echo '=== Enable termux-exec ==='
+              export LD_PRELOAD=/data/data/com.termux/files/usr/lib/libtermux-exec.so
+
               echo '=== Setup Bun ==='
               cp /bun/bun /data/data/com.termux/files/usr/bin/bun
               chmod +x /data/data/com.termux/files/usr/bin/bun
