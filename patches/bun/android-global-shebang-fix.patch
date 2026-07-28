@@ -1,0 +1,73 @@
+diff --git a/src/install/bin.zig b/src/install/bin.zig
+index 3a072fc..63fe336 100644
+--- a/src/install/bin.zig
++++ b/src/install/bin.zig
+@@ -611,11 +611,11 @@ pub const Bin = extern struct {
+             }
+ 
+             if (comptime !Environment.isWindows) {
+-                tryNormalizeShebang(abs_target);
++                tryNormalizeShebang(abs_target, global);
+             }
+         }
+ 
+-        fn tryNormalizeShebang(abs_target: [:0]const u8) void {
++        fn tryNormalizeShebang(abs_target: [:0]const u8, global: bool) void {
+             var shebang_buf: [2048]u8 = undefined;
+ 
+             // any error here is ignored
+@@ -632,8 +632,18 @@ pub const Bin = extern struct {
+             if (chunk.len < 5 or chunk[0] != '#' or chunk[1] != '!') return;
+ 
+             const newline = strings.indexOfChar(chunk, '\n') orelse return;
+-            const chunk_without_newline = chunk[0..newline];
+-            if (!(chunk_without_newline.len > 0 and chunk_without_newline[chunk_without_newline.len - 1] == '\r')) {
++            const shebang_line = chunk[0..newline];
++
++            const has_cr = shebang_line.len > 0 and shebang_line[shebang_line.len - 1] == '\r';
++            const has_node_shebang = brk: {
++                const trimmed = if (has_cr) shebang_line[0..shebang_line.len - 1] else shebang_line;
++                // Check if shebang points to "node" as the interpreter.
++                // Match patterns like: #!/usr/bin/env node, #!/usr/bin/node, #!/bin/node
++                // We check if the shebang line ends with "node" (after stripping \r)
++                break :brk strings.endsWith(trimmed, "node");
++            };
++
++            if (!has_cr and !(global and has_node_shebang)) {
+                 // Nothing to do!
+                 return;
+             }
+@@ -646,7 +656,7 @@ pub const Bin = extern struct {
+             // always unlink the old one. If it fails for any reason then exit
+             // early.
+             var tmpname_buf: [1024]u8 = undefined;
+-            const tmpname = bun.fs.FileSystem.tmpname(std.fs.path.basename(abs_target), &tmpname_buf, bun.hash(chunk_without_newline)) catch return;
++            const tmpname = bun.fs.FileSystem.tmpname(std.fs.path.basename(abs_target), &tmpname_buf, bun.hash(shebang_line)) catch return;
+ 
+             const dir_path = std.fs.path.dirname(abs_target) orelse return;
+ 
+@@ -681,8 +691,22 @@ pub const Bin = extern struct {
+                 const tmpfile = bun.sys.File.openat(.cwd(), tmppath, bun.O.WRONLY | bun.O.CREAT | bun.O.TRUNC, original_mode).unwrap() catch return;
+                 defer tmpfile.close();
+ 
+-                // Write the corrected shebang (without \r)
+-                tmpfile.writeAll(chunk_without_newline[0 .. chunk_without_newline.len - 1]).unwrap() catch return;
++                // Write the corrected shebang
++                const new_shebang_content = brk: {
++                    // Start with shebang minus trailing \r (if any)
++                    const base = if (has_cr) shebang_line[0..shebang_line.len - 1] else shebang_line;
++                    if (global and has_node_shebang) {
++                        // Replace trailing "node" with "bun"
++                        break :brk base[0..base.len - 4]; // strip "node" (4 chars)
++                    }
++                    break :brk base;
++                };
++
++                // Write the modified shebang
++                tmpfile.writeAll(new_shebang_content).unwrap() catch return;
++                if (global and has_node_shebang) {
++                    tmpfile.writeAll("bun").unwrap() catch return;
++                }
+                 tmpfile.writeAll("\n").unwrap() catch return;
+ 
+                 // Write the rest of the file (after the newline)

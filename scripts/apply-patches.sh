@@ -82,6 +82,20 @@ git apply --stat "$REPO_ROOT/patches/bun/android-standalone-raw-append.patch"
 git apply "$REPO_ROOT/patches/bun/android-standalone-raw-append.patch"
 echo "    Android standalone raw-append patch applied"
 
+# Apply global shebang fix (replace node → bun in shebangs for global installs)
+echo ">>> Applying Android global shebang fix..."
+cd "$BUN_SRC"
+git apply --stat "$REPO_ROOT/patches/bun/android-global-shebang-fix.patch" 2>/dev/null || echo "    ⚠️  Skipped (already applied?)"
+git apply "$REPO_ROOT/patches/bun/android-global-shebang-fix.patch" 2>/dev/null || echo "    ⚠️  Skipped (already applied?)"
+echo "    Android global shebang fix applied"
+
+# Apply global transitive deps fix (ensure transitive deps in global node_modules)
+echo ">>> Applying Android global transitive deps fix..."
+cd "$BUN_SRC"
+git apply --stat "$REPO_ROOT/patches/bun/android-global-transitive-deps.patch" 2>/dev/null || echo "    ⚠️  Skipped (already applied?)"
+git apply "$REPO_ROOT/patches/bun/android-global-transitive-deps.patch" 2>/dev/null || echo "    ⚠️  Skipped (already applied?)"
+echo "    Android global transitive deps fix applied"
+
 # --- Clone WebKit ---
 if [ ! -d "$WEBKIT_SRC/.git" ]; then
     echo ">>> Cloning WebKit at commit ${WEBKIT_COMMIT}..."
