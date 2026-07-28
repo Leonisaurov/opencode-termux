@@ -291,13 +291,17 @@ install_bun_target() {
 }
 
 # ── Install @oven/bun-linux-aarch64-android stub ──
-# The 'bun' npm package's postinstall script does:
-#   1. require('@oven/bun-linux-aarch64-android')
-#   2. If fail → npm install @oven/bun-linux-aarch64-android
-#   3. If fail → error
+# The 'bun' npm package's postinstall script (install.js) runs from
+# ~/.bun/install/cache/bun@1.3.14@@@1/install.js. It does:
+#   1. require.resolve("@oven/bun-linux-aarch64-android/bin/bun")
+#      which walks UP parent directories from the script location
+#      looking in node_modules/
+#   2. Falls to npm install (registry) if not found
+#   3. Falls to direct download if npm install fails
 #
-# By placing the stub in global node_modules/, step 1 succeeds
-# and it never tries to download from npm.
+# We put the stub in cache/node_modules/ so step 1 finds it
+# via standard Node.js module resolution walking up from
+# cache/bun@1.3.14@@@1/ → cache/node_modules/
 install_bun_stub() {
     info "Instalando stub npm para @oven/bun-linux-aarch64-android..."
 
@@ -307,8 +311,8 @@ install_bun_stub() {
         return 1
     fi
 
-    local global_node_modules="${HOME}/.bun/install/global/node_modules"
-    local stub_dir="${global_node_modules}/@oven/bun-linux-aarch64-android"
+    local cache_node_modules="${HOME}/.bun/install/cache/node_modules"
+    local stub_dir="${cache_node_modules}/@oven/bun-linux-aarch64-android"
     local pkg_version="${BUN_VERSION:-1.3.14}"
 
     # Create directory structure
@@ -332,6 +336,7 @@ STUBEOF
     chmod +x "${stub_dir}/bin/bun"
 
     info "Stub @oven/bun-linux-aarch64-android instalado en: ${stub_dir}"
+    info "  require.resolve() desde cache/bun@*@@@1/ lo encontrará via node_modules/ walking up"
 }
 
 setup_bun_config() {
