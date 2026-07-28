@@ -1,16 +1,5 @@
-From: opencode-termux
-Date: 2026-07-28
-Subject: [PATCH] inject() raw-append + fromExecutable() trailer fallback for Android
-
-On Android ARM64, ELF section injection via writeBunSection() produces
-corrupted binaries (SIGTRAP on startup). Instead, use raw byte append:
-- inject(): append module graph + trailer + total_byte_count after the
-  ELF binary (no section modification)
-- fromExecutable(): first try ELF .bun section; if vaddr==0 (empty),
-  fall back to reading the file trailer at the end
-
 diff --git a/src/standalone_graph/StandaloneModuleGraph.zig b/src/standalone_graph/StandaloneModuleGraph.zig
-index c9d5ab8..a9d3362 100644
+index c9d5ab8..096b635 100644
 --- a/src/standalone_graph/StandaloneModuleGraph.zig
 +++ b/src/standalone_graph/StandaloneModuleGraph.zig
 @@ -873,6 +873,56 @@ pub const StandaloneModuleGraph = struct {
@@ -70,9 +59,9 @@ index c9d5ab8..a9d3362 100644
                  // ELF section approach: find .bun section and expand it
                  const input_result = bun.sys.File.readToEnd(.{ .handle = cloned_executable_fd }, bun.default_allocator);
                  if (input_result.err) |err| {
-@@ -1301,19 +1351,78 @@ pub const StandaloneModuleGraph = struct {
+@@ -1301,19 +1351,79 @@ pub const StandaloneModuleGraph = struct {
          }
-
+ 
          if (comptime Environment.isLinux or Environment.isFreeBSD) {
 -            const elf_bytes = ELF.getData() orelse return null;
 -            if (elf_bytes.len < @sizeOf(Offsets) + trailer.len) {
@@ -97,7 +86,8 @@ index c9d5ab8..a9d3362 100644
 +            // (e.g., Android cross-compiled binaries where ELF section
 +            // injection is not used). Read the file directly and check
 +            // for the trailer.
-+            const self_exe = bun.selfExePath() catch {
++            var self_exe_buf: bun.PathBuffer = undefined;
++            const self_exe = bun.selfExePath(&self_exe_buf) catch {
 +                Output.debugWarn("bun standalone: failed to get self path", .{});
 +                return null;
 +            };
@@ -120,7 +110,7 @@ index c9d5ab8..a9d3362 100644
 +            defer allocator.free(tail_buf);
 +
 +            file.seekTo(tail_offset) catch return null;
-+            _ = file.readAll(tail_buf) catch return null;
++            file.readAll(tail_buf) catch return null;
 +
 +            // Check trailer (16 bytes before the last 8)
 +            const trailer_bytes = tail_buf[tail_buf.len - 8 - trailer.len .. tail_buf.len - 8];
@@ -136,7 +126,7 @@ index c9d5ab8..a9d3362 100644
 +            const offsets = std.mem.bytesAsValue(Offsets, offsets_bytes).*;
 +
 +            // Read total byte count (last 8 bytes)
-+            const total_byte_count = std.mem.readInt(u64, tail_buf[tail_buf.len - 8 ..], .little);
++            const total_byte_count = std.mem.readInt(u64, &(tail_buf[tail_buf.len - 8 ..].*), .little);
 +
 +            // The module graph starts at (total_byte_count - 8 - module_graph_size)
 +            // where module_graph_size = offsets.byte_count + @sizeOf(Offsets) + trailer.len
@@ -148,12 +138,12 @@ index c9d5ab8..a9d3362 100644
 +            // Read the full module graph
 +            file.seekTo(module_graph_offset) catch return null;
 +            const full_data = try allocator.alloc(u8, module_graph_size);
-+            _ = file.readAll(full_data) catch {
++            file.readAll(full_data) catch {
 +                allocator.free(full_data);
 +                return null;
 +            };
 +
 +            return try fromBytesAlloc(allocator, full_data, offsets);
          }
-
+ 
          comptime unreachable;
