@@ -1,5 +1,84 @@
+diff --git a/src/install/PackageInstall.zig b/src/install/PackageInstall.zig
+index 2175244..7cd513e 100644
+--- a/src/install/PackageInstall.zig
++++ b/src/install/PackageInstall.zig
+@@ -371,6 +371,8 @@ pub const PackageInstall = struct {
+ 
+     pub var supported_method: Method = if (Environment.isMac)
+         Method.clonefile
++    else if (Environment.isAndroid)
++        Method.symlink
+     else
+         Method.hardlink;
+ 
+diff --git a/src/jsc/bindings/wtf-bindings.cpp b/src/jsc/bindings/wtf-bindings.cpp
+index 0d4968f..1fdfbce 100644
+--- a/src/jsc/bindings/wtf-bindings.cpp
++++ b/src/jsc/bindings/wtf-bindings.cpp
+@@ -5,6 +5,7 @@
+ #include <wtf/StackTrace.h>
+ #include <wtf/dtoa.h>
+ #include <wtf/NumberOfCores.h>
++#include <assert.h>
+ #include <atomic>
+ 
+ #include "wtf/SIMDUTF.h"
+diff --git a/src/resolver/resolver.zig b/src/resolver/resolver.zig
+index 71c9530..b63520a 100644
+--- a/src/resolver/resolver.zig
++++ b/src/resolver/resolver.zig
+@@ -2859,10 +2859,11 @@ pub const Resolver = struct {
+         var _safe_path: ?string = null;
+ 
+         // Start at the top.
+-        while (queue_slice.len > 0) {
++        var parent_result = top_parent;
++        queue_loop: while (queue_slice.len > 0) {
+             var queue_top = queue_slice[queue_slice.len - 1];
+-            defer top_parent = queue_top.result;
+             queue_slice.len -= 1;
++            const is_target_dir = queue_slice.len == 0;
+ 
+             const open_dir: FD = if (queue_top.fd.isValid())
+                 queue_top.fd
+@@ -2913,6 +2914,15 @@ pub const Resolver = struct {
+                         //   openat(dfd: CWD, filename: "node_modules/react", flags: RDONLY|CLOEXEC|DIRECTORY) = -1 ENOENT (No such file or directory)
+                         //   openat(dfd: CWD, filename: "node_modules/react", flags: RDONLY|CLOEXEC|DIRECTORY) = -1 ENOENT (No such file or directory)
+                         //
++                        if (!is_target_dir) {
++                            switch (@as(anyerror, err)) {
++                                error.AccessDenied, error.PermissionDenied => {
++                                    r.dir_cache.markNotFound(queue_top.result);
++                                    continue :queue_loop;
++                                },
++                                else => {},
++                            }
++                        }
+                         r.dir_cache.markNotFound(queue_top.result);
+                         rfs.entries.markNotFound(cached_dir_entry_result);
+                         switch (@as(anyerror, err)) {
+@@ -3028,8 +3038,8 @@ pub const Resolver = struct {
+                 dir_entries_option,
+                 queue_top.result,
+                 cached_dir_entry_result.index,
+-                r.dir_cache.atIndex(top_parent.index),
+-                top_parent.index,
++                r.dir_cache.atIndex(parent_result.index),
++                parent_result.index,
+                 open_dir,
+                 null,
+             );
+@@ -3047,6 +3057,8 @@ pub const Resolver = struct {
+                 //     }
+                 // }
+             }
++
++            parent_result = queue_top.result;
+         }
+ 
+         unreachable;
 diff --git a/src/standalone_graph/StandaloneModuleGraph.zig b/src/standalone_graph/StandaloneModuleGraph.zig
-index c9d5ab8..3bd1bba 100644
+index c9d5ab8..a9d3362 100644
 --- a/src/standalone_graph/StandaloneModuleGraph.zig
 +++ b/src/standalone_graph/StandaloneModuleGraph.zig
 @@ -873,6 +873,56 @@ pub const StandaloneModuleGraph = struct {
@@ -59,3 +138,473 @@ index c9d5ab8..3bd1bba 100644
                  // ELF section approach: find .bun section and expand it
                  const input_result = bun.sys.File.readToEnd(.{ .handle = cloned_executable_fd }, bun.default_allocator);
                  if (input_result.err) |err| {
+@@ -1301,19 +1351,79 @@ pub const StandaloneModuleGraph = struct {
+         }
+ 
+         if (comptime Environment.isLinux or Environment.isFreeBSD) {
+-            const elf_bytes = ELF.getData() orelse return null;
+-            if (elf_bytes.len < @sizeOf(Offsets) + trailer.len) {
+-                Output.debugWarn("bun standalone module graph is too small to be valid", .{});
+-                return null;
++            // ── Try ELF .bun section first ──
++            if (ELF.getData()) |elf_bytes| {
++                if (elf_bytes.len >= @sizeOf(Offsets) + trailer.len) {
++                    const elf_bytes_slice = elf_bytes[elf_bytes.len - @sizeOf(Offsets) - trailer.len ..];
++                    const trailer_bytes = elf_bytes[elf_bytes.len - trailer.len ..][0..trailer.len];
++                    if (bun.strings.eqlComptime(trailer_bytes, trailer)) {
++                        const offsets = std.mem.bytesAsValue(Offsets, elf_bytes_slice).*;
++                        return try fromBytesAlloc(allocator, @constCast(elf_bytes), offsets);
++                    }
++                }
+             }
+-            const elf_bytes_slice = elf_bytes[elf_bytes.len - @sizeOf(Offsets) - trailer.len ..];
+-            const trailer_bytes = elf_bytes[elf_bytes.len - trailer.len ..][0..trailer.len];
++
++            // ── Fallback: raw-append mode ──
++            // The module graph may be appended at the end of the file
++            // (e.g., Android cross-compiled binaries where ELF section
++            // injection is not used). Read the file directly and check
++            // for the trailer.
++            var self_exe_buf: bun.PathBuffer = undefined;
++            const self_exe = bun.selfExePath(&self_exe_buf) catch {
++                Output.debugWarn("bun standalone: failed to get self path", .{});
++                return null;
++            };
++
++            const file = std.fs.openFileAbsolute(self_exe, .{ .mode = .read_only }) catch {
++                Output.debugWarn("bun standalone: failed to open self", .{});
++                return null;
++            };
++            defer file.close();
++
++            const file_size = file.getEndPos() catch return null;
++
++            // Need at least: [Offsets(32) + trailer(16) + u64(8)] = 56 bytes past module graph
++            if (file_size < @sizeOf(Offsets) + trailer.len + 8) return null;
++
++            // Read the tail: Offsets + trailer + total_byte_count
++            const tail_size = @sizeOf(Offsets) + trailer.len + 8;
++            const tail_offset = file_size - tail_size;
++            const tail_buf = try allocator.alloc(u8, tail_size);
++            defer allocator.free(tail_buf);
++
++            file.seekTo(tail_offset) catch return null;
++            file.readAll(tail_buf) catch return null;
++
++            // Check trailer (16 bytes before the last 8)
++            const trailer_bytes = tail_buf[tail_buf.len - 8 - trailer.len .. tail_buf.len - 8];
+             if (!bun.strings.eqlComptime(trailer_bytes, trailer)) {
+                 Output.debugWarn("bun standalone module graph has invalid trailer", .{});
+                 return null;
+             }
+-            const offsets = std.mem.bytesAsValue(Offsets, elf_bytes_slice).*;
+-            return try fromBytesAlloc(allocator, @constCast(elf_bytes), offsets);
++
++            // Parse Offsets (32 bytes before trailer)
++            const offsets_bytes = tail_buf[0 .. @sizeOf(Offsets)];
++            const offsets = std.mem.bytesAsValue(Offsets, offsets_bytes).*;
++
++            // Read total byte count (last 8 bytes)
++            const total_byte_count = std.mem.readInt(u64, tail_buf[tail_buf.len - 8 ..], .little);
++
++            // The module graph starts at (total_byte_count - 8 - module_graph_size)
++            // where module_graph_size = offsets.byte_count + @sizeOf(Offsets) + trailer.len
++            const module_graph_size = offsets.byte_count + @sizeOf(Offsets) + trailer.len;
++            const module_graph_offset = total_byte_count - 8 - module_graph_size;
++
++            if (module_graph_offset >= file_size) return null;
++
++            // Read the full module graph
++            file.seekTo(module_graph_offset) catch return null;
++            const full_data = try allocator.alloc(u8, module_graph_size);
++            file.readAll(full_data) catch {
++                allocator.free(full_data);
++                return null;
++            };
++
++            return try fromBytesAlloc(allocator, full_data, offsets);
+         }
+ 
+         comptime unreachable;
+diff --git a/test/cli/run/run_command.test.ts b/test/cli/run/run_command.test.ts
+index 2c036b5..343dc87 100644
+--- a/test/cli/run/run_command.test.ts
++++ b/test/cli/run/run_command.test.ts
+@@ -1,7 +1,8 @@
+ import { spawnSync } from "bun";
+ import { describe, expect, test } from "bun:test";
+-import { rmSync, writeFileSync } from "fs";
+-import { bunEnv, bunExe, bunRun, isWindows } from "harness";
++import { mkdirSync, rmSync, writeFileSync } from "fs";
++import { bunEnv, bunExe, bunRun, isLinux, isWindows, libcPathForDlopen, tempDir, tempDirWithFiles } from "harness";
++import { dirname, join } from "path";
+ 
+ let cwd: string;
+ 
+@@ -30,3 +31,229 @@ test.if(isWindows)("[windows] A file in drive root runs", () => {
+     rmSync(path);
+   }
+ });
++
++const LANDLOCK_HELPER_SRC = (libcPath: string) => `
++import { dlopen, ptr } from "bun:ffi";
++
++const libc = dlopen(${JSON.stringify(libcPath)}, {
++  syscall: { args: ["i64_fast", "usize", "usize", "usize", "usize", "usize", "usize"], returns: "i64_fast" },
++  prctl: { args: ["int", "usize", "usize", "usize", "usize"], returns: "int" },
++  open: { args: ["ptr", "int"], returns: "int" },
++  close: { args: ["int"], returns: "int" },
++}).symbols;
++
++const SYS_landlock_create_ruleset = 444;
++const SYS_landlock_add_rule = 445;
++const SYS_landlock_restrict_self = 446;
++const LANDLOCK_RULE_PATH_BENEATH = 1;
++const PR_SET_NO_NEW_PRIVS = 38;
++const O_RDONLY = 0;
++const O_DIRECTORY = 0x10000;
++const O_CLOEXEC = 0x80000;
++const O_PATH = 0x200000;
++
++const ACCESS_EXECUTE = 1n << 0n;
++const ACCESS_WRITE_FILE = 1n << 1n;
++const ACCESS_READ_FILE = 1n << 2n;
++const ACCESS_READ_DIR = 1n << 3n;
++const ACCESS_REMOVE_DIR = 1n << 4n;
++const ACCESS_REMOVE_FILE = 1n << 5n;
++const ACCESS_MAKE_CHAR = 1n << 6n;
++const ACCESS_MAKE_DIR = 1n << 7n;
++const ACCESS_MAKE_REG = 1n << 8n;
++const ACCESS_MAKE_SOCK = 1n << 9n;
++const ACCESS_MAKE_FIFO = 1n << 10n;
++const ACCESS_MAKE_BLOCK = 1n << 11n;
++const ACCESS_MAKE_SYM = 1n << 12n;
++const allAccess =
++  ACCESS_EXECUTE |
++  ACCESS_WRITE_FILE |
++  ACCESS_READ_FILE |
++  ACCESS_READ_DIR |
++  ACCESS_REMOVE_DIR |
++  ACCESS_REMOVE_FILE |
++  ACCESS_MAKE_CHAR |
++  ACCESS_MAKE_DIR |
++  ACCESS_MAKE_REG |
++  ACCESS_MAKE_SOCK |
++  ACCESS_MAKE_FIFO |
++  ACCESS_MAKE_BLOCK |
++  ACCESS_MAKE_SYM;
++const readExec = ACCESS_EXECUTE | ACCESS_READ_FILE | ACCESS_READ_DIR;
++
++function cstr(value) {
++  return Buffer.from(value + "\\0");
++}
++
++function rulesetAttr(access) {
++  const buffer = new ArrayBuffer(8);
++  new DataView(buffer).setBigUint64(0, access, true);
++  return buffer;
++}
++
++function pathBeneathAttr(access, fd) {
++  const buffer = new ArrayBuffer(16);
++  const view = new DataView(buffer);
++  view.setBigUint64(0, access, true);
++  view.setInt32(8, fd, true);
++  return buffer;
++}
++
++function addPathRule(rulesetFd, path, access) {
++  const pathBytes = cstr(path);
++  const fd = libc.open(ptr(pathBytes), O_PATH | O_CLOEXEC);
++  if (fd < 0) return;
++  const attr = pathBeneathAttr(access, fd);
++  libc.syscall(SYS_landlock_add_rule, rulesetFd, LANDLOCK_RULE_PATH_BENEATH, ptr(attr), 0, 0, 0);
++  libc.close(fd);
++}
++
++function openDir(path) {
++  const pathBytes = cstr(path);
++  return libc.open(ptr(pathBytes), O_RDONLY | O_DIRECTORY);
++}
++
++function restrictTo(allowedDir, bunDir) {
++  const ruleset = rulesetAttr(allAccess);
++  const rulesetFd = libc.syscall(SYS_landlock_create_ruleset, ptr(ruleset), ruleset.byteLength, 0, 0, 0, 0);
++  if (rulesetFd < 0) return false;
++
++  addPathRule(rulesetFd, allowedDir, allAccess);
++  addPathRule(rulesetFd, bunDir, readExec);
++  addPathRule(rulesetFd, "/usr", readExec);
++  addPathRule(rulesetFd, "/lib", readExec);
++  addPathRule(rulesetFd, "/lib64", readExec);
++  addPathRule(rulesetFd, "/etc", ACCESS_READ_FILE | ACCESS_READ_DIR);
++  addPathRule(rulesetFd, "/proc", ACCESS_READ_FILE | ACCESS_READ_DIR);
++  addPathRule(rulesetFd, "/sys", ACCESS_READ_FILE | ACCESS_READ_DIR);
++  addPathRule(rulesetFd, "/dev", readExec | ACCESS_WRITE_FILE);
++
++  if (libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) !== 0) return false;
++  const rc = libc.syscall(SYS_landlock_restrict_self, rulesetFd, 0, 0, 0, 0, 0);
++  libc.close(rulesetFd);
++  return rc === 0;
++}
++
++const [allowedDir, bunDir, modeOrCommand, ...args] = process.argv.slice(2);
++if (!restrictTo(allowedDir, bunDir)) {
++  console.log("LANDLOCK_UNSUPPORTED");
++  process.exit(0);
++}
++
++if (modeOrCommand === "--self-check") {
++  const rootFd = openDir("/");
++  const allowedFd = openDir(allowedDir);
++  if (rootFd >= 0) libc.close(rootFd);
++  if (allowedFd >= 0) libc.close(allowedFd);
++  console.log(rootFd < 0 && allowedFd >= 0 ? "LANDLOCK_OK" : "LANDLOCK_UNSUPPORTED");
++  process.exit(0);
++}
++
++const result = Bun.spawnSync({
++  cmd: [modeOrCommand, ...args],
++  cwd: process.cwd(),
++  env: process.env,
++  stdout: "inherit",
++  stderr: "inherit",
++});
++process.exit(result.exitCode ?? 1);
++`;
++
++function writeLandlockHelper(root: string) {
++  const helperPath = join(root, "landlock-helper.js");
++  writeFileSync(helperPath, LANDLOCK_HELPER_SRC(libcPathForDlopen()));
++  return helperPath;
++}
++
++function prepareLandlockFixture(root: string) {
++  const testBase = join(root, "parent", "project");
++  const helperPath = writeLandlockHelper(root);
++
++  mkdirSync(testBase, { recursive: true });
++
++  const check = Bun.spawnSync({
++    cmd: [bunExe(), helperPath, testBase, dirname(bunExe()), "--self-check"],
++    env: bunEnv,
++    cwd: testBase,
++    stdout: "pipe",
++    stderr: "pipe",
++  });
++
++  const stdout = check.stdout.toString();
++  if (stdout.includes("LANDLOCK_OK")) {
++    expect(check.exitCode).toBe(0);
++  }
++
++  return { helperPath, testBase };
++}
++
++function canUseLandlock() {
++  if (!isLinux) return false;
++
++  const root = tempDirWithFiles("run-landlock-probe", {});
++  try {
++    const testBase = join(root, "parent", "project");
++    const helperPath = writeLandlockHelper(root);
++
++    mkdirSync(testBase, { recursive: true });
++    const check = Bun.spawnSync({
++      cmd: [bunExe(), helperPath, testBase, dirname(bunExe()), "--self-check"],
++      env: bunEnv,
++      cwd: testBase,
++      stdout: "pipe",
++      stderr: "pipe",
++    });
++
++    return check.exitCode === 0 && check.stdout.toString().includes("LANDLOCK_OK");
++  } finally {
++    try {
++      rmSync(root, { recursive: true, force: true });
++    } catch {}
++  }
++}
++
++// https://github.com/oven-sh/bun/issues/30859
++// `bun run` should work when cwd is readable but one or more ancestors are
++// inaccessible, as can happen inside Landlock-style sandboxes.
++describe.skipIf(!canUseLandlock())("bun run in a Landlock sandbox", () => {
++  test("works when ancestor directories are inaccessible", () => {
++    using root = tempDir("run-landlock-ancestors", {});
++    const { helperPath, testBase } = prepareLandlockFixture(String(root));
++
++    writeFileSync(join(testBase, "index.js"), "console.log(require('path').join('a', 'b', 'c'));\n");
++
++    const result = Bun.spawnSync({
++      cmd: [bunExe(), helperPath, testBase, dirname(bunExe()), bunExe(), "run", "index.js"],
++      env: bunEnv,
++      cwd: testBase,
++      stdout: "pipe",
++      stderr: "pipe",
++    });
++
++    expect(result.stdout.toString()).toBe("a/b/c\n");
++    expect(result.exitCode).toBe(0);
++  });
++
++  test("still fails when the target directory itself is inaccessible", () => {
++    using root = tempDir("run-landlock-target", {});
++    const { helperPath } = prepareLandlockFixture(String(root));
++
++    const allowedBase = join(String(root), "allowed");
++    const blockedBase = join(String(root), "blocked");
++    mkdirSync(allowedBase, { recursive: true });
++    mkdirSync(blockedBase, { recursive: true });
++    writeFileSync(join(blockedBase, "index.js"), "console.log('should not run');\n");
++
++    const result = Bun.spawnSync({
++      cmd: [bunExe(), helperPath, allowedBase, dirname(bunExe()), bunExe(), "run", "index.js"],
++      env: bunEnv,
++      cwd: blockedBase,
++      stdout: "pipe",
++      stderr: "pipe",
++    });
++
++    expect(result.stdout.toString()).toBeEmpty();
++    expect(result.stderr.toString()).toContain("CouldntReadCurrentDirectory");
++    expect(result.exitCode).not.toBe(0);
++  });
++});
+diff --git a/test/js/bun/resolve/resolve.test.ts b/test/js/bun/resolve/resolve.test.ts
+index 9003f42..b4cd4a8 100644
+--- a/test/js/bun/resolve/resolve.test.ts
++++ b/test/js/bun/resolve/resolve.test.ts
+@@ -682,6 +682,132 @@ describe("wildcard exports with @ in matched subpath", () => {
+       } catch {}
+     }
+   });
++
++  it.skipIf(!canTriggerEACCES)("module resolution skips unreadable cwd ancestors", async () => {
++    using dir = tempDir("resolver-inaccessible-ancestor", {
++      "blocked/project/entry.js": `import { value } from "pkg";\nconsole.log(value);`,
++      "blocked/project/node_modules/pkg/index.js": `export const value = "resolved";\n`,
++      "blocked/project/node_modules/pkg/package.json": JSON.stringify({
++        name: "pkg",
++        module: "index.js",
++      }),
++    });
++    const root = String(dir);
++    const blocked = join(root, "blocked");
++    const project = join(blocked, "project");
++
++    if (canUseRunuser) {
++      for (const p of [root, project, join(project, "node_modules"), join(project, "node_modules/pkg")]) {
++        chmodSync(p, 0o755);
++      }
++      for (const p of [
++        join(project, "entry.js"),
++        join(project, "node_modules/pkg/index.js"),
++        join(project, "node_modules/pkg/package.json"),
++      ]) {
++        chmodSync(p, 0o644);
++      }
++    }
++
++    try {
++      chmodSync(blocked, 0o111);
++      await using proc = Bun.spawn({
++        cmd: canUseRunuser ? ["runuser", "-u", "nobody", "--", bunExe(), "entry.js"] : [bunExe(), "entry.js"],
++        env: bunEnv,
++        cwd: project,
++        stdout: "pipe",
++        stderr: "pipe",
++      });
++      const [stdout, stderr, exitCode] = await Promise.all([proc.stdout.text(), proc.stderr.text(), proc.exited]);
++
++      expect(stderr).toBe("");
++      expect(stdout).toBe("resolved\n");
++      expect(exitCode).toBe(0);
++    } finally {
++      try {
++        chmodSync(blocked, 0o755);
++      } catch {}
++    }
++  });
++
++  it.skipIf(!canTriggerEACCES)("unreadable cwd ancestors stop parent package metadata inheritance", async () => {
++    using dir = tempDir("resolver-inaccessible-ancestor-boundary", {
++      "package.json": JSON.stringify({
++        name: "parent-package",
++        imports: {
++          "#secret": "./secret.js",
++        },
++      }),
++      "secret.js": `export const value = "leaked";\n`,
++      "blocked/project/entry.js": `import { value } from "#secret";\nconsole.log(value);`,
++    });
++    const root = String(dir);
++    const blocked = join(root, "blocked");
++    const project = join(blocked, "project");
++
++    if (canUseRunuser) {
++      for (const p of [root, blocked, project]) {
++        chmodSync(p, 0o755);
++      }
++      for (const p of [join(root, "package.json"), join(root, "secret.js"), join(project, "entry.js")]) {
++        chmodSync(p, 0o644);
++      }
++    }
++
++    try {
++      chmodSync(blocked, 0o111);
++      await using proc = Bun.spawn({
++        cmd: canUseRunuser ? ["runuser", "-u", "nobody", "--", bunExe(), "entry.js"] : [bunExe(), "entry.js"],
++        env: bunEnv,
++        cwd: project,
++        stdout: "pipe",
++        stderr: "pipe",
++      });
++      const [stdout, stderr, exitCode] = await Promise.all([proc.stdout.text(), proc.stderr.text(), proc.exited]);
++
++      expect(stdout).toBe("");
++      expect(stderr).toContain("#secret");
++      expect(exitCode).not.toBe(0);
++    } finally {
++      try {
++        chmodSync(blocked, 0o755);
++      } catch {}
++    }
++  });
++
++  it.skipIf(!canTriggerEACCES)("module resolution still fails when cwd itself is unreadable", async () => {
++    using dir = tempDir("resolver-inaccessible-target", {
++      "project/entry.js": `console.log("should not run");\n`,
++    });
++    const root = String(dir);
++    const project = join(root, "project");
++
++    if (canUseRunuser) {
++      chmodSync(root, 0o755);
++      chmodSync(project, 0o755);
++      chmodSync(join(project, "entry.js"), 0o644);
++    }
++
++    try {
++      chmodSync(project, 0o111);
++      await using proc = Bun.spawn({
++        cmd: canUseRunuser ? ["runuser", "-u", "nobody", "--", bunExe(), "entry.js"] : [bunExe(), "entry.js"],
++        env: bunEnv,
++        cwd: project,
++        stdout: "pipe",
++        stderr: "pipe",
++      });
++      const [stdout, stderr, exitCode] = await Promise.all([proc.stdout.text(), proc.stderr.text(), proc.exited]);
++
++      expect(stdout).toBe("");
++      expect(stderr).not.toBe("");
++      expect(exitCode).not.toBe(0);
++    } finally {
++      try {
++        chmodSync(project, 0o755);
++      } catch {}
++    }
++  });
+ }
+ 
+ describe("resolving external URL specifiers with non-ASCII characters", () => {
