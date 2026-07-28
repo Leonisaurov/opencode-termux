@@ -120,7 +120,7 @@ index c9d5ab8..a9d3362 100644
 +            defer allocator.free(tail_buf);
 +
 +            file.seekTo(tail_offset) catch return null;
-+            file.readAll(tail_buf) catch return null;
++            _ = file.readAll(tail_buf) catch return null;
 +
 +            // Check trailer (16 bytes before the last 8)
 +            const trailer_bytes = tail_buf[tail_buf.len - 8 - trailer.len .. tail_buf.len - 8];
@@ -148,7 +148,7 @@ index c9d5ab8..a9d3362 100644
 +            // Read the full module graph
 +            file.seekTo(module_graph_offset) catch return null;
 +            const full_data = try allocator.alloc(u8, module_graph_size);
-+            file.readAll(full_data) catch {
++            _ = file.readAll(full_data) catch {
 +                allocator.free(full_data);
 +                return null;
 +            };
