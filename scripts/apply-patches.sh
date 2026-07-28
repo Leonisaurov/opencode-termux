@@ -62,6 +62,14 @@ git apply --stat "$REPO_ROOT/patches/bun/android-default-backend.patch"
 git apply "$REPO_ROOT/patches/bun/android-default-backend.patch"
 echo "    Default backend symlink fix applied"
 
+# Apply Android global bin wrapper (create shell script instead of symlink)
+echo ">>> Applying Android global bin wrapper patch..."
+cd "$BUN_SRC"
+git apply --stat "$REPO_ROOT/patches/bun/android-global-bin-wrapper.patch"
+git apply "$REPO_ROOT/patches/bun/android-global-bin-wrapper.patch"
+echo "    Android global bin wrapper patch applied"
+cd "$REPO_ROOT"
+
 # Apply PR #31198 fix (CouldntReadCurrentDirectory on Android/Termux)
 echo ">>> Applying PR #31198 fix for CouldntReadCurrentDirectory..."
 cd "$BUN_SRC"

@@ -1,0 +1,84 @@
+diff --git a/src/install/bin.zig b/src/install/bin.zig
+index 3a072fc..b050923 100644
+--- a/src/install/bin.zig
++++ b/src/install/bin.zig
+@@ -801,6 +801,79 @@ pub const Bin = extern struct {
+                 }
+             }
+ 
++            if (comptime Environment.isAndroid) {
++                const dir_path = std.fs.path.dirname(abs_dest) orelse {
++                    this.err = error.InvalidPath;
++                    return;
++                };
++                bun.makePath(std.fs.cwd(), dir_path) catch {};
++
++                var tmpname_buf: [1024]u8 = undefined;
++                const tmpname = bun.fs.FileSystem.tmpname(
++                    std.fs.path.basename(abs_dest),
++                    &tmpname_buf,
++                    bun.hash(abs_target),
++                ) catch {
++                    this.err = error.FailedToCreateTmpName;
++                    return;
++                };
++
++                var tmppath_buf: [bun.MAX_PATH_BYTES]u8 = undefined;
++                const tmppath = bun.path.joinAbsStringBufZ(dir_path, &tmppath_buf, &.{tmpname}, .auto);
++
++                var needs_cleanup = true;
++                defer if (needs_cleanup) _ = bun.sys.unlinkat(.cwd(), tmppath);
++
++                {
++                    const tmpfile = switch (bun.sys.File.openat(.cwd(), tmppath, bun.O.WRONLY | bun.O.CREAT | bun.O.TRUNC, 0o777)) {
++                        .result => |f| f,
++                        .err => |err| {
++                            this.err = err.toZigErr();
++                            return;
++                        },
++                    };
++                    defer tmpfile.close();
++
++                    const bun_path = bun.selfExePath() catch "bun";
++                    tmpfile.writeAll("#!/system/bin/sh\n") catch |err| {
++                        this.err = err;
++                        return;
++                    };
++                    tmpfile.writeAll("exec ") catch |err| {
++                        this.err = err;
++                        return;
++                    };
++                    tmpfile.writeAll(bun_path) catch |err| {
++                        this.err = err;
++                        return;
++                    };
++                    tmpfile.writeAll(" ") catch |err| {
++                        this.err = err;
++                        return;
++                    };
++                    tmpfile.writeAll(abs_target) catch |err| {
++                        this.err = err;
++                        return;
++                    };
++                    tmpfile.writeAll(" \"$@\"\n") catch |err| {
++                        this.err = err;
++                        return;
++                    };
++
++                    _ = bun.sys.fchmodat(.cwd(), tmppath, @as(bun.Mode, @intCast(umask | 0o777)), 0) catch {};
++                }
++
++                switch (bun.sys.renameat(.cwd(), tmppath, .cwd(), abs_dest)) {
++                    .result => {
++                        needs_cleanup = false;
++                    },
++                    .err => |err| {
++                        this.err = err.toZigErr();
++                    },
++                }
++                return;
++            }
++
+             const abs_dest_dir = path.dirname(abs_dest, .auto);
+             const rel_target = path.relativeBufZ(this.rel_buf, abs_dest_dir, abs_target);
+ 
