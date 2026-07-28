@@ -244,6 +244,8 @@ install_bun() {
 
     cp "$bun_bin" "$INSTALL_PREFIX/bin/bun"
     chmod +x "$INSTALL_PREFIX/bin/bun"
+    # ── Install target runtime cache ──
+    install_bun_target || true
 
     # Verificar
     if command -v bun &>/dev/null; then
@@ -256,6 +258,33 @@ install_bun() {
 
     # Config global: backend copyfile para Android
     setup_bun_config
+}
+
+# ── Install Bun target runtime (for --compile --target) ──
+install_bun_target() {
+    local bun_bin="$INSTALL_PREFIX/bin/bun"
+
+    if [ ! -f "$bun_bin" ]; then
+        warn "Bun binary not found at $bun_bin, skipping target runtime install"
+        return 1
+    fi
+
+    local target_name="bun-linux-arm64-android-v${BUN_VERSION:-1.3.14}"
+    local cache_dir="${HOME}/.bun/install/cache/${target_name}"
+    local package_bin_dir="${cache_dir}/package/bin"
+
+    info "Instalando target runtime para --target=bun-linux-arm64-android..."
+
+    mkdir -p "$package_bin_dir"
+    cp "$bun_bin" "$package_bin_dir/bun"
+    chmod +x "$package_bin_dir/bun"
+
+    if check_arch "$package_bin_dir/bun"; then
+        info "Target runtime instalado en: $cache_dir"
+        info "Usa: bun build --compile --target=bun-linux-arm64-android ..."
+    else
+        warn "El target runtime no parece ser ARM64"
+    fi
 }
 
 setup_bun_config() {

@@ -139,17 +139,6 @@ console.log(`Plugin wrapper written: ${pluginPath}`)
 
 // ────────────────────────────────────────────────────────────────
 // Step 4: Cross-compile with Android Bun runtime via CLI
-//
-// Instead of:
-//   1. Bun.build({compile: {}}) for HOST  →  opencode-host (x86_64)
-//   2. Manual module graph extraction (170+ lines parsing offsets/trailer)
-//   3. Manual concatenation to Android Bun binary
-//
-// We use:
-//   bun build --compile --compile-executable-path=<android-bun>
-//   This tells Bun's internal StandaloneModuleGraph.toExecutable()
-//   to use our custom Android Bun as the runtime, injecting the
-//   module graph directly — no manual surgery needed.
 // ────────────────────────────────────────────────────────────────
 console.log("\n=== Step 4: Cross-compiling with Android Bun runtime ===")
 
@@ -164,27 +153,41 @@ const parserWorkerPath = bunfsRoot + workerRelativePath
 
 console.log("Running: bun build --compile --compile-executable-path=<android-bun> --target=bun-linux-arm64-android ...")
 
-const result = await $`bun build --compile \
-  --compile-executable-path=${ANDROID_BUN} \
-  --target=bun-linux-arm64-android \
-  --plugin=${pluginFileName} \
-  --conditions=browser \
-  --tsconfig=./tsconfig.json \
-  --outfile=${androidOutputPath} \
-  --define='OPENCODE_VERSION=\'${VERSION}\'' \
-  --define='OPENCODE_MIGRATIONS=\'${migrationsJson}\'' \
-  --define='OTUI_TREE_SITTER_WORKER_PATH=\'${parserWorkerPath}\'' \
-  --define='OPENCODE_WORKER_PATH=\'${workerPath}\'' \
-  --define='OPENCODE_CHANNEL=\'${CHANNEL}\'' \
-  --define='OPENCODE_LIBC=\'\'' \
-  ./src/index.ts \
-  ${parserWorkerResolved} \
-  ${workerPath}`
+// NOTE: Bun.$ tagged template doesn't handle complex escaping with \'
+// and line continuations well. Use Bun.spawnSync with explicit array.
+const buildArgs = [
+  "bun", "build", "--compile",
+  `--compile-executable-path=${ANDROID_BUN}`,
+  "--target=bun-linux-arm64-android",
+  `--plugin=${pluginFileName}`,
+  "--conditions=browser",
+  `--tsconfig=./tsconfig.json`,
+  `--outfile=${androidOutputPath}`,
+  `--define=OPENCODE_VERSION=${JSON.stringify(VERSION)}`,
+  `--define=OPENCODE_MIGRATIONS=${migrationsJson}`,
+  `--define=OTUI_TREE_SITTER_WORKER_PATH=${JSON.stringify(parserWorkerPath)}`,
+  `--define=OPENCODE_WORKER_PATH=${JSON.stringify(workerPath)}`,
+  `--define=OPENCODE_CHANNEL=${JSON.stringify(CHANNEL)}`,
+  `--define=OPENCODE_LIBC=${JSON.stringify("")}`,
+  "./src/index.ts",
+  parserWorkerResolved,
+  workerPath,
+]
 
-if (result.exitCode !== 0) {
-  console.error("Build failed:")
-  console.error(result.stderr.toString())
-  process.exit(1)
+console.log("Build command: bun build --compile ...")
+const proc = Bun.spawnSync(buildArgs, {
+  cwd: opencodePkgDir,
+  stdio: ["inherit", "inherit", "inherit"],
+  env: {
+    ...process.env,
+    // Ensure Bun uses the correct cache for target runtime discovery
+    HOME: process.env.HOME || os.homedir(),
+  },
+})
+
+if (proc.exitCode !== 0) {
+  console.error(`Build failed with exit code ${proc.exitCode}`)
+  process.exit(proc.exitCode ?? 1)
 }
 
 console.log(`\nCross-compile output: ${androidOutputPath}`)
