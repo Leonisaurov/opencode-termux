@@ -62,6 +62,9 @@ jobs:
               echo '=== Verify Bun ==='
               bun --version
 
+              echo '=== Install git ==='
+              apt-get update -qq && apt-get install -y -qq git
+
               echo '=== Clone OpenCode ==='
               cd /workspace
               git clone https://github.com/anomalyco/opencode.git /workspace/opencode-src --branch v${{ env.OPENCODE_VERSION }} --depth 1
