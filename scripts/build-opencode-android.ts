@@ -6,10 +6,14 @@
  * 1. Generates the models-snapshot.js
  * 2. Loads migrations
  * 3. Creates a plugin wrapper for the CLI
- * 4. Cross-compiles OpenCode using:
- *      bun build --compile --compile-executable-path=<android-bun> --target=bun-linux-arm64-android
- *    This tells Bun to use our custom Android Bun binary as the runtime
- *    instead of extracting the module graph manually and concatenating.
+ * 4. Bundles OpenCode for the HOST platform using CLI:
+ *      bun build --compile ... → opencode-host (x86_64 standalone)
+ * 5. Extracts the module graph from the host binary
+ * 6. Appends it raw to the Android Bun binary (no ELF modification)
+ *
+ * The raw append approach is used because --compile-executable-path
+ * modifies the ELF (adds a .bun section) which causes SIGTRAP on
+ * Android due to ELF structure incompatibility.
  */
 
 import { $ } from "bun"
@@ -108,8 +112,7 @@ const migrations = await Promise.all(
 console.log(`Loaded ${migrations.length} migrations`)
 
 // ────────────────────────────────────────────────────────────────
-// Step 3: Write plugin wrapper for CLI (Bun.build API doesn't expose
-// --compile-executable-path, so we use the CLI instead)
+// Step 3: Write plugin wrapper for CLI
 // ────────────────────────────────────────────────────────────────
 console.log("\n=== Step 3: Creating plugin wrapper ===")
 
@@ -126,8 +129,6 @@ const bunfsRoot = "/$bunfs/root/"
 const workerRelativePath = path.relative(OPENCODE_DIR, parserWorkerResolved).replaceAll("\\", "/")
 
 // Create a temporary plugin file that the CLI --plugin flag can load.
-// Bun's CLI resolves plugins relative to CWD, so we put it inside the
-// opencode package directory where @opentui/solid is resolvable.
 const pluginFileName = ".build-solid-plugin.ts"
 const pluginPath = path.join(opencodePkgDir, pluginFileName)
 const pluginContent = `import { createSolidTransformPlugin } from "@opentui/solid/bun-plugin"
@@ -138,31 +139,25 @@ await Bun.write(pluginPath, pluginContent)
 console.log(`Plugin wrapper written: ${pluginPath}`)
 
 // ────────────────────────────────────────────────────────────────
-// Step 4: Cross-compile with Android Bun runtime via CLI
+// Step 4: Bundle for HOST platform using CLI
 // ────────────────────────────────────────────────────────────────
-console.log("\n=== Step 4: Cross-compiling with Android Bun runtime ===")
+console.log("\n=== Step 4: Bundling OpenCode for HOST platform ===")
 
 await $`rm -rf ${OUTPUT_DIR}`
 await $`mkdir -p ${OUTPUT_DIR}`
 
-const androidOutputPath = path.join(OUTPUT_DIR, "opencode")
-
-// Build the --define flags for compile-time constants
+const hostBinaryPath = path.join(OUTPUT_DIR, "opencode-host")
 const migrationsJson = JSON.stringify(migrations)
 const parserWorkerPath = bunfsRoot + workerRelativePath
 
-console.log("Running: bun build --compile --compile-executable-path=<android-bun> --target=bun-linux-arm64-android ...")
+console.log("Running: bun build --compile ... --> opencode-host (x86_64)")
 
-// NOTE: Bun.$ tagged template doesn't handle complex escaping with \'
-// and line continuations well. Use Bun.spawnSync with explicit array.
 const buildArgs = [
   "bun", "build", "--compile",
-  `--compile-executable-path=${ANDROID_BUN}`,
-
   `--plugin=${pluginFileName}`,
   "--conditions=browser",
   `--tsconfig=./tsconfig.json`,
-  `--outfile=${androidOutputPath}`,
+  `--outfile=${hostBinaryPath}`,
   `--define=OPENCODE_VERSION=${JSON.stringify(VERSION)}`,
   `--define=OPENCODE_MIGRATIONS=${migrationsJson}`,
   `--define=OTUI_TREE_SITTER_WORKER_PATH=${JSON.stringify(parserWorkerPath)}`,
@@ -174,15 +169,9 @@ const buildArgs = [
   workerPath,
 ]
 
-console.log("Build command: bun build --compile ...")
 const proc = Bun.spawnSync(buildArgs, {
   cwd: opencodePkgDir,
   stdio: ["inherit", "inherit", "inherit"],
-  env: {
-    ...process.env,
-    // Ensure Bun uses the correct cache for target runtime discovery
-    HOME: process.env.HOME || os.homedir(),
-  },
 })
 
 if (proc.exitCode !== 0) {
@@ -191,87 +180,212 @@ if (proc.exitCode !== 0) {
 }
 
 // ────────────────────────────────────────────────────────────────
-// Step 4b: Patch undici reference for Android
-// Android bun doesn't expose globalThis.undici (lowercase), but
-// does expose Undici (capital U). The host bun generates module
-// graph with `undici` reference, so we need to fix it post-compile.
-// This is a same-byte-count replacement in the binary output.
+// Step 5: Extract module graph from host binary
 // ────────────────────────────────────────────────────────────────
-console.log("\n=== Step 4b: Patching undici reference ===")
+console.log("\n=== Step 5: Extracting module graph ===")
 
-const binaryBuffer = await Bun.file(androidOutputPath).arrayBuffer()
-const binaryBytes = new Uint8Array(binaryBuffer)
+const hostBinary = await Bun.file(hostBinaryPath).arrayBuffer()
+const hostBytes = new Uint8Array(hostBinary)
 
-const SEARCH_PATTERN = '__reExport(exports_Undici, undici)'
-const REPLACE_PATTERN = '__reExport(exports_Undici, Undici)'
+// Standalone binary format (ELF):
+//   [bun runtime bytes] [module graph bytes] [total_byte_count as u64 LE (8 bytes)]
+//
+// Module graph internal layout:
+//   [string data] [module list] [offsets (32 bytes)] [trailer "\n---- Bun! ----\n" (16 bytes)]
+//
+// We find the trailer at the end, read the Offsets struct to get the
+// module graph size, then extract the module graph.
 
-const searchEncoded = Buffer.from(SEARCH_PATTERN)
-const replaceEncoded = Buffer.from(REPLACE_PATTERN)
+const TRAILER_STR = "\n---- Bun! ----\n"
+const TRAILER_LEN = TRAILER_STR.length  // 16
+const OFFSETS_SIZE = 32
 
-if (searchEncoded.length !== replaceEncoded.length) {
-  console.error("ERROR: Search and replace patterns must be the same length")
+// Find trailer: it's near the end of the file, just before the final 8-byte u64.
+const trailerBuf = Buffer.from(TRAILER_STR)
+const searchBuf = Buffer.from(hostBytes.buffer, hostBytes.byteOffset, hostBytes.length)
+const trailerEnd = hostBytes.length - 8
+const expectedTrailerStart = trailerEnd - TRAILER_LEN
+
+// Verify trailer at expected position
+const foundTrailer = searchBuf.compare(
+  trailerBuf, 0, TRAILER_LEN,
+  expectedTrailerStart, trailerEnd
+) === 0
+
+if (!foundTrailer) {
+  console.error("ERROR: Bun standalone trailer not found")
   process.exit(1)
 }
 
-const searchBuf = Buffer.from(binaryBytes.buffer, binaryBytes.byteOffset, binaryBytes.length)
-let patchCount = 0
-let searchPos = 0
+// Read offsets struct (32 bytes) just before the trailer
+const offsetsStart = expectedTrailerStart - OFFSETS_SIZE
+const offsetsByteCount = Number(searchBuf.readBigUInt64LE(offsetsStart))
 
-while (true) {
-  const pos = searchBuf.indexOf(searchEncoded, searchPos)
-  if (pos < 0) break
-  replaceEncoded.copy(searchBuf, pos)
-  patchCount++
-  searchPos = pos + searchEncoded.length
-}
+// Module graph total size = byte_count + offsets(32) + trailer(16)
+const moduleGraphSize = offsetsByteCount + OFFSETS_SIZE + TRAILER_LEN
+const hostBunSize = hostBytes.length - 8 - moduleGraphSize
 
-if (patchCount === 0) {
-  console.warn("WARNING: undici pattern not found - binary may still crash on Android")
-  console.warn(`  Searched for: ${SEARCH_PATTERN}`)
-} else {
-  console.log(`  Patched ${patchCount} occurrence(s) of undici→Undici`)
-}
+console.log(`Host standalone size: ${hostBytes.length}`)
+console.log(`Host bun size: ${hostBunSize}`)
+console.log(`Module graph size: ${moduleGraphSize}`)
 
-// Write patched binary
-await Bun.write(androidOutputPath, binaryBytes)
-console.log("Undici patch applied to binary")
-
-console.log(`\nCross-compile output: ${androidOutputPath}`)
-
-// ────────────────────────────────────────────────────────────────
-// Step 5: Verify the binary
-// ────────────────────────────────────────────────────────────────
-console.log("\n=== Step 5: Verifying binary ===")
-
-if (!fs.existsSync(androidOutputPath)) {
-  console.error("ERROR: OpenCode binary not found at", androidOutputPath)
+if (hostBunSize <= 0) {
+  console.error("ERROR: Invalid host bun size")
   process.exit(1)
 }
 
-const stat = fs.statSync(androidOutputPath)
-console.log(`Size: ${(stat.size / 1024 / 1024).toFixed(1)} MB`)
+const moduleGraphBytes = hostBytes.slice(hostBunSize, hostBytes.length - 8)
+console.log(`Module graph extracted: ${moduleGraphBytes.length} bytes`)
+
+// Parse module graph offsets for patching
+const mgBuf = Buffer.from(moduleGraphBytes)
+const mgTrailerBuf = Buffer.from(TRAILER_STR)
+const trailerPosInMg = mgBuf.lastIndexOf(mgTrailerBuf)
+if (trailerPosInMg < 0) throw new Error("Trailer not found in module graph!")
+
+const mgOffsetsStart = trailerPosInMg - OFFSETS_SIZE
+const modOff = mgBuf.readUInt32LE(mgOffsetsStart + 8)
+console.log(`String data region: [0, ${modOff})`)
+
+// ────────────────────────────────────────────────────────────────
+// Step 5b: Patch undici reference (Bun 1.3.14 built-in module)
+// In Bun 1.3.14, undici is a built-in module at
+// "builtin://thirdparty/undici". The host bun generates references
+// that may not work on Android bun. We need to find and fix them.
+//
+// Old pattern (Bun <=1.2.x): __reExport(exports_Undici, undici)
+// New pattern (Bun 1.3.x):  __require("undici")
+// ────────────────────────────────────────────────────────────────
+console.log("\n=== Step 5b: Patching module graph ===")
+
+const undiciPatterns = [
+  {
+    name: "old pattern (undici global ref)",
+    search: Buffer.from('__reExport(exports_Undici, undici)'),
+    replace: Buffer.from('__reExport(exports_Undici, Undici)'),
+  },
+]
+
+// For Bun 1.3.14, scan the binary for any undici references in the
+// module graph string data region [0, modOff)
+let totalPatches = 0
+for (const pattern of undiciPatterns) {
+  if (pattern.search.length !== pattern.replace.length) {
+    console.warn(`  SKIP ${pattern.name}: different lengths (${pattern.search.length} vs ${pattern.replace.length})`)
+    continue
+  }
+  const strDataRegion = mgBuf.slice(0, modOff)
+  let searchPos = 0
+  let count = 0
+  while (true) {
+    const pos = strDataRegion.indexOf(pattern.search, searchPos)
+    if (pos < 0) break
+    pattern.replace.copy(mgBuf, pos)
+    count++
+    totalPatches++
+    searchPos = pos + pattern.search.length
+  }
+  if (count > 0) {
+    console.log(`  ✓ ${pattern.name}: patched ${count} occurrence(s)`)
+  }
+}
+
+if (totalPatches === 0) {
+  console.log("  No undici patterns found in module graph (Bun 1.3.14 may have fixed this)")
+  console.log("  Scanning for alternative undici patterns...")
+
+  // Search for any undici-related strings in the module graph
+  const searchPatterns = [
+    Buffer.from('"undici"'),
+    Buffer.from("'undici'"),
+    Buffer.from('undici'),
+    Buffer.from('Undici'),
+  ]
+  for (const sp of searchPatterns) {
+    let pos = 0
+    let count = 0
+    while (true) {
+      pos = mgBuf.indexOf(sp, pos)
+      if (pos < 0) break
+      if (count < 5) {
+        const ctxStart = Math.max(0, pos - 30)
+        const ctxEnd = Math.min(mgBuf.length, pos + sp.length + 30)
+        console.log(`    Found at offset ${pos}: ${mgBuf.slice(ctxStart, ctxEnd).toString()}`)
+      }
+      count++
+      pos++
+    }
+    if (count > 0) {
+      console.log(`    Pattern "${sp.toString()}": ${count} occurrences`)
+    }
+  }
+}
+
+// ────────────────────────────────────────────────────────────────
+// Step 6: Create Android standalone binary (raw append)
+// ────────────────────────────────────────────────────────────────
+console.log("\n=== Step 6: Creating Android standalone binary ===")
+
+// Take the patched module graph and append it raw to the Android Bun binary.
+// This is the same approach as the original working code — raw append,
+// no ELF modification.
+var finalModuleGraph = mgBuf.slice(0, trailerPosInMg + mgTrailerBuf.length)
+
+const androidBunBytes = new Uint8Array(await Bun.file(ANDROID_BUN).arrayBuffer())
+const androidBunSize = androidBunBytes.length
+console.log(`Android bun size: ${androidBunSize}`)
+
+// New total_byte_count = android_bun_size + module_graph.length + 8
+const newTotalByteCount = androidBunSize + finalModuleGraph.length + 8
+
+// Create the output buffer
+const outputSize = androidBunSize + finalModuleGraph.length + 8
+const output = new Uint8Array(outputSize)
+
+// Copy Android bun binary
+output.set(androidBunBytes, 0)
+
+// Copy patched module graph
+output.set(new Uint8Array(finalModuleGraph.buffer, finalModuleGraph.byteOffset, finalModuleGraph.length), androidBunSize)
+
+// Write new total_byte_count as u64 LE
+const totalView = new DataView(output.buffer, outputSize - 8, 8)
+totalView.setUint32(0, newTotalByteCount & 0xFFFFFFFF, true)
+totalView.setUint32(4, Math.floor(newTotalByteCount / 0x100000000), true)
+
+const androidOutputPath = path.join(OUTPUT_DIR, "opencode")
+await Bun.write(androidOutputPath, output)
+fs.chmodSync(androidOutputPath, 0o755)
+
+console.log(`\nAndroid standalone binary: ${androidOutputPath}`)
+console.log(`Size: ${(outputSize / 1024 / 1024).toFixed(1)} MB`)
+
+// ────────────────────────────────────────────────────────────────
+// Step 7: Verify the binary
+// ────────────────────────────────────────────────────────────────
+console.log("\n=== Step 7: Verifying binary ===")
+
+const verifyBytes = new Uint8Array(await Bun.file(androidOutputPath).arrayBuffer())
+const verifyView = new DataView(verifyBytes.buffer, verifyBytes.length - 8, 8)
+const verifyTotal = verifyView.getUint32(0, true) + verifyView.getUint32(4, true) * 0x100000000
+console.log(`Verification: total_byte_count=${verifyTotal}, file_size=${verifyBytes.length}, match=${verifyTotal === verifyBytes.length}`)
 
 // Check ELF header
-const header = new Uint8Array(await Bun.file(androidOutputPath).slice(0, 64).arrayBuffer())
-const elfMagic = String.fromCharCode(header[0], header[1], header[2], header[3])
+const elfMagic = String.fromCharCode(verifyBytes[0], verifyBytes[1], verifyBytes[2], verifyBytes[3])
 console.log(`ELF magic: ${elfMagic === "\x7fELF" ? "OK" : "INVALID"}`)
 
 // Check machine type (0xB7 = AArch64)
-const machine = header[18] | (header[19] << 8)
-const machineStr = machine === 0xB7 ? "AArch64" : machine === 0x3E ? "x86_64" : `Unknown (0x${machine.toString(16)})`
-console.log(`Architecture: ${machineStr}`)
-
+const machine = verifyBytes[18] | (verifyBytes[19] << 8)
 if (machine !== 0xB7) {
-  console.error(`ERROR: Expected AArch64 (0xB7), got ${machineStr}`)
+  console.error(`ERROR: Expected AArch64 (0xB7), got ${machine === 0x3E ? "x86_64" : `0x${machine.toString(16)}`}`)
   process.exit(1)
 }
-
-console.log("Binary verification: OK")
+console.log("Architecture: AArch64 OK")
 
 // ────────────────────────────────────────────────────────────────
-// Step 6: Cleanup
+// Step 8: Cleanup
 // ────────────────────────────────────────────────────────────────
-console.log("\n=== Step 6: Cleanup ===")
+console.log("\n=== Step 8: Cleanup ===")
 try {
   await $`rm -f ${pluginPath}`
   console.log("Plugin wrapper removed")
