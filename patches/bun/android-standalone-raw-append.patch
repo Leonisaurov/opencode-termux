@@ -1,5 +1,5 @@
 diff --git a/src/standalone_graph/StandaloneModuleGraph.zig b/src/standalone_graph/StandaloneModuleGraph.zig
-index c9d5ab8..164db21 100644
+index c9d5ab8..873f172 100644
 --- a/src/standalone_graph/StandaloneModuleGraph.zig
 +++ b/src/standalone_graph/StandaloneModuleGraph.zig
 @@ -873,6 +873,56 @@ pub const StandaloneModuleGraph = struct {
@@ -98,7 +98,7 @@ index c9d5ab8..164db21 100644
 +            defer self_exe_fd.close();
 +
 +            const file_size = switch (Syscall.fstat(self_exe_fd)) {
-+                .result => |stat| @as(u64, @intCast(stat.size)),
++                .result => |st| @as(u64, @intCast(st.size)),
 +                .err => |_| return null,
 +            };
 +
