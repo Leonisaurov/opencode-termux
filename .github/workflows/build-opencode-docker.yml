@@ -1,0 +1,94 @@
+name: Build OpenCode via Docker+QEMU
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Build Bun"]
+    types: [completed]
+    branches: [update-v1.18.6]
+
+env:
+  OPENCODE_VERSION: "1.18.6"
+  WORK_DIR: "${{ github.workspace }}/build"
+  DOCKER_IMAGE: "ghcr.io/${{ github.repository }}/termux-bun-builder"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create work directory
+        run: mkdir -p "$WORK_DIR"
+
+      # ── Set up QEMU for ARM64 emulation ──
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      # ── Restore Android Bun binary ──
+      - name: Compute patch hashes
+        id: hashes
+        run: |
+          echo "bun_pr_hash=$(sha256sum patches/bun/pr31198.diff 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
+          echo "android_backend_hash=$(sha256sum patches/bun/android-default-backend.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
+          echo "webkit_hash=$(sha256sum patches/webkit/android-support.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
+          echo "zig_patch_hash=$(sha256sum patches/zig/posix-android-sigaction.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
+
+      - name: Restore Android Bun
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.WORK_DIR }}/bun-build/bun
+          key: bun-android-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_pr_hash }}-${{ steps.hashes.outputs.android_backend_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}-${{ steps.hashes.outputs.webkit_hash }}
+          restore-keys: |
+            bun-android-
+          fail-on-cache-miss: true
+
+      # ── Build on QEMU + termux-docker ──
+      - name: Build OpenCode in termux-docker
+        run: |
+          docker run --rm --platform linux/arm64 \
+            -v ${{ env.WORK_DIR }}/bun-build:/bun \
+            -v $PWD:/workspace \
+            termux/termux-docker:aarch64 \
+            bash -c "
+              set -e
+              echo '=== Setup Bun ==='
+              cp /bun/bun /data/data/com.termux/files/usr/bin/bun
+              chmod +x /data/data/com.termux/files/usr/bin/bun
+
+              echo '=== Verify Bun ==='
+              bun --version
+
+              echo '=== Clone OpenCode ==='
+              cd /workspace
+              git clone https://github.com/anomalyco/opencode.git /workspace/opencode-src --branch v${{ env.OPENCODE_VERSION }} --depth 1
+
+              echo '=== Install dependencies ==='
+              cd /workspace/opencode-src/packages/opencode
+              bun install
+
+              echo '=== Compile OpenCode ==='
+              bun build --compile \
+                --conditions browser \
+                --define OPENCODE_VERSION=\"'${{ env.OPENCODE_VERSION }}'\" \
+                --outfile=/workspace/dist/opencode \
+                ./src/index.ts
+
+              echo '=== Done ==='
+            "
+
+      # ── Verify binary ──
+      - name: Verify binary
+        run: |
+          file "$PWD/dist/opencode"
+          ls -lh "$PWD/dist/opencode"
+
+      # ── Upload artifact ──
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencode-docker-${{ env.OPENCODE_VERSION }}
+          path: ${{ github.workspace }}/dist/opencode
