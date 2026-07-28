@@ -56,6 +56,7 @@ jobs:
         id: hashes
         run: |
           echo "bun_patch_hash=$(sha256sum patches/bun/android-support.patch | cut -c1-16)" >> $GITHUB_OUTPUT
+          echo "bun_pr_hash=$(sha256sum patches/bun/pr31198.diff | cut -c1-16)" >> $GITHUB_OUTPUT
           echo "zig_patch_hash=$(sha256sum patches/zig/posix-android-sigaction.patch | cut -c1-16)" >> $GITHUB_OUTPUT
           echo "webkit_patch_hash=$(sha256sum patches/webkit/android-support.patch | cut -c1-16)" >> $GITHUB_OUTPUT
 
@@ -86,7 +87,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.WORK_DIR }}/bun-build/bun
-          key: bun-android-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}
+          key: bun-android-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.bun_pr_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}
 
       - name: Clone, patch, and build Bun
         if: steps.cache-bun.outputs.cache-hit != 'true'
