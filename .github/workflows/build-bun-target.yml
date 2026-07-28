@@ -1,0 +1,98 @@
+name: Build Bun Target Runtime
+
+on:
+  workflow_dispatch:
+    inputs:
+      bun_version:
+        description: 'Bun version to build target for'
+        required: false
+        default: '1.3.14'
+
+env:
+  BUN_VERSION: "${{ github.event.inputs.bun_version || '1.3.14' }}"
+  ANDROID_API: "24"
+  ANDROID_NDK_VERSION: "28.1.13356709"
+  WORK_DIR: "${{ github.workspace }}/build"
+  ANDROID_NDK_HOME: "${{ github.workspace }}/android-ndk"
+
+jobs:
+  build-bun-target:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create work directory
+        run: mkdir -p "$WORK_DIR"
+
+      # ── Compute patch hashes (same as build-bun.yml) ──────────
+      - name: Compute patch hashes
+        id: hashes
+        run: |
+          echo "bun_patch_hash=$(sha256sum patches/bun/android-support.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
+          echo "bun_pr_hash=$(sha256sum patches/bun/pr31198.diff 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
+          echo "zig_patch_hash=$(sha256sum patches/zig/posix-android-sigaction.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
+          echo "android_backend_hash=$(sha256sum patches/bun/android-default-backend.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
+          echo "TARGET_NAME=bun-linux-arm64-android-v${BUN_VERSION}" >> $GITHUB_ENV
+
+      # ── Restore Bun binary ────────────────────────────────────
+      - name: Restore Bun binary
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.WORK_DIR }}/bun-build/bun
+          key: bun-android-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.bun_pr_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}-${{ steps.hashes.outputs.android_backend_hash }}
+          restore-keys: |
+            bun-android-${{ env.BUN_VERSION }}-
+            bun-android-
+          fail-on-cache-miss: true
+
+      # ── Verify Bun binary ─────────────────────────────────────
+      - name: Verify Bun binary
+        run: |
+          BUN_BINARY="${WORK_DIR}/bun-build/bun"
+          echo "=== Bun binary verification ==="
+          ls -lh "$BUN_BINARY"
+          file "$BUN_BINARY"
+          readelf -h "$BUN_BINARY" 2>/dev/null | grep -E "Machine|Class"
+
+      # ── Create target runtime bundle ──────────────────────────
+      - name: Create target runtime bundle
+        run: |
+          BUN_BINARY="${WORK_DIR}/bun-build/bun"
+          TARGET_DIR="${WORK_DIR}/bun-target/${TARGET_NAME}"
+          PACKAGE_DIR="${TARGET_DIR}/package"
+          
+          echo "=== Creating target runtime: ${TARGET_NAME} ==="
+          
+          # Create npm-style package structure
+          mkdir -p "$PACKAGE_DIR/bin"
+          cp "$BUN_BINARY" "$PACKAGE_DIR/bin/bun"
+          chmod +x "$PACKAGE_DIR/bin/bun"
+          
+          echo "Package structure:"
+          find "$TARGET_DIR" -type f -o -type l | sort
+          
+          # Create tarball (same format as npm registry packages)
+          echo ">>> Creating tarball..."
+          cd "${WORK_DIR}/bun-target"
+          tar czf "${WORK_DIR}/${TARGET_NAME}.tgz" "${TARGET_NAME}/"
+          
+          echo ""
+          echo "=== Target runtime created ==="
+          ls -lh "${WORK_DIR}/${TARGET_NAME}.tgz"
+          ls -lh "$PACKAGE_DIR/bin/bun"
+
+      # ── Cache the target runtime ──────────────────────────────
+      - name: Cache target runtime tarball
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.WORK_DIR }}/${{ env.TARGET_NAME }}.tgz
+          key: bun-target-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.bun_pr_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}-${{ steps.hashes.outputs.android_backend_hash }}
+
+      # ── Upload tarball as artifact ────────────────────────────
+      - name: Upload target runtime artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bun-target-android-aarch64-${{ env.BUN_VERSION }}
+          path: ${{ env.WORK_DIR }}/${{ env.TARGET_NAME }}.tgz
+          if-no-files-found: error
