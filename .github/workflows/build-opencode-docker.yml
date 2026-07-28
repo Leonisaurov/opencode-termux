@@ -48,14 +48,25 @@ jobs:
             --branch v${{ env.OPENCODE_VERSION }} --depth 1
 
       # ── Install dependencies and build ──
-      - name: Install deps and compile
+      - name: Setup Android Bun
+        run: |
+          ANDROID_BUN="$WORK_DIR/bun-build/bun"
+          chmod +x "$ANDROID_BUN"
+          echo "ANDROID_BUN=$ANDROID_BUN" >> $GITHUB_ENV
+
+      - name: Install deps
         run: |
           cd "$WORK_DIR/opencode-src/packages/opencode"
-          # tree-sitter-bash confuses ARM64 Linux with Android
-          # Skip postinstall scripts to avoid node-gyp NDK requirement
           bun install --ignore-scripts
-          # tree-sitter bindings are optional for OpenCode
+
+      - name: Cross-compile with Android Bun runtime
+        run: |
+          cd "$WORK_DIR/opencode-src/packages/opencode"
+          # On ARM64, both stock bun and Android Bun are ARM64
+          # --compile-executable-path injects module graph into Android Bun
+          # No cross-arch ELF issues since both are ARM64
           bun build --compile \
+            --compile-executable-path="$ANDROID_BUN" \
             --conditions browser \
             --define "OPENCODE_VERSION='${{ env.OPENCODE_VERSION }}'" \
             --outfile="$WORK_DIR/opencode" \
