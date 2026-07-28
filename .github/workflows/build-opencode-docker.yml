@@ -51,7 +51,8 @@ jobs:
         run: |
           docker run --rm --platform linux/arm64 \
             -v ${{ env.WORK_DIR }}/bun-build:/bun \
-            -v $PWD:/workspace \
+            -e HOME=/data/data/com.termux/files/home \
+            -v ${{ env.WORK_DIR }}:/workspace \
             termux/termux-docker:aarch64 \
             bash -c "
               set -e
@@ -66,11 +67,11 @@ jobs:
               apt-get update -qq && apt-get install -y -qq git
 
               echo '=== Clone OpenCode ==='
-              cd $HOME
+              cd /data/data/com.termux/files/home
               git clone https://github.com/anomalyco/opencode.git opencode-src --branch v${{ env.OPENCODE_VERSION }} --depth 1
 
               echo '=== Install dependencies ==='
-              cd $HOME/opencode-src/packages/opencode
+              cd /data/data/com.termux/files/home/opencode-src/packages/opencode
               bun install
 
               echo '=== Compile OpenCode ==='
