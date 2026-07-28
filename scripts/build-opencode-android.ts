@@ -125,8 +125,7 @@ try {
 console.log(`Parser worker: ${parserWorkerResolved}`)
 
 const workerPath = "./src/cli/tui/worker.ts"
-const bunfsRoot = "/$bunfs/root/"
-const workerRelativePath = path.relative(OPENCODE_DIR, parserWorkerResolved).replaceAll("\\", "/")
+const parserWorkerRelative = path.relative(opencodePkgDir, parserWorkerResolved).replaceAll("\\", "/")
 
 // Create a temporary plugin file that the CLI --plugin flag can load.
 const pluginFileName = ".build-solid-plugin.ts"
@@ -148,7 +147,6 @@ await $`mkdir -p ${OUTPUT_DIR}`
 
 const hostBinaryPath = path.join(OUTPUT_DIR, "opencode-host")
 const migrationsJson = JSON.stringify(migrations)
-const parserWorkerPath = bunfsRoot + workerRelativePath
 
 console.log("Running: bun build --compile ... --> opencode-host (x86_64)")
 
@@ -160,7 +158,7 @@ const buildArgs = [
   `--outfile=${hostBinaryPath}`,
   `--define=OPENCODE_VERSION=${JSON.stringify(VERSION)}`,
   `--define=OPENCODE_MIGRATIONS=${migrationsJson}`,
-  `--define=OTUI_TREE_SITTER_WORKER_PATH=${JSON.stringify(parserWorkerPath)}`,
+  `--define=OTUI_TREE_SITTER_WORKER_PATH=${JSON.stringify(parserWorkerRelative)}`,
   `--define=OPENCODE_WORKER_PATH=${JSON.stringify(workerPath)}`,
   `--define=OPENCODE_CHANNEL=${JSON.stringify(CHANNEL)}`,
   `--define=OPENCODE_LIBC=${JSON.stringify("")}`,
