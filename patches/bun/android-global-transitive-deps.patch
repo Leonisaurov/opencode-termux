@@ -1,8 +1,8 @@
 diff --git a/src/install/PackageManager.zig b/src/install/PackageManager.zig
-index d78c327..0677e27 100644
+index d78c327..ed47f4f 100644
 --- a/src/install/PackageManager.zig
 +++ b/src/install/PackageManager.zig
-@@ -266,6 +266,43 @@ pub const PackageUpdateInfo = struct {
+@@ -266,6 +266,41 @@ pub const PackageUpdateInfo = struct {
      original_version: ?Semver.Version,
  };
  
@@ -12,8 +12,6 @@ index d78c327..0677e27 100644
 +pub fn verifyGlobalPackagesInstalled(this: *PackageManager) !bool {
 +    const lockfile = this.lockfile;
 +    const packages = lockfile.packages.slice();
-+    const pkg_names = packages.items(.name);
-+    const string_buf = lockfile.buffers.string_bytes.items;
 +
 +    // Open the global node_modules directory
 +    var global_link_dir = this.globalLinkDir();
@@ -47,10 +45,10 @@ index d78c327..0677e27 100644
      this.root_package_id.id = null;
  }
 diff --git a/src/install/PackageManager/install_with_manager.zig b/src/install/PackageManager/install_with_manager.zig
-index 2debc3d..8ea7732 100644
+index 2debc3d..c250758 100644
 --- a/src/install/PackageManager/install_with_manager.zig
 +++ b/src/install/PackageManager/install_with_manager.zig
-@@ -922,6 +922,18 @@ pub fn installWithManager(
+@@ -922,6 +922,17 @@ pub fn installWithManager(
          }
      }
  
@@ -60,12 +58,11 @@ index 2debc3d..8ea7732 100644
 +    if (manager.options.global) {
 +        const any_missing = try manager.verifyGlobalPackagesInstalled();
 +        if (any_missing) {
-+            Output.prettyErrorln("<y>⚠<r> Some transitive dependencies may not be fully installed.", .{});
++            Output.prettyErrorln("<yellow>⚠<r> Some transitive dependencies may not be fully installed.", .{});
 +            Output.prettyErrorln("  Run <cyan>bun install --cwd ~/.bun/install/global --production<r> to fix.", .{});
 +        }
 +    }
 +
-+    
      if (manager.options.do.run_scripts and install_root_dependencies and !manager.options.global) {
          if (manager.root_lifecycle_scripts) |scripts| {
              if (comptime Environment.allow_assert) {
