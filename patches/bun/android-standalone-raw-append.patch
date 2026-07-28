@@ -1,5 +1,5 @@
 diff --git a/src/standalone_graph/StandaloneModuleGraph.zig b/src/standalone_graph/StandaloneModuleGraph.zig
-index c9d5ab8..096b635 100644
+index c9d5ab8..cf494e8 100644
 --- a/src/standalone_graph/StandaloneModuleGraph.zig
 +++ b/src/standalone_graph/StandaloneModuleGraph.zig
 @@ -873,6 +873,56 @@ pub const StandaloneModuleGraph = struct {
@@ -126,7 +126,7 @@ index c9d5ab8..096b635 100644
 +            const offsets = std.mem.bytesAsValue(Offsets, offsets_bytes).*;
 +
 +            // Read total byte count (last 8 bytes)
-+            const total_byte_count = std.mem.readInt(u64, &(tail_buf[tail_buf.len - 8 ..].*), .little);
++            const total_byte_count = std.mem.readInt(u64, @as(*const [8]u8, @ptrCast(&tail_buf[tail_buf.len - 8])), .little);
 +
 +            // The module graph starts at (total_byte_count - 8 - module_graph_size)
 +            // where module_graph_size = offsets.byte_count + @sizeOf(Offsets) + trailer.len
