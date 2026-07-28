@@ -66,14 +66,15 @@ jobs:
               apt-get update -qq && apt-get install -y -qq git
 
               echo '=== Clone OpenCode ==='
-              cd /workspace
-              git clone https://github.com/anomalyco/opencode.git /workspace/opencode-src --branch v${{ env.OPENCODE_VERSION }} --depth 1
+              cd $HOME
+              git clone https://github.com/anomalyco/opencode.git opencode-src --branch v${{ env.OPENCODE_VERSION }} --depth 1
 
               echo '=== Install dependencies ==='
-              cd /workspace/opencode-src/packages/opencode
+              cd $HOME/opencode-src/packages/opencode
               bun install
 
               echo '=== Compile OpenCode ==='
+              mkdir -p /workspace/dist
               bun build --compile \
                 --conditions browser \
                 --define OPENCODE_VERSION=\"'${{ env.OPENCODE_VERSION }}'\" \
