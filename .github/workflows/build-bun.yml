@@ -2,14 +2,14 @@ name: Build Bun
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - 'patches/bun/**'
-      - 'patches/zig/**'
-      - 'scripts/build-bun.sh'
-      - 'scripts/env.sh'
-      - 'scripts/setup-runner.sh'
-
+#   push:
+#     paths:
+#       - 'patches/bun/**'
+#       - 'patches/zig/**'
+#       - 'scripts/build-bun.sh'
+#       - 'scripts/env.sh'
+#       - 'scripts/setup-runner.sh'
+# 
 env:
   BUN_VERSION: "1.3.14"
   ANDROID_API: "24"
