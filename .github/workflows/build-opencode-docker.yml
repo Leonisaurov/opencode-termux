@@ -35,6 +35,13 @@ jobs:
             bun-android-
           fail-on-cache-miss: true
 
+      # ── Restore OpenTUI ARM64 native library ──
+      - name: Restore OpenTUI
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.WORK_DIR }}/opentui-build/libopentui.so
+          key: opentui-android
+
       # ── Install stock Bun (for building) ──
       - name: Install stock Bun
         run: |
@@ -53,6 +60,18 @@ jobs:
           ANDROID_BUN="$WORK_DIR/bun-build/bun"
           chmod +x "$ANDROID_BUN"
           echo "ANDROID_BUN=$ANDROID_BUN" >> $GITHUB_ENV
+
+      - name: Swap libopentui.so (x86_64 → ARM64)
+        run: |
+          # OpenCode uses @opentui/core-linux-x64 regardless of arch
+          # Replace the x86_64 .so with the ARM64 version
+          OPENTUI_SO="$WORK_DIR/opencode-src/node_modules/@opentui/core-linux-x64/libopentui.so"
+          if [ -f "$OPENTUI_SO" ]; then
+            cp "$WORK_DIR/opentui-build/libopentui.so" "$OPENTUI_SO"
+            echo "Swapped libopentui.so with ARM64 version"
+          else
+            echo "Warning: libopentui.so not found at $OPENTUI_SO"
+          fi
 
       - name: Install deps
         run: |
