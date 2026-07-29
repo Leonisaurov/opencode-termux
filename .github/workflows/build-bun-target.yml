@@ -36,7 +36,7 @@ jobs:
           echo "raw_append_hash=$(sha256sum patches/bun/android-standalone-raw-append.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
           echo "shebang_fix_hash=$(sha256sum patches/bun/android-global-shebang-fix.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
           echo "transitive_deps_hash=$(sha256sum patches/bun/android-global-transitive-deps.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
-          echo "preserve_symlinks_hash=$(sha256sum patches/bun/android-preserve-symlinks-global.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
+          echo "path_reconstruction_hash=$(sha256sum patches/bun/android-global-path-reconstruction.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
           echo "TARGET_NAME=bun-linux-arm64-android-v${BUN_VERSION}" >> $GITHUB_ENV
 
       # ── Restore Bun binary ────────────────────────────────────
@@ -44,7 +44,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.WORK_DIR }}/bun-build/bun
-          key: bun-android-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.bun_pr_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}-${{ steps.hashes.outputs.android_backend_hash }}-${{ steps.hashes.outputs.raw_append_hash }}-${{ steps.hashes.outputs.shebang_fix_hash }}-${{ steps.hashes.outputs.transitive_deps_hash }}-${{ steps.hashes.outputs.preserve_symlinks_hash }}
+          key: bun-android-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.bun_pr_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}-${{ steps.hashes.outputs.android_backend_hash }}-${{ steps.hashes.outputs.raw_append_hash }}-${{ steps.hashes.outputs.shebang_fix_hash }}-${{ steps.hashes.outputs.transitive_deps_hash }}-${{ steps.hashes.outputs.path_reconstruction_hash }}
           restore-keys: |
             bun-android-${{ env.BUN_VERSION }}-
             bun-android-
@@ -91,7 +91,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.WORK_DIR }}/${{ env.TARGET_NAME }}.tgz
-          key: bun-target-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.bun_pr_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}-${{ steps.hashes.outputs.android_backend_hash }}-${{ steps.hashes.outputs.raw_append_hash }}-${{ steps.hashes.outputs.shebang_fix_hash }}-${{ steps.hashes.outputs.transitive_deps_hash }}-${{ steps.hashes.outputs.preserve_symlinks_hash }}
+          key: bun-target-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.bun_pr_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}-${{ steps.hashes.outputs.android_backend_hash }}-${{ steps.hashes.outputs.raw_append_hash }}-${{ steps.hashes.outputs.shebang_fix_hash }}-${{ steps.hashes.outputs.transitive_deps_hash }}-${{ steps.hashes.outputs.path_reconstruction_hash }}
 
       # ── Upload tarball as artifact ────────────────────────────
       - name: Upload target runtime artifact
