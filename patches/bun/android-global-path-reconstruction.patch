@@ -1,8 +1,8 @@
 diff --git a/src/cli/run_command.zig b/src/cli/run_command.zig
-index 0c171c7..fd2e5a1 100644
+index 0c171c7..5b26ae4 100644
 --- a/src/cli/run_command.zig
 +++ b/src/cli/run_command.zig
-@@ -1842,6 +1842,48 @@ pub const RunCommand = struct {
+@@ -1842,6 +1842,51 @@ pub const RunCommand = struct {
                  bun.options.defaultLoaders.get(path.name.ext) orelse .tsx;
              if (loader.canBeRunByBun() or loader == .html or loader == .md) {
                  log("Resolved to: `{s}`", .{path.text});
@@ -29,10 +29,13 @@ index 0c171c7..fd2e5a1 100644
 +                        }
 +                        if (version_at > 0 and after_cache[version_at] == '@') {
 +                            const pkg_name = after_cache[0..version_at];
-+                            // Subpath starts after @@N (or @@@N)
++                            // Subpath starts after @@ + any extra @ + hash + /
 +                            var sub_start = at_at + 2; // skip @@
++                            // Skip any additional @ (e.g., @@@ has one extra @)
 +                            while (sub_start < after_cache.len and after_cache[sub_start] == '@') : (sub_start += 1) {}
-+                            while (sub_start < after_cache.len and after_cache[sub_start] >= '0' and after_cache[sub_start] <= '9') : (sub_start += 1) {}
++                            // Skip the hash (everything until the first /)
++                            while (sub_start < after_cache.len and after_cache[sub_start] != '/') : (sub_start += 1) {}
++                            // Skip the /
 +                            if (sub_start < after_cache.len and after_cache[sub_start] == '/') sub_start += 1;
 +                            const subpath = after_cache[sub_start..];
 +                            if (subpath.len > 0) {
