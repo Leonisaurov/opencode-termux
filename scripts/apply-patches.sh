@@ -108,6 +108,13 @@ echo ">>> Applying Android global resolve fallback fix..."
 cd "$BUN_SRC"
 git apply --stat "$REPO_ROOT/patches/bun/android-global-resolve-fallback.patch" 2>/dev/null || echo "    ⚠️  Skipped (already applied?)"
 git apply "$REPO_ROOT/patches/bun/android-global-resolve-fallback.patch" 2>/dev/null || echo "    ⚠️  Skipped (already applied?)"
+
+# Apply platform fallback (android-arm64 → linux-arm64 for bindings)
+echo ">>> Applying Android platform fallback fix..."
+cd "$BUN_SRC"
+git apply --stat "$REPO_ROOT/patches/bun/android-platform-fallback.patch" 2>/dev/null || echo "    ⚠️  Skipped (already applied?)"
+git apply "$REPO_ROOT/patches/bun/android-platform-fallback.patch" 2>/dev/null || echo "    ⚠️  Skipped (already applied?)"
+echo "    Android platform fallback fix applied"
 echo "    Android global resolve fallback fix applied"
 
 # Apply skip peer dep "bun" when runtime is bun

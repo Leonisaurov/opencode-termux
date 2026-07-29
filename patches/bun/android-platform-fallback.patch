@@ -1,0 +1,34 @@
+diff --git a/src/runtime/api/BunObject.zig b/src/runtime/api/BunObject.zig
+index a23af46..e13eb93 100644
+--- a/src/runtime/api/BunObject.zig
++++ b/src/runtime/api/BunObject.zig
+@@ -845,7 +845,28 @@ fn doResolveWithArgs(ctx: *jsc.JSGlobalObject, specifier: bun.String, from: bun.
+     );
+ 
+     if (!errorable.success) {
+-        return ctx.throwValue(errorable.result.err.value);
++        if (comptime bun.Environment.isAndroid) {
++            const spec_utf8 = specifier_decoded.toUTF8(bun.default_allocator);
++            defer spec_utf8.deinit();
++            const spec_slice = spec_utf8.slice();
++            if (bun.strings.indexOf(spec_slice, "android-arm64")) |pos| {
++                const before = spec_slice[0..pos];
++                const after = spec_slice[pos + "android-arm64".len..];
++                var buf: [bun.MAX_PATH_BYTES]u8 = undefined;
++                const linux_spec = std.fmt.bufPrint(&buf, "{s}linux-arm64{s}", .{ before, after }) catch null;
++                if (linux_spec) |ls| {
++                    const linux_bun = bun.String.createUTF8(ls);
++                    defer linux_bun.deref();
++                    try VirtualMachine.resolveMaybeNeedsTrailingSlash(
++                        &errorable, ctx, linux_bun, from, &query_string,
++                        is_esm, is_file_path, is_user_require_resolve,
++                    );
++                }
++            }
++        }
++        if (!errorable.success) {
++            return ctx.throwValue(errorable.result.err.value);
++        }
+     }
+     defer errorable.result.value.deref();
+ 
