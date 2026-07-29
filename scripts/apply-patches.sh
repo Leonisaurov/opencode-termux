@@ -96,10 +96,12 @@ git apply --stat "$REPO_ROOT/patches/bun/android-global-transitive-deps.patch" 2
 git apply "$REPO_ROOT/patches/bun/android-global-transitive-deps.patch" 2>/dev/null || echo "    ⚠️  Skipped (already applied?)"
 echo "    Android global transitive deps fix applied"
 
-    # Parche: Reconstruct global/node_modules/ path from cache paths
-    echo "  • android-global-path-reconstruction.patch — reconstruct global/node_modules/ path from cache"
-    git apply --stat "$PATCH_DIR/bun/android-global-path-reconstruction.patch" 2>/dev/null || true
-    git apply "$PATCH_DIR/bun/android-global-path-reconstruction.patch" 2>/dev/null || echo "    ⚠️  Skipped (already applied?)"
+# Apply global path reconstruction (fix module resolution for global installs)
+echo ">>> Applying Android global path reconstruction fix..."
+cd "$BUN_SRC"
+git apply --stat "$REPO_ROOT/patches/bun/android-global-path-reconstruction.patch" 2>/dev/null || echo "    ⚠️  Skipped (already applied?)"
+git apply "$REPO_ROOT/patches/bun/android-global-path-reconstruction.patch" 2>/dev/null || echo "    ⚠️  Skipped (already applied?)"
+echo "    Android global path reconstruction fix applied"
 
 # Apply skip peer dep "bun" when runtime is bun
 echo ">>> Applying Android skip peer dep 'bun' patch..."
