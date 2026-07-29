@@ -1,3 +1,21 @@
+diff --git a/src/install/npm.zig b/src/install/npm.zig
+index c65a70d..c23e8dd 100644
+--- a/src/install/npm.zig
++++ b/src/install/npm.zig
+@@ -651,6 +651,13 @@ pub const OperatingSystem = enum(u16) {
+     };
+ 
+     pub fn isMatch(this: OperatingSystem, target: OperatingSystem) bool {
++        if (comptime Environment.isAndroid) {
++            // On Android, also consider linux packages as compatible.
++            // Native bindings compiled for linux-arm64 share the same
++            // ARM64 ABI and work on Android (bionic vs glibc is
++            // handled by the .so loader).
++            return (@intFromEnum(this) & (@intFromEnum(target) | @intFromEnum(OperatingSystem.linux))) != 0;
++        }
+         return (@intFromEnum(this) & @intFromEnum(target)) != 0;
+     }
+ 
 diff --git a/src/runtime/api/BunObject.zig b/src/runtime/api/BunObject.zig
 index a23af46..01a0ccc 100644
 --- a/src/runtime/api/BunObject.zig
