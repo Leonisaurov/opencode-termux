@@ -103,6 +103,13 @@ git apply --stat "$REPO_ROOT/patches/bun/android-preserve-symlinks-global.patch"
 git apply "$REPO_ROOT/patches/bun/android-preserve-symlinks-global.patch" 2>/dev/null || echo "    ⚠️  Skipped (already applied?)"
 echo "    Android preserve symlinks for global installs applied"
 
+# Apply skip peer dep "bun" when runtime is bun
+echo ">>> Applying Android skip peer dep 'bun' patch..."
+cd "$BUN_SRC"
+git apply --stat "$REPO_ROOT/patches/bun/android-skip-peer-dep-bun.patch" 2>/dev/null || true
+git apply "$REPO_ROOT/patches/bun/android-skip-peer-dep-bun.patch" 2>/dev/null || echo "    ⚠️  Skipped (already applied?)"
+echo "    Android skip peer dep 'bun' patch applied"
+
 # --- Clone WebKit ---
 if [ ! -d "$WEBKIT_SRC/.git" ]; then
     echo ">>> Cloning WebKit at commit ${WEBKIT_COMMIT}..."

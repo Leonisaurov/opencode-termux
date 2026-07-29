@@ -10,17 +10,19 @@ Cross-compila [Bun](https://bun.sh) para Android/Termux (aarch64). También comp
 ## Pipeline
 
 ```
-build-bun.yml ──→ bun-android binary (cache, ~45 min)
+build-bun.yml ──→ Android Bun ARM64 (con parches)
      ↓
-build-bun-target.yml ──→ target runtime bundle (OPCIONAL)
-     ↓
-build-opencode.yml ──→ OpenCode binary + packages (~5 min)
+Build OpenCode (ARM64 runner) ──→ ubuntu-24.04-arm nativo
+  → bun build --compile --compile-executable-path=<android-bun>
+  → OpenCode ARM64 standalone
 ```
+
+El runner ARM64 nativo elimina el cross-arch issue de `--compile-executable-path`.
 
 ### build-bun.yml
 - Cross-compila Bun 1.3.14 para Android ARM64 via `scripts/build.ts` → `build.ninja` → `ninja`
 - Aplica parches de `patches/` ANTES del build
-- Cache key incluye SHA256 de los 8 parches activos
+- Cache key incluye SHA256 de los 9 parches activos
 
 ### build-opencode.yml
 - Consume Android Bun del caché de build-bun.yml (`fail-on-cache-miss: true`)
@@ -69,6 +71,7 @@ El parche `patches/bun/android-standalone-raw-append.patch` añade ese fallback 
 | `patches/bun/android-global-shebang-fix.patch` | ✅ ACTIVO | `apply-patches.sh` | Fix shebangs (`node`→`bun`) en global install |
 | `patches/bun/android-global-transitive-deps.patch` | ✅ ACTIVO | `apply-patches.sh` | Fix transitive deps + resolver + standalone en global install |
 | `patches/bun/android-preserve-symlinks-global.patch` | ✅ ACTIVO | `apply-patches.sh` | Preserva symlinks en scripts globales para que `__filename` no se resuelva al cache |
+| `patches/bun/android-skip-peer-dep-bun.patch` | ✅ ACTIVO | `apply-patches.sh` | Skip peer dep "bun" cuando runtime es bun (evita postinstall fallido) |
 | `patches/webkit/android-support.patch` | ✅ ACTIVO | `apply-patches.sh` | JSC Android: polling traps, aligned_alloc |
 | `patches/zig/posix-android-sigaction.patch` | 🔄 APLICADO POR BUILD | `build-bun.sh` (implícito) | Al vendor/zig/ que Bun descarga |
 | `patches/bun/build-zig-no-link-obj.patch` | 📎 REFERENCIA | Inline con sed+python3 | Solo documentación, el parche real es inline |
@@ -92,7 +95,7 @@ El parche `patches/bun/android-standalone-raw-append.patch` añade ese fallback 
 | `zig-0.15.2` | Zig estándar ~300 MB | no |
 | `icu-android-75.1-24` | ICU cross-compilado | no |
 | `webkit-android-<commit>-<patch_hash>` | WebKit build | **sí** |
-| `bun-android-1.3.14-<8_hashes>` | Binario Bun ~88 MB | no |
+| `bun-android-1.3.14-<9_hashes>` | Binario Bun ~88 MB | no |
 | `bun-host-1.3.14` | Host bun ~737 MB | no |
 | `opentui-android` | libopentui.so | no |
 
@@ -135,66 +138,9 @@ source scripts/env.sh
 | 🟡 Media | Implementar build vía termux-docker + QEMU (elimina transplant) | ⏳ Pendiente |
 | 🟡 Media | Evaluar si el bug #25110 de `bun add -g` aplica a nuestro Bun ARM64 | ⏳ Pendiente |
 
-## Próximo: Build vía Termux-Docker + QEMU
+## Build exitoso: runner ARM64 nativo
 
-Eliminar el module graph transplant usando `termux/termux-docker:aarch64` con QEMU.
-
-### Diseño
-
-```mermaid
-flowchart LR
-    A[build-bun.yml] --> B[Android Bun ARM64 + fromExecutable patch]
-    B --> C[Docker image ghcr.io/termux-bun-builder]
-    C --> D[CI: docker/setup-qemu-action]
-    D --> E[termux-docker + bun nativo]
-    E --> F[bun install + bun build --compile]
-    F --> G[OpenCode ARM64 sin transplant]
-```
-
-### Dockerfile propuesto
-
-```dockerfile
-FROM termux/termux-docker:aarch64
-RUN apt update && apt install -y git tar xz-utils
-COPY bun-android /data/data/com.termux/files/usr/bin/bun
-RUN chmod +x /data/data/com.termux/files/usr/bin/bun
-```
-
-### Workflow futuro: `build-opencode-docker.yml`
-
-```yaml
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
-      - name: Build OpenCode
-        run: |
-          docker run --rm \
-            -v $PWD:/workspace \
-            ghcr.io/termux-bun-builder:latest \
-            bash -c "
-              cd /workspace/opencode/packages/opencode
-              bun install
-              bun build --compile --outfile=/tmp/opencode ./src/index.ts
-              cp /tmp/opencode /workspace/dist/opencode
-            "
-```
-
-### Cachés
-
-| Cache | Clave | Path |
-|-------|-------|------|
-| Docker image | `bun-builder-<hash>` | ghcr.io |
-| node_modules | `opencode-nm-<lockfile_hash>` | actions/cache, montado en contenedor |
-| OpenCode source | `opencode-src-<version>` | actions/cache |
-
-### Notas
-
-- `writeBunSection()` corre en ARM64 nativo dentro del contenedor → **NO corrompe el ELF** (el bug ocurría porque x86_64 modificaba ELF ARM64)
-- El parche `fromExecutable()` sigue siendo útil como safety net
-- `bun install` dentro de termux-docker obtiene bindings ARM64 automáticamente
-- QEMU añade ~3-5 min al build comparado con native x86_64
-
-- **Dockerfile** está en `scripts/Dockerfile`, no en la raíz.
+Desde Julio 2026, GitHub ofrece runners ARM64 nativos (`ubuntu-24.04-arm`).
+En este runner, `bun build --compile --compile-executable-path=<android-bun>`
+funciona correctamente porque tanto el host bun como el target bun son ARM64,
+eliminando el bug de corrupción de ELF que ocurría en x86_64.

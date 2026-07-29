@@ -63,6 +63,7 @@ jobs:
           echo "shebang_fix_hash=$(sha256sum patches/bun/android-global-shebang-fix.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
           echo "transitive_deps_hash=$(sha256sum patches/bun/android-global-transitive-deps.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
           echo "preserve_symlinks_hash=$(sha256sum patches/bun/android-preserve-symlinks-global.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
+          echo "skip_peer_bun_hash=$(sha256sum patches/bun/android-skip-peer-dep-bun.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
           echo "webkit_patch_hash=$(sha256sum patches/webkit/android-support.patch | cut -c1-16)" >> $GITHUB_OUTPUT
 
       # ── Restore ICU (build if missing, ~5 min) ────────────────
@@ -92,7 +93,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.WORK_DIR }}/bun-build/bun
-          key: bun-android-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.bun_pr_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}-${{ steps.hashes.outputs.android_backend_hash }}-${{ steps.hashes.outputs.raw_append_hash }}-${{ steps.hashes.outputs.shebang_fix_hash }}-${{ steps.hashes.outputs.transitive_deps_hash }}-${{ steps.hashes.outputs.preserve_symlinks_hash }}
+          key: bun-android-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.bun_pr_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}-${{ steps.hashes.outputs.android_backend_hash }}-${{ steps.hashes.outputs.raw_append_hash }}-${{ steps.hashes.outputs.shebang_fix_hash }}-${{ steps.hashes.outputs.transitive_deps_hash }}-${{ steps.hashes.outputs.preserve_symlinks_hash }}-${{ steps.hashes.outputs.skip_peer_bun_hash }}
 
       - name: Clone, patch, and build Bun
         if: steps.cache-bun.outputs.cache-hit != 'true'
