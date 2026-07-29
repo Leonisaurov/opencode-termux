@@ -1,5 +1,5 @@
 diff --git a/src/jsc/VirtualMachine.zig b/src/jsc/VirtualMachine.zig
-index 461906c..c114c79 100644
+index 461906c..3e4d61f 100644
 --- a/src/jsc/VirtualMachine.zig
 +++ b/src/jsc/VirtualMachine.zig
 @@ -2001,6 +2001,76 @@ pub fn resolveMaybeNeedsTrailingSlash(
@@ -67,9 +67,9 @@ index 461906c..c114c79 100644
 +                        // to avoid returning a non-existent path when the
 +                        // package is only in cache and not in global.
 +                        if (global_path) |gp| {
-+                            if (std.fs.access(gp, .{})) {
++                            if (bun.sys.exists(gp)) {
 +                                result.path = gp;
-+                            } else |_| {}
++                            }
 +                        }
 +                    }
 +                }
