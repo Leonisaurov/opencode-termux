@@ -1,11 +1,11 @@
 diff --git a/src/jsc/VirtualMachine.zig b/src/jsc/VirtualMachine.zig
-index 3e4d61f..da606c6 100644
+index 3e4d61f..733f164 100644
 --- a/src/jsc/VirtualMachine.zig
 +++ b/src/jsc/VirtualMachine.zig
-@@ -1899,6 +1899,32 @@ pub fn resolveMaybeNeedsTrailingSlash(
-                 printed,
-             ),
+@@ -1995,6 +1995,32 @@ pub fn resolveMaybeNeedsTrailingSlash(
          };
+ 
+         {
 +        // Platform fallback on Android: try linux-arm64 when android-arm64 fails
 +        if (comptime bun.Environment.isAndroid) {
 +            const spec_slice = specifier_utf8.slice();
@@ -32,6 +32,6 @@ index 3e4d61f..da606c6 100644
 +                }
 +            }
 +        }
-         res.* = ErrorableString.err(error.NameTooLong, (try bun.api.ResolveMessage.create(global, VirtualMachine.get().allocator, msg, source_utf8.slice())));
-         return;
-     }
+             res.* = ErrorableString.err(err, (try bun.api.ResolveMessage.create(global, VirtualMachine.get().allocator, msg, source_utf8.slice())));
+         }
+ 
