@@ -1,5 +1,5 @@
 diff --git a/src/bun.js.zig b/src/bun.js.zig
-index d79d53e..f857b47 100644
+index d79d53e..a6ab3ab 100644
 --- a/src/bun.js.zig
 +++ b/src/bun.js.zig
 @@ -396,6 +396,37 @@ pub const Run = struct {
@@ -10,7 +10,7 @@ index d79d53e..f857b47 100644
 +            const cache_marker = "/install/cache/";
 +            if (strings.indexOf(this.entry_path, cache_marker)) |cache_idx| {
 +                const after_cache = this.entry_path[cache_idx + cache_marker.len..];
-+                if (strings.offsetOfChar(u8, after_cache, '/')) |first_slash| {
++                if (strings.indexOfChar(after_cache, '/')) |first_slash| {
 +                    const pkg_dir = after_cache[0..first_slash];
 +                    const subpath = after_cache[first_slash..];
 +                    var version_end = pkg_dir.len;
@@ -41,7 +41,7 @@ index d79d53e..f857b47 100644
  
          if (vm.loadEntryPoint(this.entry_path)) |promise| {
 diff --git a/src/cli/run_command.zig b/src/cli/run_command.zig
-index 0c171c7..8938e0f 100644
+index 0c171c7..04c5670 100644
 --- a/src/cli/run_command.zig
 +++ b/src/cli/run_command.zig
 @@ -1842,6 +1842,42 @@ pub const RunCommand = struct {
@@ -52,7 +52,7 @@ index 0c171c7..8938e0f 100644
 +                    const cache_marker = "/install/cache/";
 +                    if (strings.indexOf(path.text, cache_marker)) |cache_idx| {
 +                        const after_cache = path.text[cache_idx + cache_marker.len..];
-+                        if (strings.offsetOfChar(u8, after_cache, '/')) |first_slash| {
++                        if (strings.indexOfChar(after_cache, '/')) |first_slash| {
 +                            const pkg_dir = after_cache[0..first_slash];
 +                            const subpath = after_cache[first_slash..];
 +                            var version_end = pkg_dir.len;
