@@ -9,6 +9,7 @@ VERSION="1.0.0"
 INSTALL_PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
 INSTALL_BUN=false
 INSTALL_OPENCODE=false
+FIX_GLOBAL_BINS=false
 
 # Colors
 RED='\033[0;31m'
@@ -42,6 +43,7 @@ OPCIONES:
     --just opencode    Instala solo OpenCode (futuro)
     --all              Instala todo (default)
     --prefix <path>    Directorio de instalación (default: \$PREFIX)
+    --fix-global-bins  Repara binarios globales (reemplaza symlinks por wrappers)
     --version          Muestra versión
     --help             Muestra esta ayuda
 
@@ -68,6 +70,7 @@ parse_args() {
                 ;;
             --all) INSTALL_BUN=true; INSTALL_OPENCODE=true; shift ;;
             --prefix) INSTALL_PREFIX="$2"; shift 2 ;;
+            --fix-global-bins) FIX_GLOBAL_BINS=true; shift ;;
             --version) echo "opencode-termux-installer v$VERSION"; exit 0 ;;
             --help|-h) show_help ;;
             *) error "Opción desconocida: $1"; show_help; exit 1 ;;
@@ -261,6 +264,9 @@ install_bun() {
 
     # Config global: backend copyfile para Android
     setup_bun_config
+
+    # Reparar binarios globales existentes (si los hay)
+    fix_global_bins
 }
 
 # ── Install Bun target runtime (for --compile --target) ──
@@ -367,6 +373,47 @@ EOF
     info ".bunfig.toml creado con backend=copyfile"
 }
 
+# ── Fix global bin wrappers ──
+# Globally installed packages via 'bun add -g' create symlinks in
+# ~/.bun/bin/ that point to the cache via a chain:
+#   ~/.bun/bin/<cmd> → global/node_modules/.bin/<cmd> → global/node_modules/<pkg>/<bin> → cache/...
+#
+# When executed, Bun follows all symlinks and __filename becomes
+# the cache path. Module resolution from the cache fails because
+# require() walks up from cache/ instead of global/node_modules/.
+#
+# The fix: replace symlinks with bash wrappers that call 'bunx <pkg>'.
+# bunx resolves the package from global install and runs it with
+# correct module resolution.
+fix_global_bins() {
+    local bun_bin="$INSTALL_PREFIX/bin/bun"
+    local global_bin_dir="${HOME}/.bun/bin"
+    
+    if [ ! -d "$global_bin_dir" ]; then
+        return 0
+    fi
+    
+    local fixed=0
+    for entry in "$global_bin_dir"/*; do
+        [ -L "$entry" ] || continue
+        local name
+        name=$(basename "$entry")
+        
+        # Replace symlink with bunx wrapper
+        rm "$entry"
+        cat > "$entry" << WRAPPER
+#!/data/data/com.termux/files/usr/bin/bash
+exec "$bun_bin" x "$name" "\$@"
+WRAPPER
+        chmod +x "$entry"
+        fixed=$((fixed + 1))
+    done
+    
+    if [ "$fixed" -gt 0 ]; then
+        info "Arreglados $fixed binarios globales para usar bunx"
+    fi
+}
+
 # ── Main ────────────────────────────────────────────────────────────
 main() {
     echo ""
@@ -376,6 +423,13 @@ main() {
     echo ""
 
     parse_args "$@"
+
+    if $FIX_GLOBAL_BINS; then
+        check_env
+        fix_global_bins
+        exit $?
+    fi
+
     check_env
 
     if $INSTALL_BUN; then
