@@ -1,96 +1,50 @@
-diff --git a/src/bun.js.zig b/src/bun.js.zig
-index d79d53e..4cfa222 100644
---- a/src/bun.js.zig
-+++ b/src/bun.js.zig
-@@ -396,6 +396,42 @@ pub const Run = struct {
-             this.entry_path = vm.transpiler.fs.top_level_dir;
-         }
- 
-+        // Reconstruct global/node_modules/ path if entry is in cache
-+        if (strings.contains(this.entry_path, "/install/cache/")) {
-+            const cache_idx = strings.indexOf(this.entry_path, "/install/cache/") orelse 0;
-+            const after_cache = this.entry_path[cache_idx + "/install/cache/".len..];
-+            if (strings.indexOfChar(after_cache, '/')) |first_slash| {
-+                const pkg_dir = after_cache[0..first_slash];
-+                const subpath = after_cache[first_slash..];
-+
-+                const version_end = brk: {
-+                    var i = pkg_dir.len;
-+                    while (i > 0) {
-+                        i -= 1;
-+                        if (pkg_dir[i] == '@' and
-+                            i + 1 < pkg_dir.len and
-+                            pkg_dir[i + 1] >= '0' and
-+                            pkg_dir[i + 1] <= '9' and
-+                            !(i > 0 and pkg_dir[i - 1] == '@'))
-+                        {
-+                            break :brk i;
-+                        }
-+                    }
-+                    break :brk pkg_dir.len;
-+                };
-+                if (version_end < pkg_dir.len) {
-+                    const pkg_name = pkg_dir[0..version_end];
-+                    const base_dir = this.entry_path[0..cache_idx];
-+                    this.entry_path = try std.fmt.allocPrint(
-+                        bun.default_allocator,
-+                        "{s}/install/global/node_modules/{s}{s}",
-+                        .{ base_dir, pkg_name, subpath },
-+                    );
-+                    vm.transpiler.resolver.opts.preserve_symlinks = true;
-+                }
-+            }
-+        }
-+
-         var printed_sourcemap_warning_and_version = false;
- 
-         if (vm.loadEntryPoint(this.entry_path)) |promise| {
 diff --git a/src/cli/run_command.zig b/src/cli/run_command.zig
-index 0c171c7..ad3b91c 100644
+index 0c171c7..fd2e5a1 100644
 --- a/src/cli/run_command.zig
 +++ b/src/cli/run_command.zig
-@@ -1842,6 +1842,47 @@ pub const RunCommand = struct {
+@@ -1842,6 +1842,48 @@ pub const RunCommand = struct {
                  bun.options.defaultLoaders.get(path.name.ext) orelse .tsx;
              if (loader.canBeRunByBun() or loader == .html or loader == .md) {
                  log("Resolved to: `{s}`", .{path.text});
 +                // Reconstruct global/node_modules/ path from cache path
-+                // Cache: .../install/cache/pkg@v@@@N/sub/file.js
++                // Cache format: .../install/cache/pkg@v@@@N/sub/file.js
++                //                  or .../install/cache/@scope/pkg@v@@@N/sub/file.js
 +                // Global: .../install/global/node_modules/pkg/sub/file.js
 +                if (strings.contains(path.text, "/install/cache/")) {
 +                    const cache_idx = strings.indexOf(path.text, "/install/cache/") orelse 0;
 +                    const after_cache = path.text[cache_idx + "/install/cache/".len..];
-+                    if (strings.indexOfChar(after_cache, '/')) |first_slash| {
-+                        const pkg_dir = after_cache[0..first_slash];
-+                        const subpath = after_cache[first_slash..];
-+                        
-+                        // Strip @version@@@hash from package dir name
-+                        const version_end = brk: {
-+                            var i = pkg_dir.len;
-+                            while (i > 0) {
-+                                i -= 1;
-+                                if (pkg_dir[i] == '@' and
-+                                    i + 1 < pkg_dir.len and
-+                                    pkg_dir[i + 1] >= '0' and
-+                                    pkg_dir[i + 1] <= '9' and
-+                                    !(i > 0 and pkg_dir[i - 1] == '@'))
-+                                {
-+                                    break :brk i;
-+                                }
++                    // Find @@ marker which separates version from hash
++                    if (strings.indexOf(after_cache, "@@")) |at_at| {
++                        // Work backwards from @@ to find the @ that starts the version
++                        var version_at: usize = at_at;
++                        while (version_at > 0) {
++                            version_at -= 1;
++                            if (after_cache[version_at] == '@' and
++                                version_at + 1 < after_cache.len and
++                                after_cache[version_at + 1] >= '0' and
++                                after_cache[version_at + 1] <= '9')
++                            {
++                                break;
 +                            }
-+                            break :brk pkg_dir.len;
-+                        };
-+                        if (version_end < pkg_dir.len) {
-+                            const pkg_name = pkg_dir[0..version_end];
-+                            const base_dir = path.text[0..cache_idx];
-+                            const reconstructed = try std.fmt.allocPrint(
-+                                ctx.allocator,
-+                                "{s}/install/global/node_modules/{s}{s}",
-+                                .{ base_dir, pkg_name, subpath },
-+                            );
-+                            const orig_ps = ctx.args.preserve_symlinks;
-+                            defer ctx.args.preserve_symlinks = orig_ps;
-+                            ctx.args.preserve_symlinks = true;
-+                            return _bootAndHandleError(ctx, reconstructed, loader);
++                        }
++                        if (version_at > 0 and after_cache[version_at] == '@') {
++                            const pkg_name = after_cache[0..version_at];
++                            // Subpath starts after @@N (or @@@N)
++                            var sub_start = at_at + 2; // skip @@
++                            while (sub_start < after_cache.len and after_cache[sub_start] == '@') : (sub_start += 1) {}
++                            while (sub_start < after_cache.len and after_cache[sub_start] >= '0' and after_cache[sub_start] <= '9') : (sub_start += 1) {}
++                            if (sub_start < after_cache.len and after_cache[sub_start] == '/') sub_start += 1;
++                            const subpath = after_cache[sub_start..];
++                            if (subpath.len > 0) {
++                                const base_dir = path.text[0..cache_idx];
++                                const reconstructed = try std.fmt.allocPrint(
++                                    ctx.allocator,
++                                    "{s}/install/global/node_modules/{s}/{s}",
++                                    .{ base_dir, pkg_name, subpath },
++                                );
++                                ctx.args.preserve_symlinks = true;
++                                return _bootAndHandleError(ctx, reconstructed, loader);
++                            }
 +                        }
 +                    }
 +                }
