@@ -1,5 +1,5 @@
 diff --git a/src/install/PackageManager/PackageManagerEnqueue.zig b/src/install/PackageManager/PackageManagerEnqueue.zig
-index cbe8d81..2254351 100644
+index cbe8d81..f8d0793 100644
 --- a/src/install/PackageManager/PackageManagerEnqueue.zig
 +++ b/src/install/PackageManager/PackageManagerEnqueue.zig
 @@ -1694,6 +1694,18 @@ fn getOrPutResolvedPackage(
@@ -14,7 +14,7 @@ index cbe8d81..2254351 100644
 +                if (comptime Environment.isDebug) {
 +                    Output.debug("Skipping install of npm package 'bun' - peer dep satisfied by runtime", .{});
 +                }
-+                return;
++                return null;
 +        }
 +    }
 +
