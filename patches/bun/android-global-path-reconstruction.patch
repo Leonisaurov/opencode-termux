@@ -1,0 +1,89 @@
+diff --git a/src/bun.js.zig b/src/bun.js.zig
+index d79d53e..eca174e 100644
+--- a/src/bun.js.zig
++++ b/src/bun.js.zig
+@@ -396,6 +396,37 @@ pub const Run = struct {
+             this.entry_path = vm.transpiler.fs.top_level_dir;
+         }
+ 
++        if (strings.contains(this.entry_path, "/install/cache/")) {
++            const cache_marker = "/install/cache/";
++            if (strings.indexOfComptime(this.entry_path, cache_marker)) |cache_idx| {
++                const after_cache = this.entry_path[cache_idx + cache_marker.len..];
++                if (strings.offsetOfChar(u8, after_cache, '/')) |first_slash| {
++                    const pkg_dir = after_cache[0..first_slash];
++                    const subpath = after_cache[first_slash..];
++                    var version_end = pkg_dir.len;
++                    while (version_end > 0) {
++                        version_end -= 1;
++                        if (pkg_dir[version_end] == '@' and
++                            version_end + 1 < pkg_dir.len and
++                            pkg_dir[version_end + 1] >= '0' and
++                            pkg_dir[version_end + 1] <= '9' and
++                            !(version_end > 0 and pkg_dir[version_end - 1] == '@'))
++                        {
++                            break;
++                        }
++                    }
++                    const pkg_name = pkg_dir[0..version_end];
++                    const base_dir = this.entry_path[0..cache_idx];
++                    this.entry_path = try std.fmt.allocPrint(
++                        bun.default_allocator,
++                        "{s}/install/global/node_modules/{s}{s}",
++                        .{ base_dir, pkg_name, subpath },
++                    );
++                }
++            }
++            vm.transpiler.resolver.opts.preserve_symlinks = true;
++        }
++
+         var printed_sourcemap_warning_and_version = false;
+ 
+         if (vm.loadEntryPoint(this.entry_path)) |promise| {
+diff --git a/src/cli/run_command.zig b/src/cli/run_command.zig
+index 0c171c7..232a11d 100644
+--- a/src/cli/run_command.zig
++++ b/src/cli/run_command.zig
+@@ -1842,6 +1842,42 @@ pub const RunCommand = struct {
+                 bun.options.defaultLoaders.get(path.name.ext) orelse .tsx;
+             if (loader.canBeRunByBun() or loader == .html or loader == .md) {
+                 log("Resolved to: `{s}`", .{path.text});
++                if (strings.contains(path.text, "/install/cache/")) {
++                    const cache_marker = "/install/cache/";
++                    if (strings.indexOfComptime(path.text, cache_marker)) |cache_idx| {
++                        const after_cache = path.text[cache_idx + cache_marker.len..];
++                        if (strings.offsetOfChar(u8, after_cache, '/')) |first_slash| {
++                            const pkg_dir = after_cache[0..first_slash];
++                            const subpath = after_cache[first_slash..];
++                            var version_end = pkg_dir.len;
++                            while (version_end > 0) {
++                                version_end -= 1;
++                                if (pkg_dir[version_end] == '@' and
++                                    version_end + 1 < pkg_dir.len and
++                                    pkg_dir[version_end + 1] >= '0' and
++                                    pkg_dir[version_end + 1] <= '9' and
++                                    !(version_end > 0 and pkg_dir[version_end - 1] == '@'))
++                                {
++                                    break;
++                                }
++                            }
++                            const pkg_name = pkg_dir[0..version_end];
++                            const base_dir = path.text[0..cache_idx];
++                            const reconstructed_path = try std.fmt.allocPrint(
++                                ctx.allocator,
++                                "{s}/install/global/node_modules/{s}{s}",
++                                .{ base_dir, pkg_name, subpath },
++                            );
++                            const orig_ps = ctx.args.preserve_symlinks;
++                            defer ctx.args.preserve_symlinks = orig_ps;
++                            const orig_rps = this_transpiler.resolver.opts.preserve_symlinks;
++                            defer this_transpiler.resolver.opts.preserve_symlinks = orig_rps;
++                            ctx.args.preserve_symlinks = true;
++                            this_transpiler.resolver.opts.preserve_symlinks = true;
++                            return _bootAndHandleError(ctx, reconstructed_path, loader);
++                        }
++                    }
++                }
+                 return _bootAndHandleError(ctx, path.text, loader);
+             } else {
+                 log("Resolved file `{s}` but ignoring because loader is {s}", .{ path.text, @tagName(loader) });

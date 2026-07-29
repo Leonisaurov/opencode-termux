@@ -70,7 +70,7 @@ El parche `patches/bun/android-standalone-raw-append.patch` añade ese fallback 
 | `patches/bun/android-standalone-raw-append.patch` | ✅ ACTIVO | `apply-patches.sh` | inject() raw append + fromExecutable() fallback |
 | `patches/bun/android-global-shebang-fix.patch` | ✅ ACTIVO | `apply-patches.sh` | Fix shebangs (`node`→`bun`) en global install |
 | `patches/bun/android-global-transitive-deps.patch` | ✅ ACTIVO | `apply-patches.sh` | Fix transitive deps + resolver + standalone en global install |
-| `patches/bun/android-preserve-symlinks-global.patch` | ✅ ACTIVO | `apply-patches.sh` | Preserva symlinks en scripts globales para que `__filename` no se resuelva al cache |
+| `patches/bun/android-global-path-reconstruction.patch` | ✅ ACTIVO | `bun.js.zig`, `run_command.zig` | Reconstruye path global/node_modules/ desde cache para que module resolution funcione |
 | `patches/bun/android-skip-peer-dep-bun.patch` | ✅ ACTIVO | `apply-patches.sh` | Skip peer dep "bun" cuando runtime es bun (evita postinstall fallido) |
 | `patches/webkit/android-support.patch` | ✅ ACTIVO | `apply-patches.sh` | JSC Android: polling traps, aligned_alloc |
 | `patches/zig/posix-android-sigaction.patch` | 🔄 APLICADO POR BUILD | `build-bun.sh` (implícito) | Al vendor/zig/ que Bun descarga |
