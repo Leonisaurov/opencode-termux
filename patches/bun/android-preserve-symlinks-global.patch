@@ -16,24 +16,34 @@ index d79d53e..9eab3aa 100644
  
          if (vm.loadEntryPoint(this.entry_path)) |promise| {
 diff --git a/src/cli/run_command.zig b/src/cli/run_command.zig
-index 0c171c7..83443af 100644
+index 0c171c7..735f72c 100644
 --- a/src/cli/run_command.zig
 +++ b/src/cli/run_command.zig
-@@ -1842,6 +1842,21 @@ pub const RunCommand = struct {
+@@ -1842,6 +1842,31 @@ pub const RunCommand = struct {
                  bun.options.defaultLoaders.get(path.name.ext) orelse .tsx;
              if (loader.canBeRunByBun() or loader == .html or loader == .md) {
                  log("Resolved to: `{s}`", .{path.text});
 +                if (ctx.args.preserve_symlinks != true and strings.contains(path.text, "/install/global/node_modules/")) {
++                    const original_preserve_symlinks = ctx.args.preserve_symlinks;
++                    defer ctx.args.preserve_symlinks = original_preserve_symlinks;
 +                    ctx.args.preserve_symlinks = true;
 +                    const preserve_symlinks = this_transpiler.resolver.opts.preserve_symlinks;
 +                    defer this_transpiler.resolver.opts.preserve_symlinks = preserve_symlinks;
 +                    this_transpiler.resolver.opts.preserve_symlinks = true;
-+                    if (this_transpiler.resolver.resolve(
-+                        this_transpiler.fs.top_level_dir,
-+                        target_name,
-+                        .entry_point_run,
-+                    ) catch null) |re| {
-+                        if (re.path()) |p| {
++                    const re_resolved = brk: {
++                        break :brk this_transpiler.resolver.resolve(
++                            this_transpiler.fs.top_level_dir,
++                            target_name,
++                            .entry_point_run,
++                        ) catch
++                            this_transpiler.resolver.resolve(
++                                this_transpiler.fs.top_level_dir,
++                                try std.mem.join(ctx.allocator, "", &.{ "./", target_name }),
++                                .entry_point_run,
++                            );
++                    };
++                    if (re_resolved) |re| {
++                        if (re.pathConst()) |p| {
 +                            return _bootAndHandleError(ctx, p.text, loader);
 +                        }
 +                    }
