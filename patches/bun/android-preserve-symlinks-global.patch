@@ -16,10 +16,10 @@ index d79d53e..9eab3aa 100644
  
          if (vm.loadEntryPoint(this.entry_path)) |promise| {
 diff --git a/src/cli/run_command.zig b/src/cli/run_command.zig
-index 0c171c7..735f72c 100644
+index 0c171c7..a1503bd 100644
 --- a/src/cli/run_command.zig
 +++ b/src/cli/run_command.zig
-@@ -1842,6 +1842,31 @@ pub const RunCommand = struct {
+@@ -1842,6 +1842,34 @@ pub const RunCommand = struct {
                  bun.options.defaultLoaders.get(path.name.ext) orelse .tsx;
              if (loader.canBeRunByBun() or loader == .html or loader == .md) {
                  log("Resolved to: `{s}`", .{path.text});
@@ -30,19 +30,22 @@ index 0c171c7..735f72c 100644
 +                    const preserve_symlinks = this_transpiler.resolver.opts.preserve_symlinks;
 +                    defer this_transpiler.resolver.opts.preserve_symlinks = preserve_symlinks;
 +                    this_transpiler.resolver.opts.preserve_symlinks = true;
-+                    const re_resolved = brk: {
-+                        break :brk this_transpiler.resolver.resolve(
++                    const resolved_or_null = blk: {
++                        const first = this_transpiler.resolver.resolve(
 +                            this_transpiler.fs.top_level_dir,
 +                            target_name,
 +                            .entry_point_run,
-+                        ) catch
-+                            this_transpiler.resolver.resolve(
++                        ) catch {
++                            const with_slash = std.mem.join(ctx.allocator, "", &.{ "./", target_name }) catch break :blk null;
++                            break :blk this_transpiler.resolver.resolve(
 +                                this_transpiler.fs.top_level_dir,
-+                                try std.mem.join(ctx.allocator, "", &.{ "./", target_name }),
++                                with_slash,
 +                                .entry_point_run,
-+                            );
++                            ) catch null;
++                        };
++                        break :blk first;
 +                    };
-+                    if (re_resolved) |re| {
++                    if (resolved_or_null) |re| {
 +                        if (re.pathConst()) |p| {
 +                            return _bootAndHandleError(ctx, p.text, loader);
 +                        }
