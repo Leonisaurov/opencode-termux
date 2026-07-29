@@ -1,0 +1,33 @@
+diff --git a/src/jsc/VirtualMachine.zig b/src/jsc/VirtualMachine.zig
+index 461906c..803cc28 100644
+--- a/src/jsc/VirtualMachine.zig
++++ b/src/jsc/VirtualMachine.zig
+@@ -2001,6 +2001,28 @@ pub fn resolveMaybeNeedsTrailingSlash(
+         return;
+     };
+ 
++    // Fallback for global packages: if resolution failed and the source
++    // path is inside Bun's install cache, retry resolution from the
++    // global node_modules directory where transitive deps are stored.
++    if (result.path.len == 0) {
++        const source_slice = normalizeSource(source_utf8.slice());
++        if (strings.contains(source_slice, "/install/cache/")) {
++            const cache_idx = strings.indexOf(source_slice, "/install/cache/") orelse 0;
++            if (cache_idx > 0) {
++                const base_dir = source_slice[0..cache_idx];
++                var global_path_buf: [bun.MAX_PATH_BYTES]u8 = undefined;
++                const global_path = std.fmt.bufPrint(
++                    &global_path_buf,
++                    "{s}/install/global/node_modules/.resolve",
++                    .{base_dir},
++                ) catch null;
++                if (global_path) |gp| {
++                    result = .{ .path = "", .result = null };
++                    jsc_vm._resolve(&result, specifier_utf8.slice(), gp, is_esm, is_a_file_path) catch {};
++                }
++            }
++        }
++    }
+     if (query_string) |query| {
+         // `result.query_string` is a slice into `specifier_utf8`, which is freed by
+         // `defer specifier_utf8.deinit()` before callers (C++ or Zig) read the out-param.

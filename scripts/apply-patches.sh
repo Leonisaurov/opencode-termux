@@ -103,6 +103,13 @@ git apply --stat "$REPO_ROOT/patches/bun/android-global-path-reconstruction.patc
 git apply "$REPO_ROOT/patches/bun/android-global-path-reconstruction.patch" 2>/dev/null || echo "    ⚠️  Skipped (already applied?)"
 echo "    Android global path reconstruction fix applied"
 
+# Apply global resolve fallback (fix transitive dep resolution for global packages)
+echo ">>> Applying Android global resolve fallback fix..."
+cd "$BUN_SRC"
+git apply --stat "$REPO_ROOT/patches/bun/android-global-resolve-fallback.patch" 2>/dev/null || echo "    ⚠️  Skipped (already applied?)"
+git apply "$REPO_ROOT/patches/bun/android-global-resolve-fallback.patch" 2>/dev/null || echo "    ⚠️  Skipped (already applied?)"
+echo "    Android global resolve fallback fix applied"
+
 # Apply skip peer dep "bun" when runtime is bun
 echo ">>> Applying Android skip peer dep 'bun' patch..."
 cd "$BUN_SRC"
