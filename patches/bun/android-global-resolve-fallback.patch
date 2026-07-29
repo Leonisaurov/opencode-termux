@@ -1,8 +1,8 @@
 diff --git a/src/jsc/VirtualMachine.zig b/src/jsc/VirtualMachine.zig
-index 461906c..803cc28 100644
+index 461906c..c114c79 100644
 --- a/src/jsc/VirtualMachine.zig
 +++ b/src/jsc/VirtualMachine.zig
-@@ -2001,6 +2001,28 @@ pub fn resolveMaybeNeedsTrailingSlash(
+@@ -2001,6 +2001,76 @@ pub fn resolveMaybeNeedsTrailingSlash(
          return;
      };
  
@@ -24,6 +24,54 @@ index 461906c..803cc28 100644
 +                if (global_path) |gp| {
 +                    result = .{ .path = "", .result = null };
 +                    jsc_vm._resolve(&result, specifier_utf8.slice(), gp, is_esm, is_a_file_path) catch {};
++                }
++            }
++        }
++    }
++    // Transform resolved cache paths to global node_modules paths.
++    // When resolution succeeds but returns a path inside Bun's flat
++    // install cache, transform it to the global equivalent so that
++    // module.filename points to global/node_modules/ where transitive
++    // deps are properly linked via symlinks.
++    if (result.path.len > 0 and strings.contains(result.path, "/install/cache/")) {
++        const path_slice = result.path;
++        const cache_idx = strings.indexOf(path_slice, "/install/cache/") orelse 0;
++        if (cache_idx > 0) {
++            const after_cache = path_slice[cache_idx + "/install/cache/".len..];
++            if (strings.indexOf(after_cache, "@@")) |at_at| {
++                var version_at: usize = at_at;
++                while (version_at > 0) {
++                    version_at -= 1;
++                    if (after_cache[version_at] == '@' and
++                        version_at + 1 < after_cache.len and
++                        after_cache[version_at + 1] >= '0' and
++                        after_cache[version_at + 1] <= '9')
++                    { break; }
++                }
++                if (version_at > 0 and after_cache[version_at] == '@') {
++                    const pkg_name = after_cache[0..version_at];
++                    var sub_start = at_at + 2;
++                    while (sub_start < after_cache.len and after_cache[sub_start] == '@') : (sub_start += 1) {}
++                    while (sub_start < after_cache.len and after_cache[sub_start] != '/') : (sub_start += 1) {}
++                    if (sub_start < after_cache.len and after_cache[sub_start] == '/') sub_start += 1;
++                    const subpath = after_cache[sub_start..];
++                    if (subpath.len > 0) {
++                        const base_dir = path_slice[0..cache_idx];
++                        var global_buf: [bun.MAX_PATH_BYTES]u8 = undefined;
++                        const global_path = std.fmt.bufPrint(
++                            &global_buf,
++                            "{s}/install/global/node_modules/{s}/{s}",
++                            .{ base_dir, pkg_name, subpath },
++                        ) catch null;
++                        // Only transform if the global path actually exists
++                        // to avoid returning a non-existent path when the
++                        // package is only in cache and not in global.
++                        if (global_path) |gp| {
++                            if (std.fs.access(gp, .{})) {
++                                result.path = gp;
++                            } else |_| {}
++                        }
++                    }
 +                }
 +            }
 +        }
