@@ -35,12 +35,34 @@ jobs:
             bun-android-
           fail-on-cache-miss: true
 
-      # ── Restore OpenTUI ARM64 native library ──
-      - name: Restore OpenTUI
+      # ── Build libopentui.so ───────────────────────────────────
+      - name: Restore Zig cache
+        id: restore-zig
         uses: actions/cache/restore@v4
         with:
-          path: ${{ env.WORK_DIR }}/opentui-build/libopentui.so
-          key: opentui-android
+          path: ${{ env.WORK_DIR }}/zig
+          key: zig-0.15.2
+
+      - name: Install Zig
+        if: steps.restore-zig.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL https://ziglang.org/download/0.15.2/zig-linux-aarch64-0.15.2.tar.xz | tar xJ -C "$WORK_DIR"
+          ln -sf "$WORK_DIR/zig-linux-aarch64-0.15.2/zig" /usr/local/bin/zig
+
+      - name: Compile libopentui.so
+        run: |
+          source scripts/env.sh
+          mkdir -p "$WORK_DIR/opentui-src"
+          ./scripts/build-opentui.sh
+          # Build output goes to $WORK_DIR/opentui-src/zig-out/
+          SO_FILE="$WORK_DIR/opentui-src/zig-out/lib/libopentui.so"
+          if [ -f "$SO_FILE" ]; then
+            mkdir -p "$WORK_DIR/opentui-build"
+            cp "$SO_FILE" "$WORK_DIR/opentui-build/libopentui.so"
+            echo "OpenTUI compiled OK"
+          else
+            echo "Warning: libopentui.so not found at $SO_FILE"
+          fi
 
       # ── Install stock Bun (for building) ──
       - name: Install stock Bun
