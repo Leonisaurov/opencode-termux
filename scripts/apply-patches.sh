@@ -117,12 +117,6 @@ git apply "$REPO_ROOT/patches/bun/android-platform-fallback.patch" 2>/dev/null |
 echo "    Android platform fallback fix applied"
 echo "    Android global resolve fallback fix applied"
 
-# Apply skip peer dep "bun" when runtime is bun
-echo ">>> Applying Android skip peer dep 'bun' patch..."
-cd "$BUN_SRC"
-git apply --stat "$REPO_ROOT/patches/bun/android-skip-peer-dep-bun.patch" 2>/dev/null || true
-git apply "$REPO_ROOT/patches/bun/android-skip-peer-dep-bun.patch" 2>/dev/null || echo "    ⚠️  Skipped (already applied?)"
-echo "    Android skip peer dep 'bun' patch applied"
 
 # --- Clone WebKit ---
 if [ ! -d "$WEBKIT_SRC/.git" ]; then
