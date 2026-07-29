@@ -1,51 +1,37 @@
-diff --git a/src/install/npm.zig b/src/install/npm.zig
-index c65a70d..4f52cf4 100644
---- a/src/install/npm.zig
-+++ b/src/install/npm.zig
-@@ -651,6 +651,13 @@ pub const OperatingSystem = enum(u16) {
-     };
- 
-     pub fn isMatch(this: OperatingSystem, target: OperatingSystem) bool {
-+        if (comptime Environment.isAndroid) {
-+            // On Android, also consider linux packages as compatible.
-+            // Native bindings compiled for linux-arm64 share the same
-+            // ARM64 ABI and work on Android (bionic vs glibc is
-+            // handled by the .so loader).
-+            return (@intFromEnum(this) & (@intFromEnum(target) | OperatingSystem.linux)) != 0;
-+        }
-         return (@intFromEnum(this) & @intFromEnum(target)) != 0;
-     }
- 
-diff --git a/src/runtime/api/BunObject.zig b/src/runtime/api/BunObject.zig
-index a23af46..01a0ccc 100644
---- a/src/runtime/api/BunObject.zig
-+++ b/src/runtime/api/BunObject.zig
-@@ -845,7 +845,27 @@ fn doResolveWithArgs(ctx: *jsc.JSGlobalObject, specifier: bun.String, from: bun.
-     );
- 
-     if (!errorable.success) {
--        return ctx.throwValue(errorable.result.err.value);
+diff --git a/src/jsc/VirtualMachine.zig b/src/jsc/VirtualMachine.zig
+index 3e4d61f..da606c6 100644
+--- a/src/jsc/VirtualMachine.zig
++++ b/src/jsc/VirtualMachine.zig
+@@ -1899,6 +1899,32 @@ pub fn resolveMaybeNeedsTrailingSlash(
+                 printed,
+             ),
+         };
++        // Platform fallback on Android: try linux-arm64 when android-arm64 fails
 +        if (comptime bun.Environment.isAndroid) {
-+            const spec_utf8 = specifier_decoded.toUTF8(bun.default_allocator);
-+            defer spec_utf8.deinit();
-+            const spec_slice = spec_utf8.slice();
++            const spec_slice = specifier_utf8.slice();
 +            if (bun.strings.indexOf(spec_slice, "android-arm64")) |pos| {
 +                const before = spec_slice[0..pos];
 +                const after = spec_slice[pos + "android-arm64".len..];
 +                var buf: [bun.MAX_PATH_BYTES]u8 = undefined;
 +                const linux_spec = std.fmt.bufPrint(&buf, "{s}linux-arm64{s}", .{ before, after }) catch null;
 +                if (linux_spec) |ls| {
-+                    const linux_bun = bun.String.init(ls);
-+                    try VirtualMachine.resolveMaybeNeedsTrailingSlash(
-+                        &errorable, ctx, linux_bun, from, &query_string,
-+                        is_esm, is_file_path, is_user_require_resolve,
-+                    );
++                    result = .{ .path = "", .result = null };
++                    jsc_vm._resolve(&result, ls, normalizeSource(source_utf8.slice()), is_esm, is_a_file_path) catch |_| {
++                        // Retry failed. Keep original error.
++                    };
++                    if (result.path.len > 0) {
++                        if (query_string) |query| {
++                            query.* = if (result.query_string.len > 0)
++                                bun.String.cloneUTF8(result.query_string)
++                            else
++                                bun.String.empty;
++                        }
++                        res.* = ErrorableString.ok(bun.String.cloneUTF8(result.path));
++                        return;
++                    }
 +                }
 +            }
 +        }
-+        if (!errorable.success) {
-+            return ctx.throwValue(errorable.result.err.value);
-+        }
+         res.* = ErrorableString.err(error.NameTooLong, (try bun.api.ResolveMessage.create(global, VirtualMachine.get().allocator, msg, source_utf8.slice())));
+         return;
      }
-     defer errorable.result.value.deref();
- 
