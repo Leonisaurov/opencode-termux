@@ -1,8 +1,8 @@
 diff --git a/src/runtime/api/BunObject.zig b/src/runtime/api/BunObject.zig
-index a23af46..e13eb93 100644
+index a23af46..01a0ccc 100644
 --- a/src/runtime/api/BunObject.zig
 +++ b/src/runtime/api/BunObject.zig
-@@ -845,7 +845,28 @@ fn doResolveWithArgs(ctx: *jsc.JSGlobalObject, specifier: bun.String, from: bun.
+@@ -845,7 +845,27 @@ fn doResolveWithArgs(ctx: *jsc.JSGlobalObject, specifier: bun.String, from: bun.
      );
  
      if (!errorable.success) {
@@ -17,8 +17,7 @@ index a23af46..e13eb93 100644
 +                var buf: [bun.MAX_PATH_BYTES]u8 = undefined;
 +                const linux_spec = std.fmt.bufPrint(&buf, "{s}linux-arm64{s}", .{ before, after }) catch null;
 +                if (linux_spec) |ls| {
-+                    const linux_bun = bun.String.createUTF8(ls);
-+                    defer linux_bun.deref();
++                    const linux_bun = bun.String.init(ls);
 +                    try VirtualMachine.resolveMaybeNeedsTrailingSlash(
 +                        &errorable, ctx, linux_bun, from, &query_string,
 +                        is_esm, is_file_path, is_user_require_resolve,
