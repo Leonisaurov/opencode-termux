@@ -1,0 +1,13 @@
+diff --git a/scripts/build/config.ts b/scripts/build/config.ts
+index fd527a2..7c68a1d 100644
+--- a/scripts/build/config.ts
++++ b/scripts/build/config.ts
+@@ -619,7 +619,7 @@ export function resolveConfig(partial: PartialConfig, toolchain: Toolchain): Con
+   // TinyCC: off on Windows ARM64 (not supported), Android (no upstream
+   // bionic support; FFI cc() falls back to dlopen-only), and FreeBSD
+   // (oven-sh/tinycc has no FreeBSD target).
+-  const tinycc = partial.tinycc ?? !((windows && arm64) || abi === "android" || freebsd);
++  const tinycc = partial.tinycc ?? !((windows && arm64) || freebsd);
+ 
+   const valgrind = partial.valgrind ?? false;
+   const fuzzilli = partial.fuzzilli ?? false;

@@ -114,9 +114,25 @@ echo ">>> Applying Android platform fallback fix..."
 cd "$BUN_SRC"
 git apply --stat "$REPO_ROOT/patches/bun/android-platform-fallback.patch" 2>/dev/null || echo "    ⚠️  Skipped (already applied?)"
 git apply "$REPO_ROOT/patches/bun/android-platform-fallback.patch" 2>/dev/null || echo "    ⚠️  Skipped (already applied?)"
-echo "    Android platform fallback fix applied"
-echo "    Android global resolve fallback fix applied"
+    echo "    Android platform fallback fix applied"
+    echo "    Android global resolve fallback fix applied"
 
+# Apply TinyCC configuration changes for Android
+echo ">>> Applying TinyCC Android configuration..."
+cd "$BUN_SRC"
+git apply --stat "$REPO_ROOT/patches/bun/android-config-tinycc.patch" 2>/dev/null || true
+git apply "$REPO_ROOT/patches/bun/android-config-tinycc.patch" 2>/dev/null || true
+echo "    TinyCC Android config applied"
+
+echo ">>> Applying TinyCC build dependency changes..."
+cd "$BUN_SRC"
+git apply --stat "$REPO_ROOT/patches/bun/android-tinycc-deps.patch" 2>/dev/null || true
+git apply "$REPO_ROOT/patches/bun/android-tinycc-deps.patch" 2>/dev/null || true
+echo "    TinyCC build dependency changes applied"
+
+echo ">>> Installing TinyCC vendor patch for Android..."
+cp "$REPO_ROOT/patches/tinycc/include-tccdefs.h.patch" "$BUN_SRC/patches/tinycc/include-tccdefs.h.patch"
+echo "    TinyCC vendor patch installed"
 
 # --- Clone WebKit ---
 if [ ! -d "$WEBKIT_SRC/.git" ]; then
