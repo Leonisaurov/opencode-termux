@@ -95,6 +95,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.WORK_DIR }}/bun-build/bun
+          key: bun-android-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.bun_pr_hash }}-${{ steps.hashes.outputs.android_backend_hash }}-${{ steps.hashes.outputs.raw_append_hash }}-${{ steps.hashes.outputs.shebang_fix_hash }}-${{ steps.hashes.outputs.transitive_deps_hash }}-${{ steps.hashes.outputs.path_reconstruction_hash }}-${{ steps.hashes.outputs.resolve_fallback_hash }}-${{ steps.hashes.outputs.platform_fallback_hash }}-${{ steps.hashes.outputs.tinycc_config_hash }}
 
       - name: Clone, patch, and build Bun
         if: steps.cache-bun.outputs.cache-hit != 'true'
