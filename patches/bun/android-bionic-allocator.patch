@@ -46,7 +46,7 @@ index 18be563..966fc84 100644
  };
  
 -const basic = if (bun.use_mimalloc)
-+const basic = if (comptime Environment.isAndroid)
++const basic = if (Environment.isAndroid)
 +    @import("./bionic.zig")
 +else if (bun.use_mimalloc)
      @import("./basic.zig")
