@@ -124,6 +124,13 @@ git apply --stat "$REPO_ROOT/patches/bun/android-config-tinycc.patch" 2>/dev/nul
 git apply "$REPO_ROOT/patches/bun/android-config-tinycc.patch" 2>/dev/null || true
 echo "    TinyCC Android config applied"
 
+# Apply system allocator fix for Android (use Scudo instead of mimalloc)
+echo ">>> Applying Android system allocator fix..."
+cd "$BUN_SRC"
+git apply --stat "$REPO_ROOT/patches/bun/android-system-allocator.patch" 2>/dev/null || true
+git apply "$REPO_ROOT/patches/bun/android-system-allocator.patch" 2>/dev/null || true
+echo "    Android system allocator fix applied"
+
 
 
 # --- Clone WebKit ---

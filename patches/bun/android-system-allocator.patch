@@ -1,0 +1,25 @@
+diff --git a/scripts/build/flags.ts b/scripts/build/flags.ts
+index df55580..bca0d0f 100644
+--- a/scripts/build/flags.ts
++++ b/scripts/build/flags.ts
+@@ -619,6 +619,7 @@ export const defines: Flag[] = [
+   {
+     // Hardcoded ON — experimental flag not exposed in config
+     flag: "USE_BUN_MIMALLOC=1",
++    when: (c) => c.abi !== "android",
+     desc: "Use mimalloc as default allocator",
+   },
+ 
+diff --git a/scripts/build/zig.ts b/scripts/build/zig.ts
+index 2e0129e..bee3bfd 100644
+--- a/scripts/build/zig.ts
++++ b/scripts/build/zig.ts
+@@ -509,7 +509,7 @@ function zigBuildArgs(cfg: Config): string[] {
+     `-Dlto=${bool(cfg.lto)}`,
+     // Always ON — bun uses mimalloc as its default allocator. The flag
+     // exists for experimentation; in practice it's never OFF.
+-    `-Duse_mimalloc=true`,
++    `-Duse_mimalloc=${cfg.abi !== "android"}`,
+     // Sharded LLVM codegen — one shard per host core on the parallel
+     // compiler. Zig has no "auto" value (0 = single-threaded). MUST be 0
+     // on the stable compiler — see codegenThreads().
