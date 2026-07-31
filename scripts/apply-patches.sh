@@ -131,6 +131,13 @@ git apply --stat "$REPO_ROOT/patches/bun/android-system-allocator.patch" 2>/dev/
 git apply "$REPO_ROOT/patches/bun/android-system-allocator.patch" 2>/dev/null || true
 echo "    Android system allocator fix applied"
 
+# Apply formal bionic allocator (use system Scudo, no mimalloc linking)
+echo ">>> Applying Android bionic allocator..."
+cd "$BUN_SRC"
+git apply --stat "$REPO_ROOT/patches/bun/android-bionic-allocator.patch" 2>/dev/null || true
+git apply "$REPO_ROOT/patches/bun/android-bionic-allocator.patch" 2>/dev/null || true
+echo "    Android bionic allocator applied"
+
 
 
 # --- Clone WebKit ---

@@ -1,0 +1,269 @@
+diff --git a/scripts/build/deps/mimalloc.ts b/scripts/build/deps/mimalloc.ts
+index ea0d1bc..8329b82 100644
+--- a/scripts/build/deps/mimalloc.ts
++++ b/scripts/build/deps/mimalloc.ts
+@@ -17,6 +17,11 @@ const MIMALLOC_COMMIT = "f15aecb94fc8096008bf87b90c53ed682026914a";
+ export const mimalloc: Dependency = {
+   name: "mimalloc",
+   versionMacro: "MIMALLOC",
++  // mimalloc is the default allocator on Linux/macOS/Windows. On
++  // Android (bionic), Bun uses the system allocator (Scudo) so that
++  // memory can safely cross into native libraries compiled against
++  // the NDK — mimalloc and Scudo are not interoperable.
++  enabled: cfg => cfg.abi !== "android",
+ 
+   source: () => ({
+     kind: "github-archive",
+diff --git a/src/bun_alloc/bionic.zig b/src/bun_alloc/bionic.zig
+new file mode 100644
+index 0000000..1c0a593
+--- /dev/null
++++ b/src/bun_alloc/bionic.zig
+@@ -0,0 +1,17 @@
++/// The bionic allocator — the Android system allocator.
++///
++/// Bun on Android uses bionic's system allocator (Scudo) instead of
++/// mimalloc so that memory allocated by the runtime can safely cross
++/// the boundary into native libraries compiled against the NDK (which
++/// also use Scudo). mimalloc and Scudo maintain incompatible chunk
++/// headers; freeing a mimalloc allocation through Scudo (or vice versa)
++/// is detected as heap corruption and aborts the process.
++pub const c_allocator = std.heap.c_allocator;
++pub const z_allocator = @import("./fallback/z.zig").allocator;
++
++/// libc can free allocations without being given their size.
++pub fn freeWithoutSize(ptr: ?*anyopaque) void {
++    std.c.free(ptr);
++}
++
++const std = @import("std");
+diff --git a/src/bun_alloc/bun_alloc.zig b/src/bun_alloc/bun_alloc.zig
+index 18be563..966fc84 100644
+--- a/src/bun_alloc/bun_alloc.zig
++++ b/src/bun_alloc/bun_alloc.zig
+@@ -924,7 +924,9 @@ pub const Default = struct {
+     pub const deinit = void;
+ };
+ 
+-const basic = if (bun.use_mimalloc)
++const basic = if (comptime Environment.isAndroid)
++    @import("./bionic.zig")
++else if (bun.use_mimalloc)
+     @import("./basic.zig")
+ else
+     @import("./fallback.zig");
+diff --git a/src/bundler/BundleThread.zig b/src/bundler/BundleThread.zig
+index 179f01f..345008a 100644
+--- a/src/bundler/BundleThread.zig
++++ b/src/bundler/BundleThread.zig
+@@ -92,7 +92,9 @@ pub fn BundleThread(CompletionStruct: type) type {
+                 instance.generation +|= 1;
+ 
+                 if (has_bundled) {
+-                    bun.mimalloc.mi_collect(false);
++                    if (comptime bun.use_mimalloc) {
++                        bun.mimalloc.mi_collect(false);
++                    }
+                     has_bundled = false;
+                 }
+ 
+diff --git a/src/jsc/bindings/BunString.cpp b/src/jsc/bindings/BunString.cpp
+index 0288c78..a25a647 100644
+--- a/src/jsc/bindings/BunString.cpp
++++ b/src/jsc/bindings/BunString.cpp
+@@ -14,7 +14,7 @@
+ #include "DOMURL.h"
+ #include "ZigGlobalObject.h"
+ #include "IDLTypes.h"
+-#include "mimalloc.h"
++#include "MimallocCompat.h"
+ 
+ #include <limits>
+ #include <wtf/Seconds.h>
+diff --git a/src/jsc/bindings/MiString.h b/src/jsc/bindings/MiString.h
+index 597b057..c63ff7d 100644
+--- a/src/jsc/bindings/MiString.h
++++ b/src/jsc/bindings/MiString.h
+@@ -1,6 +1,6 @@
+ #pragma once
+ #include "root.h"
+-#include <mimalloc.h>
++#include "MimallocCompat.h"
+ 
+ struct MiCString {
+     const char* ptr;
+diff --git a/src/jsc/bindings/MimallocCompat.h b/src/jsc/bindings/MimallocCompat.h
+new file mode 100644
+index 0000000..d4b4f1d
+--- /dev/null
++++ b/src/jsc/bindings/MimallocCompat.h
+@@ -0,0 +1,34 @@
++#pragma once
++
++// Mimalloc compatibility layer.
++//
++// On platforms where Bun uses mimalloc as its default allocator
++// (Linux, macOS, Windows), this header exposes the real mimalloc API.
++// On Android (bionic), Bun uses the system allocator (Scudo) instead
++// so that memory allocated by the runtime can safely cross the boundary
++// into native libraries compiled against the NDK (which also use Scudo).
++// The mi_* functions are thin wrappers over libc in mimalloc_compat.cpp
++// that keep the rest of the codebase compiling unchanged.
++
++#include "root.h"
++
++#if USE(BUN_MIMALLOC)
++#include "mimalloc.h"
++#include "mimalloc/types.h"
++#else
++#include <cstddef>
++
++extern "C" {
++void* mi_malloc(size_t size);
++void* mi_calloc(size_t count, size_t size);
++void* mi_realloc(void* p, size_t newsize);
++void mi_free(void* p);
++void* mi_zalloc(size_t size);
++void* mi_malloc_aligned(size_t size, size_t alignment);
++void* mi_expand(void* p, size_t newsize);
++void mi_collect(bool force);
++char* mi_stats_get_json(size_t, char*);
++char* mi_heap_dump_json(bool include_blocks, bool hash_addresses);
++void mi_process_info(size_t* elapsed_msecs, size_t* user_msecs, size_t* system_msecs, size_t* current_rss, size_t* peak_rss, size_t* current_commit, size_t* peak_commit, size_t* page_faults);
++}
++#endif
+diff --git a/src/jsc/bindings/MimallocWTFMalloc.h b/src/jsc/bindings/MimallocWTFMalloc.h
+index eb87710..8f4b6a9 100644
+--- a/src/jsc/bindings/MimallocWTFMalloc.h
++++ b/src/jsc/bindings/MimallocWTFMalloc.h
+@@ -4,8 +4,7 @@
+ #include <cstdlib>
+ #include <wtf/Assertions.h>
+ #include <wtf/PlatformOS.h>
+-#include "mimalloc.h"
+-#include "mimalloc/types.h"
++#include "MimallocCompat.h"
+ 
+ namespace Bun {
+ // For use with WTF types like WTF::Vector.
+diff --git a/src/jsc/bindings/Uint8Array.cpp b/src/jsc/bindings/Uint8Array.cpp
+index 53feafe..a7d42ef 100644
+--- a/src/jsc/bindings/Uint8Array.cpp
++++ b/src/jsc/bindings/Uint8Array.cpp
+@@ -2,7 +2,7 @@
+ 
+ #include "JavaScriptCore/JSArrayBuffer.h"
+ #include "JavaScriptCore/TypedArrayType.h"
+-#include "mimalloc.h"
++#include "MimallocCompat.h"
+ 
+ namespace Bun {
+ 
+diff --git a/src/jsc/bindings/ZigSourceProvider.cpp b/src/jsc/bindings/ZigSourceProvider.cpp
+index 076d31f..9256852 100644
+--- a/src/jsc/bindings/ZigSourceProvider.cpp
++++ b/src/jsc/bindings/ZigSourceProvider.cpp
+@@ -14,7 +14,7 @@
+ #include <wtf/text/StringHash.h>
+ #include <sys/stat.h>
+ #include <JavaScriptCore/SourceCodeKey.h>
+-#include <mimalloc.h>
++#include "MimallocCompat.h"
+ #include <JavaScriptCore/CodeCache.h>
+ 
+ namespace Zig {
+diff --git a/src/jsc/bindings/mimalloc_compat.cpp b/src/jsc/bindings/mimalloc_compat.cpp
+new file mode 100644
+index 0000000..db750a9
+--- /dev/null
++++ b/src/jsc/bindings/mimalloc_compat.cpp
+@@ -0,0 +1,74 @@
++// Provides the mimalloc API on Android where Bun uses the system
++// allocator (Scudo) instead of mimalloc. This file is empty on
++// platforms where mimalloc is the default allocator.
++#include "MimallocCompat.h"
++#include <cstdlib>
++
++#if !USE(BUN_MIMALLOC)
++extern "C" {
++
++void* mi_malloc(size_t size)
++{
++    return std::malloc(size);
++}
++
++void* mi_calloc(size_t count, size_t size)
++{
++    return std::calloc(count, size);
++}
++
++void* mi_realloc(void* p, size_t newsize)
++{
++    return std::realloc(p, newsize);
++}
++
++void mi_free(void* p)
++{
++    std::free(p);
++}
++
++void* mi_zalloc(size_t size)
++{
++    return std::calloc(1, size);
++}
++
++void* mi_malloc_aligned(size_t size, size_t alignment)
++{
++    void* p = nullptr;
++    if (posix_memalign(&p, alignment, size) != 0)
++        return nullptr;
++    return p;
++}
++
++void* mi_expand(void* p, size_t newsize)
++{
++    return std::realloc(p, newsize);
++}
++
++void mi_collect(bool)
++{
++}
++
++char* mi_stats_get_json(size_t, char*)
++{
++    return nullptr;
++}
++
++char* mi_heap_dump_json(bool, bool)
++{
++    return nullptr;
++}
++
++void mi_process_info(size_t* elapsed_msecs, size_t* user_msecs, size_t* system_msecs, size_t* current_rss, size_t* peak_rss, size_t* current_commit, size_t* peak_commit, size_t* page_faults)
++{
++    *elapsed_msecs = 0;
++    *user_msecs = 0;
++    *system_msecs = 0;
++    *current_rss = 0;
++    *peak_rss = 0;
++    *current_commit = 0;
++    *peak_commit = 0;
++    *page_faults = 0;
++}
++}
++#endif
+diff --git a/src/jsc/modules/BunJSCModule.h b/src/jsc/modules/BunJSCModule.h
+index deb683b..ecfb57f 100644
+--- a/src/jsc/modules/BunJSCModule.h
++++ b/src/jsc/modules/BunJSCModule.h
+@@ -45,9 +45,7 @@
+ 
+ #include "JSDOMConvertBase.h"
+ #include "ZigSourceProvider.h"
+-#include "mimalloc.h"
+-extern "C" char* mi_stats_get_json(size_t, char*);
+-extern "C" char* mi_heap_dump_json(bool include_blocks, bool hash_addresses);
++#include "../bindings/MimallocCompat.h"
+ 
+ #include <JavaScriptCore/ControlFlowProfiler.h>
+ 

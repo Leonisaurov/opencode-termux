@@ -67,6 +67,7 @@ jobs:
           echo "platform_fallback_hash=$(sha256sum patches/bun/android-platform-fallback.patch | head -c 8)" >> $GITHUB_OUTPUT
           echo "tinycc_config_hash=$(sha256sum patches/bun/android-config-tinycc.patch | head -c 8)" >> $GITHUB_OUTPUT
           echo "allocator_hash=$(sha256sum patches/bun/android-system-allocator.patch | head -c 8)" >> $GITHUB_OUTPUT
+          echo "bionic_hash=$(sha256sum patches/bun/android-bionic-allocator.patch | head -c 8)" >> $GITHUB_OUTPUT
           echo "webkit_patch_hash=$(sha256sum patches/webkit/android-support.patch | cut -c1-16)" >> $GITHUB_OUTPUT
 
       # ── Restore ICU (build if missing, ~5 min) ────────────────
@@ -96,7 +97,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.WORK_DIR }}/bun-build/bun
-          key: bun-android-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.bun_pr_hash }}-${{ steps.hashes.outputs.android_backend_hash }}-${{ steps.hashes.outputs.raw_append_hash }}-${{ steps.hashes.outputs.shebang_fix_hash }}-${{ steps.hashes.outputs.transitive_deps_hash }}-${{ steps.hashes.outputs.path_reconstruction_hash }}-${{ steps.hashes.outputs.resolve_fallback_hash }}-${{ steps.hashes.outputs.platform_fallback_hash }}-${{ steps.hashes.outputs.tinycc_config_hash }}-${{ steps.hashes.outputs.allocator_hash }}
+          key: bun-android-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.bun_pr_hash }}-${{ steps.hashes.outputs.android_backend_hash }}-${{ steps.hashes.outputs.raw_append_hash }}-${{ steps.hashes.outputs.shebang_fix_hash }}-${{ steps.hashes.outputs.transitive_deps_hash }}-${{ steps.hashes.outputs.path_reconstruction_hash }}-${{ steps.hashes.outputs.resolve_fallback_hash }}-${{ steps.hashes.outputs.platform_fallback_hash }}-${{ steps.hashes.outputs.tinycc_config_hash }}-${{ steps.hashes.outputs.allocator_hash }}-${{ steps.hashes.outputs.bionic_hash }}
 
       - name: Clone, patch, and build Bun
         if: steps.cache-bun.outputs.cache-hit != 'true'
