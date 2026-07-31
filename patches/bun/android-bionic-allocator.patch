@@ -134,6 +134,20 @@ index ee5b835..45e5172 100644
          }
  
          return this.toJSUnchecked(ctx);
+diff --git a/src/jsc/bindings/BunProcess.cpp b/src/jsc/bindings/BunProcess.cpp
+index 6935f0c..28342d4 100644
+--- a/src/jsc/bindings/BunProcess.cpp
++++ b/src/jsc/bindings/BunProcess.cpp
+@@ -223,7 +223,9 @@ static JSValue constructVersions(VM& vm, JSObject* processObject)
+     // keep in sync with src/jsc/bindings/node/http/llhttp/README.md
+     object->putDirect(vm, JSC::Identifier::fromString(vm, "llhttp"_s), JSC::jsOwnedString(vm, String("9.3.0"_s)));
+     object->putDirect(vm, JSC::Identifier::fromString(vm, "libarchive"_s), JSC::jsOwnedString(vm, ASCIILiteral::fromLiteralUnsafe(BUN_VERSION_LIBARCHIVE)), 0);
++#if USE(BUN_MIMALLOC)
+     object->putDirect(vm, JSC::Identifier::fromString(vm, "mimalloc"_s), JSC::jsOwnedString(vm, ASCIILiteral::fromLiteralUnsafe(BUN_VERSION_MIMALLOC)), 0);
++#endif // USE(BUN_MIMALLOC)
+     object->putDirect(vm, JSC::Identifier::fromString(vm, "picohttpparser"_s), JSC::jsOwnedString(vm, ASCIILiteral::fromLiteralUnsafe(BUN_VERSION_PICOHTTPPARSER)), 0);
+     object->putDirect(vm, JSC::Identifier::fromString(vm, "uwebsockets"_s), JSC::jsOwnedString(vm, ASCIILiteral::fromLiteralUnsafe(BUN_VERSION_UWS)), 0);
+     object->putDirect(vm, JSC::Identifier::fromString(vm, "webkit"_s), JSC::jsOwnedString(vm, ASCIILiteral::fromLiteralUnsafe(BUN_VERSION_WEBKIT)), 0);
 diff --git a/src/jsc/bindings/BunString.cpp b/src/jsc/bindings/BunString.cpp
 index 0288c78..a25a647 100644
 --- a/src/jsc/bindings/BunString.cpp
@@ -475,7 +489,7 @@ index 0000000..cb272a9
 +}
 +#endif
 diff --git a/src/jsc/modules/BunJSCModule.h b/src/jsc/modules/BunJSCModule.h
-index deb683b..ecfb57f 100644
+index deb683b..adf6abd 100644
 --- a/src/jsc/modules/BunJSCModule.h
 +++ b/src/jsc/modules/BunJSCModule.h
 @@ -45,9 +45,7 @@
@@ -489,6 +503,48 @@ index deb683b..ecfb57f 100644
  
  #include <JavaScriptCore/ControlFlowProfiler.h>
  
+@@ -358,6 +356,7 @@ JSC_DEFINE_HOST_FUNCTION(functionMemoryUsageStatistics,
+ #endif
+ #endif
+ 
++#if USE(BUN_MIMALLOC)
+     mi_collect(false);
+     if (char* json = mi_stats_get_json(0, nullptr)) {
+         JSValue parsed = JSONParse(globalObject, String::fromUTF8(json));
+@@ -385,6 +384,7 @@ JSC_DEFINE_HOST_FUNCTION(functionMemoryUsageStatistics,
+             }
+         }
+     }
++#endif // USE(BUN_MIMALLOC)
+ 
+     return JSValue::encode(object);
+ }
+diff --git a/src/runtime/api/UnsafeObject.zig b/src/runtime/api/UnsafeObject.zig
+index 7ab191b..759ac20 100644
+--- a/src/runtime/api/UnsafeObject.zig
++++ b/src/runtime/api/UnsafeObject.zig
+@@ -1,10 +1,16 @@
+ pub fn create(globalThis: *jsc.JSGlobalObject) jsc.JSValue {
+     const object = JSValue.createEmptyObject(globalThis, 3);
+-    const fields = comptime .{
+-        .gcAggressionLevel = gcAggressionLevel,
+-        .arrayBufferToString = arrayBufferToString,
+-        .mimallocDump = dump_mimalloc,
+-    };
++    const fields = comptime if (bun.use_mimalloc)
++        .{
++            .gcAggressionLevel = gcAggressionLevel,
++            .arrayBufferToString = arrayBufferToString,
++            .mimallocDump = dump_mimalloc,
++        }
++    else
++        .{
++            .gcAggressionLevel = gcAggressionLevel,
++            .arrayBufferToString = arrayBufferToString,
++        };
+     inline for (comptime std.meta.fieldNames(@TypeOf(fields))) |name| {
+         object.put(
+             globalThis,
 diff --git a/src/runtime/api/filesystem_router.zig b/src/runtime/api/filesystem_router.zig
 index 814927a..4b53ec6 100644
 --- a/src/runtime/api/filesystem_router.zig
