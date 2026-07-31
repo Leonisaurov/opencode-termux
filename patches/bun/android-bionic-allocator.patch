@@ -38,7 +38,7 @@ index 0000000..1c0a593
 +
 +const std = @import("std");
 diff --git a/src/bun_alloc/bun_alloc.zig b/src/bun_alloc/bun_alloc.zig
-index 18be563..966fc84 100644
+index 18be563..aa1167b 100644
 --- a/src/bun_alloc/bun_alloc.zig
 +++ b/src/bun_alloc/bun_alloc.zig
 @@ -924,7 +924,9 @@ pub const Default = struct {
@@ -67,6 +67,73 @@ index 179f01f..345008a 100644
                      has_bundled = false;
                  }
  
+diff --git a/src/cli/cli.zig b/src/cli/cli.zig
+index 2ff10e6..63604c0 100644
+--- a/src/cli/cli.zig
++++ b/src/cli/cli.zig
+@@ -532,7 +532,9 @@ pub const Command = struct {
+     pub fn start(allocator: std.mem.Allocator, log: *logger.Log) !void {
+         if (comptime Environment.allow_assert) {
+             if (!bun.env_var.MI_VERBOSE.get()) {
+-                bun.mimalloc.mi_option_set_enabled(.verbose, false);
++                if (comptime bun.use_mimalloc) {
++                    bun.mimalloc.mi_option_set_enabled(.verbose, false);
++                }
+             }
+         }
+ 
+diff --git a/src/jsc/array_buffer.zig b/src/jsc/array_buffer.zig
+index ee5b835..45e5172 100644
+--- a/src/jsc/array_buffer.zig
++++ b/src/jsc/array_buffer.zig
+@@ -257,28 +257,32 @@ pub const ArrayBuffer = extern struct {
+             return this.value;
+         }
+ 
+-        // If it's not a mimalloc heap buffer, we're not going to call a deallocator
+-        if (this.len > 0 and !bun.mimalloc.mi_is_in_heap_region(this.ptr)) {
+-            log("toJS but will never free: {d} bytes", .{this.len});
+-
+-            if (this.typed_array_type == .ArrayBuffer) {
+-                return makeArrayBufferWithBytesNoCopy(
++        // If it's not a mimalloc heap buffer, we're not going to call a deallocator.
++        // On Android (bionic) the system allocator backs bun.default_allocator, so
++        // every buffer here is owned by the allocator that would free it.
++        if (comptime bun.use_mimalloc) {
++            if (this.len > 0 and !bun.mimalloc.mi_is_in_heap_region(this.ptr)) {
++                log("toJS but will never free: {d} bytes", .{this.len});
++
++                if (this.typed_array_type == .ArrayBuffer) {
++                    return makeArrayBufferWithBytesNoCopy(
++                        ctx,
++                        this.ptr,
++                        this.byte_len,
++                        null,
++                        null,
++                    );
++                }
++
++                return makeTypedArrayWithBytesNoCopy(
+                     ctx,
++                    this.typed_array_type.toTypedArrayType(),
+                     this.ptr,
+                     this.byte_len,
+                     null,
+                     null,
+                 );
+             }
+-
+-            return makeTypedArrayWithBytesNoCopy(
+-                ctx,
+-                this.typed_array_type.toTypedArrayType(),
+-                this.ptr,
+-                this.byte_len,
+-                null,
+-                null,
+-            );
+         }
+ 
+         return this.toJSUnchecked(ctx);
 diff --git a/src/jsc/bindings/BunString.cpp b/src/jsc/bindings/BunString.cpp
 index 0288c78..a25a647 100644
 --- a/src/jsc/bindings/BunString.cpp
@@ -94,10 +161,10 @@ index 597b057..c63ff7d 100644
      const char* ptr;
 diff --git a/src/jsc/bindings/MimallocCompat.h b/src/jsc/bindings/MimallocCompat.h
 new file mode 100644
-index 0000000..d4b4f1d
+index 0000000..1111f7e
 --- /dev/null
 +++ b/src/jsc/bindings/MimallocCompat.h
-@@ -0,0 +1,34 @@
+@@ -0,0 +1,65 @@
 +#pragma once
 +
 +// Mimalloc compatibility layer.
@@ -118,18 +185,49 @@ index 0000000..d4b4f1d
 +#else
 +#include <cstddef>
 +
++struct mi_heap_s;
++
++using mi_output_fun = void (*)(const char* message, void* arg);
++
 +extern "C" {
++// Allocation.
 +void* mi_malloc(size_t size);
 +void* mi_calloc(size_t count, size_t size);
 +void* mi_realloc(void* p, size_t newsize);
 +void mi_free(void* p);
 +void* mi_zalloc(size_t size);
-+void* mi_malloc_aligned(size_t size, size_t alignment);
 +void* mi_expand(void* p, size_t newsize);
++void* mi_malloc_aligned(size_t size, size_t alignment);
++void* mi_realloc_aligned(void* p, size_t newsize, size_t alignment);
++void mi_free_size(void* p, size_t size);
++void mi_free_size_aligned(void* p, size_t size, size_t alignment);
++
++// Heap management.
++mi_heap_s* mi_heap_new();
++void mi_heap_destroy(mi_heap_s* heap);
++mi_heap_s* mi_heap_main();
++void mi_heap_collect(mi_heap_s* heap, bool force);
++bool mi_heap_contains(const mi_heap_s* heap, const void* p);
++void* mi_heap_malloc(mi_heap_s* heap, size_t size);
++void* mi_heap_malloc_aligned(mi_heap_s* heap, size_t size, size_t alignment);
++void* mi_heap_realloc_aligned(mi_heap_s* heap, void* p, size_t newsize, size_t alignment);
++
++// Introspection.
++size_t mi_usable_size(const void* p);
++size_t mi_malloc_usable_size(const void* p);
++bool mi_check_owned(const void* p);
++bool mi_is_in_heap_region(const void* p);
++
++// Stats (no-ops on the system allocator).
 +void mi_collect(bool force);
++void mi_stats_print_out(mi_output_fun out, void* arg);
++void mi_thread_stats_print_out(mi_output_fun out, void* arg);
 +char* mi_stats_get_json(size_t, char*);
 +char* mi_heap_dump_json(bool include_blocks, bool hash_addresses);
 +void mi_process_info(size_t* elapsed_msecs, size_t* user_msecs, size_t* system_msecs, size_t* current_rss, size_t* peak_rss, size_t* current_commit, size_t* peak_commit, size_t* page_faults);
++
++// Thread.
++void mi_thread_set_in_threadpool();
 +}
 +#endif
 diff --git a/src/jsc/bindings/MimallocWTFMalloc.h b/src/jsc/bindings/MimallocWTFMalloc.h
@@ -174,19 +272,22 @@ index 076d31f..9256852 100644
  namespace Zig {
 diff --git a/src/jsc/bindings/mimalloc_compat.cpp b/src/jsc/bindings/mimalloc_compat.cpp
 new file mode 100644
-index 0000000..db750a9
+index 0000000..cb272a9
 --- /dev/null
 +++ b/src/jsc/bindings/mimalloc_compat.cpp
-@@ -0,0 +1,74 @@
+@@ -0,0 +1,198 @@
 +// Provides the mimalloc API on Android where Bun uses the system
 +// allocator (Scudo) instead of mimalloc. This file is empty on
 +// platforms where mimalloc is the default allocator.
 +#include "MimallocCompat.h"
 +#include <cstdlib>
++#include <cstring>
++#include <malloc.h>
 +
 +#if !USE(BUN_MIMALLOC)
 +extern "C" {
 +
++// ─── Allocation ────────────────────────────────────────────────
 +void* mi_malloc(size_t size)
 +{
 +    return std::malloc(size);
@@ -212,20 +313,136 @@ index 0000000..db750a9
 +    return std::calloc(1, size);
 +}
 +
-+void* mi_malloc_aligned(size_t size, size_t alignment)
++void* mi_expand(void* p, size_t newsize)
 +{
++    return std::realloc(p, newsize);
++}
++
++static void* compat_aligned_alloc(size_t size, size_t alignment)
++{
++    // Normalize alignment: posix_memalign requires a power of two that is a
++    // multiple of sizeof(void*).
++    if (alignment < sizeof(void*))
++        alignment = sizeof(void*);
++    if ((alignment & (alignment - 1)) != 0)
++        alignment = 1u << (31u - __builtin_clz(alignment));
 +    void* p = nullptr;
 +    if (posix_memalign(&p, alignment, size) != 0)
 +        return nullptr;
 +    return p;
 +}
 +
-+void* mi_expand(void* p, size_t newsize)
++void* mi_malloc_aligned(size_t size, size_t alignment)
 +{
-+    return std::realloc(p, newsize);
++    return compat_aligned_alloc(size, alignment);
 +}
 +
++void* mi_realloc_aligned(void* p, size_t newsize, size_t alignment)
++{
++    // Preserve alignment across reallocation by allocating a fresh aligned
++    // block, copying the old contents, and freeing the old block.
++    void* result = compat_aligned_alloc(newsize, alignment);
++    if (result == nullptr)
++        return nullptr;
++    if (p != nullptr) {
++        size_t old_size = malloc_usable_size(p);
++        std::memcpy(result, p, old_size < newsize ? old_size : newsize);
++        std::free(p);
++    }
++    return result;
++}
++
++void mi_free_size(void* p, size_t)
++{
++    std::free(p);
++}
++
++void mi_free_size_aligned(void* p, size_t, size_t)
++{
++    std::free(p);
++}
++
++// ─── Heap management ───────────────────────────────────────────
++// The compat layer models every mimalloc heap as a single process-wide
++// singleton backed by the system allocator. MimallocArena is not used on
++// Android (use_mimalloc=false), so no per-heap state is ever needed.
++static char bunCompatMainHeapStorage[1];
++
++mi_heap_s* mi_heap_new()
++{
++    return reinterpret_cast<mi_heap_s*>(bunCompatMainHeapStorage);
++}
++
++void mi_heap_destroy(mi_heap_s*)
++{
++    // No-op: the compat heap is a static singleton with no state.
++}
++
++mi_heap_s* mi_heap_main()
++{
++    return reinterpret_cast<mi_heap_s*>(bunCompatMainHeapStorage);
++}
++
++void mi_heap_collect(mi_heap_s*, bool)
++{
++    // No-op: the system allocator manages memory on its own.
++}
++
++bool mi_heap_contains(const mi_heap_s*, const void*)
++{
++    return true;
++}
++
++void* mi_heap_malloc(mi_heap_s*, size_t size)
++{
++    return std::malloc(size);
++}
++
++void* mi_heap_malloc_aligned(mi_heap_s*, size_t size, size_t alignment)
++{
++    return compat_aligned_alloc(size, alignment);
++}
++
++void* mi_heap_realloc_aligned(mi_heap_s*, void* p, size_t newsize, size_t alignment)
++{
++    return mi_realloc_aligned(p, newsize, alignment);
++}
++
++// ─── Introspection ─────────────────────────────────────────────
++size_t mi_usable_size(const void* p)
++{
++    if (p == nullptr)
++        return 0;
++    return malloc_usable_size(const_cast<void*>(p));
++}
++
++size_t mi_malloc_usable_size(const void* p)
++{
++    if (p == nullptr)
++        return 0;
++    return malloc_usable_size(const_cast<void*>(p));
++}
++
++bool mi_check_owned(const void*)
++{
++    return true;
++}
++
++bool mi_is_in_heap_region(const void*)
++{
++    return true;
++}
++
++// ─── Stats (no-ops on the system allocator) ────────────────────
 +void mi_collect(bool)
++{
++}
++
++void mi_stats_print_out(mi_output_fun, void*)
++{
++}
++
++void mi_thread_stats_print_out(mi_output_fun, void*)
 +{
 +}
 +
@@ -250,6 +467,11 @@ index 0000000..db750a9
 +    *peak_commit = 0;
 +    *page_faults = 0;
 +}
++
++// ─── Thread ────────────────────────────────────────────────────
++void mi_thread_set_in_threadpool()
++{
++}
 +}
 +#endif
 diff --git a/src/jsc/modules/BunJSCModule.h b/src/jsc/modules/BunJSCModule.h
@@ -267,3 +489,26 @@ index deb683b..ecfb57f 100644
  
  #include <JavaScriptCore/ControlFlowProfiler.h>
  
+diff --git a/src/runtime/api/filesystem_router.zig b/src/runtime/api/filesystem_router.zig
+index 814927a..4b53ec6 100644
+--- a/src/runtime/api/filesystem_router.zig
++++ b/src/runtime/api/filesystem_router.zig
+@@ -473,8 +473,16 @@ pub const MatchedRoute = struct {
+             map.deinit();
+         }
+         if (this.needs_deinit) {
+-            if (this.route.pathname.len > 0 and bun.mimalloc.mi_is_in_heap_region(this.route.pathname.ptr)) {
+-                bun.mimalloc.mi_free(@constCast(this.route.pathname.ptr));
++            // On Android (bionic) the system allocator backs bun.default_allocator,
++            // so pathname is always owned by the allocator that frees it.
++            if (comptime bun.use_mimalloc) {
++                if (this.route.pathname.len > 0 and bun.mimalloc.mi_is_in_heap_region(this.route.pathname.ptr)) {
++                    bun.mimalloc.mi_free(@constCast(this.route.pathname.ptr));
++                }
++            } else {
++                if (this.route.pathname.len > 0) {
++                    bun.mimalloc.mi_free(@constCast(this.route.pathname.ptr));
++                }
+             }
+ 
+             this.params_list_holder.deinit(bun.default_allocator);
