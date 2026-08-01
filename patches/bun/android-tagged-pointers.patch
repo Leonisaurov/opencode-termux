@@ -1,19 +1,45 @@
 diff --git a/src/main.zig b/src/main.zig
-index 6698634..26aa22a 100644
+index 6698634..e9d3e9a 100644
 --- a/src/main.zig
 +++ b/src/main.zig
-@@ -19,6 +19,16 @@ pub extern "c" var _environ: ?*anyopaque;
+@@ -18,7 +18,42 @@ extern fn bun_warn_avx_missing(url: [*:0]const u8) void;
+ pub extern "c" var _environ: ?*anyopaque;
  pub extern "c" var environ: ?*anyopaque;
  
++// bionic mallopt to disable heap pointer tagging (Scudo/TBI). Not in
++// Zig's stdlib; declared manually. Available since API 31.
++const M_BIONIC_SET_HEAP_TAGGING_LEVEL: c_int = -204;
++const M_HEAP_TAGGING_LEVEL_NONE: c_int = 0;
++extern "c" fn mallopt(option: c_int, value: c_int) c_int;
++
++// On Android ARM64, bionic/Scudo tags heap pointers in the top byte by
++// default (Top Byte Ignore). Bun and JavaScriptCore pack tagged pointers
++// in the low bits and truncate pointers to 48 bits, which Scudo detects
++// as "Pointer tag ... was truncated" and aborts on any heap operation.
++// The correct fix is mallopt(M_BIONIC_SET_HEAP_TAGGING_LEVEL, NONE), which
++// disables heap tagging while keeping the kernel's tagged-address ABI
++// active (so stack pointers tagged before main() keep working). Calling it
++// in .init_array runs after libc init and before main(), before Bun's own
++// allocations. It is irreversible per process by design.
++fn android_disable_heap_tagging() callconv(.c) void {
++    _ = mallopt(M_BIONIC_SET_HEAP_TAGGING_LEVEL, M_HEAP_TAGGING_LEVEL_NONE);
++}
++
++// The .init_array constructor. @export with .section does not emit the
++// section in Zig 0.15.2; a top-level export const with linksection does.
++// SHT_INIT_ARRAY prevents --gc-sections from dropping it.
++export const android_heap_tagging_ctor: ?*const fn () callconv(.c) void linksection(".init_array") = if (Environment.isAndroid and builtin.target.cpu.arch.isAARCH64())
++    &android_disable_heap_tagging
++else
++    null;
++
  pub fn main() void {
-+    // On Android ARM64, disable the tagged address ABI (Top Byte Ignore)
-+    // before any heap allocation. Scudo tags heap pointers in the top byte;
-+    // Bun and JavaScriptCore pack tagged pointers in the low bits and can
-+    // truncate pointers to 48 bits, which Scudo detects as "Pointer tag ...
-+    // was truncated" and aborts. Disabling TBI makes Scudo skip tagging.
++    // Redundant with the .init_array constructor but kept as a safety net:
++    // mallopt(NONE) is idempotent and irreversible, so calling it again
++    // here guarantees heap tagging is disabled even if the constructor
++    // path is skipped by the linker.
 +    if (comptime Environment.isAndroid and builtin.target.cpu.arch.isAARCH64()) {
-+        // PR_SET_TAGGED_ADDR_CTRL = 55, arg2 = 0 disables the tagged ABI.
-+        _ = std.os.linux.prctl(55, 0, 0, 0, 0);
++        android_disable_heap_tagging();
 +    }
 +
      _bun.crash_handler.init();
