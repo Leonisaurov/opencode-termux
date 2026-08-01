@@ -158,3 +158,9 @@ void* mi_expand(void* p, size_t newsize)
 | 5 | `Pointer tag was truncated` | Scudo taggea punteros, Bun los trunca | `mallopt(M_BIONIC_SET_HEAP_TAGGING_LEVEL, 0)` (`android-tagged-pointers.patch`) | `a483144` |
 | 6 | EFAULT en `/proc/self/stat` | `prctl(55,0)` deshabilitaba TBI del kernel | Reemplazar por `mallopt` (nunca prctl TBI off) | `a483144` |
 | 7 | **SIGSEGV bundler con graphs grandes** | **`mi_expand` = `std::realloc` (mueve bloque)** | **`mi_expand` in-place (nunca mueve)** | **`d4df10d`** |
+
+## Nota adicional: bug del symlink backend (bun-project)
+
+Este diagnóstico es independiente del bug del allocator. El bug del symlink backend
+(resolución transitiva rota en proyectos con `bun install` symlink) se documentó y
+resolvió por separado en `symlink-backend-bug.md`.
