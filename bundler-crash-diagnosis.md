@@ -138,3 +138,23 @@ void* mi_expand(void* p, size_t newsize)
 - `bun-source/src/bun_alloc/MimallocArena.zig` — arena usada por el bundler (ThreadLocalArena)
 - `bun-source/src/bundler/BundleThread.zig:107,110` — init del arena en el bundler
 - `test-fiel.ts` — test con 7 variantes (`/data/data/com.termux/files/home/.cache/opencode/tmp/test-fiel.ts`)
+
+## Resultado Final (verificado 1 Ago 2026)
+
+**El fix de `mi_expand` resolvió el crash del bundler completamente.**
+
+- OpenCode ahora se compila nativamente en Termux con `bun-downloaded run scripts/build-android.ts` (sin SIGSEGV).
+- El build funciona — más lento que en CI (overhead normal de Termux en ARM64), pero correcto.
+- El proyecto es 100% Termux: los paquetes se construyen en Termux, no en CI.
+
+### Resumen del camino
+
+| # | Problema | Causa raíz | Fix | Commit |
+|---|----------|-----------|-----|--------|
+| 1 | `bun add -g` no encuentra transitivas | Resolución desde cache path | `android-global-resolve-fallback.patch` | `75232ab` |
+| 2 | `@opentui/core-android-arm64` no existe | Package manager filtra linux en Android | `isMatch` + fallback android→linux (`android-platform-fallback.patch`) | `0ce8991` |
+| 3 | `dlopen()` no disponible | TinyCC desactivado en Android | `android-config-tinycc.patch` (habilitar TinyCC) | `b7bebb0` |
+| 4 | Mismatch allocator mimalloc↔Scudo | Bun usaba mimalloc, .so bionic usa Scudo | Bionic allocator formal (`android-bionic-allocator.patch`) | `8882da5` |
+| 5 | `Pointer tag was truncated` | Scudo taggea punteros, Bun los trunca | `mallopt(M_BIONIC_SET_HEAP_TAGGING_LEVEL, 0)` (`android-tagged-pointers.patch`) | `a483144` |
+| 6 | EFAULT en `/proc/self/stat` | `prctl(55,0)` deshabilitaba TBI del kernel | Reemplazar por `mallopt` (nunca prctl TBI off) | `a483144` |
+| 7 | **SIGSEGV bundler con graphs grandes** | **`mi_expand` = `std::realloc` (mueve bloque)** | **`mi_expand` in-place (nunca mueve)** | **`d4df10d`** |
