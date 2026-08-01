@@ -286,10 +286,10 @@ index 076d31f..9256852 100644
  namespace Zig {
 diff --git a/src/jsc/bindings/mimalloc_compat.cpp b/src/jsc/bindings/mimalloc_compat.cpp
 new file mode 100644
-index 0000000..cb272a9
+index 0000000..7f90624
 --- /dev/null
 +++ b/src/jsc/bindings/mimalloc_compat.cpp
-@@ -0,0 +1,198 @@
+@@ -0,0 +1,210 @@
 +// Provides the mimalloc API on Android where Bun uses the system
 +// allocator (Scudo) instead of mimalloc. This file is empty on
 +// platforms where mimalloc is the default allocator.
@@ -329,7 +329,19 @@ index 0000000..cb272a9
 +
 +void* mi_expand(void* p, size_t newsize)
 +{
-+    return std::realloc(p, newsize);
++    // mi_expand expands in place or returns NULL — it never moves the block.
++    // std::realloc may move and free the old pointer, which breaks the Zig
++    // Allocator.resize contract ("if true, the pointer did not change") and
++    // causes silent use-after-free in the bundler's ArrayList grows.
++    if (p == nullptr)
++        return std::malloc(newsize);
++    if (newsize == 0) {
++        std::free(p);
++        return nullptr;
++    }
++    if (malloc_usable_size(p) >= newsize)
++        return p;
++    return nullptr;
 +}
 +
 +static void* compat_aligned_alloc(size_t size, size_t alignment)
