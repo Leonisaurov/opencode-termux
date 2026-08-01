@@ -1,0 +1,88 @@
+diff --git a/src/resolver/resolver.zig b/src/resolver/resolver.zig
+index b63520a..0bca4e3 100644
+--- a/src/resolver/resolver.zig
++++ b/src/resolver/resolver.zig
+@@ -473,6 +473,7 @@ pub const Resolver = struct {
+     generation: bun.Generation = 0,
+ 
+     package_manager: ?*PackageManager = null,
++    bun_cache_path: ?[]const u8 = null,
+     onWakePackageManager: PackageManager.WakeHandler = .{},
+     env_loader: ?*DotEnv.Loader = null,
+     store_fd: bool = false,
+@@ -554,6 +555,37 @@ pub const Resolver = struct {
+         };
+     }
+ 
++    /// Whether an absolute path is inside Bun's install cache directory.
++    /// On Android the default install backend is symlink, so packages in
++    /// node_modules are symlinks into the cache. Rewriting the module path
++    /// to the cache realpath breaks transitive resolution (the node_modules
++    /// walk-up starts from the cache, where sibling packages are absent).
++    /// Keeping the logical node_modules path reproduces the hardlink backend
++    /// behavior used on desktop.
++    fn isBunCachePath(this: *ThisResolver, abs_path: string) bool {
++        if (abs_path.len == 0) return false;
++        if (this.bun_cache_path) |cache_path| {
++            if (cache_path.len == 0) return false;
++            if (cache_path.len > abs_path.len) return false;
++            if (!bun.strings.hasPrefix(abs_path, cache_path)) return false;
++            // Path-aware: a match must end at a path separator, so sibling
++            // directories like "cache_foo" are not mistaken for the cache.
++            if (abs_path.len > cache_path.len and abs_path[cache_path.len] != std.fs.path.sep) return false;
++            return true;
++        }
++        // Resolve the install cache directory lazily without initializing the
++        // full package manager (which can be null during `bun run`/`bun build`).
++        const resolved = if (this.env_loader) |env_loader|
++            PackageManager.fetchCacheDirectoryPath(env_loader, null).path
++        else
++            "";
++        this.bun_cache_path = if (resolved.len > 0)
++            bun.handleOom(bun.default_allocator.dupe(u8, resolved))
++        else
++            "";
++        return this.isBunCachePath(abs_path);
++    }
++
+     pub inline fn usePackageManager(self: *const ThisResolver) bool {
+         // TODO(@paperclover): make this configurable. the rationale for disabling
+         // auto-install in standalone mode is that such executable must either:
+@@ -1078,7 +1110,9 @@ pub const Resolver = struct {
+                 if (entries.get(path.name.filename)) |query| {
+                     const symlink_path = query.entry.symlink(&r.fs.fs, r.store_fd);
+                     if (symlink_path.len > 0) {
+-                        path.setRealpath(symlink_path);
++                        if (!r.isBunCachePath(symlink_path)) {
++                            path.setRealpath(symlink_path);
++                        }
+                         if (!result.file_fd.isValid()) result.file_fd = query.entry.cache.fd;
+ 
+                         if (r.debug_logs) |*debug| {
+@@ -1115,10 +1149,23 @@ pub const Resolver = struct {
+                         if (r.debug_logs) |*debug| {
+                             debug.addNoteFmt("Resolved symlink \"{s}\" to \"{s}\"", .{ symlink, path.text });
+                         }
+-                        query.entry.cache.symlink = PathString.init(symlink);
++                        if (r.isBunCachePath(dir.abs_real_path)) {
++                            // On Android the default install backend is symlink, so
++                            // node_modules packages are directory symlinks into the
++                            // install cache. Rewriting the module path to the cache
++                            // realpath breaks transitive resolution (the node_modules
++                            // walk-up starts from the cache, where sibling packages
++                            // are absent). Keep the logical node_modules path so
++                            // transitive imports resolve correctly — this reproduces
++                            // the hardlink backend behavior used on desktop.
++                            // is_symlink is intentionally left unset: unlike
++                            // setRealpath, the logical path is kept, so the flag
++                            // would be misleading.
++                        } else {
++                            query.entry.cache.symlink = PathString.init(symlink);
++                            path.setRealpath(symlink);
++                        }
+                         if (!result.file_fd.isValid() and store_fd) result.file_fd = query.entry.cache.fd;
+-
+-                        path.setRealpath(symlink);
+                     }
+                 }
+             }

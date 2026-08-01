@@ -145,6 +145,13 @@ git apply --stat "$REPO_ROOT/patches/bun/android-tagged-pointers.patch" 2>/dev/n
 git apply "$REPO_ROOT/patches/bun/android-tagged-pointers.patch" 2>/dev/null || true
 echo "    Android tagged pointers fix applied"
 
+# Keep logical node_modules path for cache-backed symlinks (fixes transitive resolution)
+echo ">>> Applying Android resolver logical path fix..."
+cd "$BUN_SRC"
+git apply --stat "$REPO_ROOT/patches/bun/android-resolver-logical-path.patch" 2>/dev/null || true
+git apply "$REPO_ROOT/patches/bun/android-resolver-logical-path.patch" 2>/dev/null || true
+echo "    Android resolver logical path fix applied"
+
 
 
 # --- Clone WebKit ---
