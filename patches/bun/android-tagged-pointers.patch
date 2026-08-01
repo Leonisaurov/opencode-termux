@@ -1,0 +1,21 @@
+diff --git a/src/main.zig b/src/main.zig
+index 6698634..26aa22a 100644
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -19,6 +19,16 @@ pub extern "c" var _environ: ?*anyopaque;
+ pub extern "c" var environ: ?*anyopaque;
+ 
+ pub fn main() void {
++    // On Android ARM64, disable the tagged address ABI (Top Byte Ignore)
++    // before any heap allocation. Scudo tags heap pointers in the top byte;
++    // Bun and JavaScriptCore pack tagged pointers in the low bits and can
++    // truncate pointers to 48 bits, which Scudo detects as "Pointer tag ...
++    // was truncated" and aborts. Disabling TBI makes Scudo skip tagging.
++    if (comptime Environment.isAndroid and builtin.target.cpu.arch.isAARCH64()) {
++        // PR_SET_TAGGED_ADDR_CTRL = 55, arg2 = 0 disables the tagged ABI.
++        _ = std.os.linux.prctl(55, 0, 0, 0, 0);
++    }
++
+     _bun.crash_handler.init();
+ 
+     if (Environment.isPosix) {

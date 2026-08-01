@@ -138,6 +138,13 @@ git apply --stat "$REPO_ROOT/patches/bun/android-bionic-allocator.patch" 2>/dev/
 git apply "$REPO_ROOT/patches/bun/android-bionic-allocator.patch" 2>/dev/null || true
 echo "    Android bionic allocator applied"
 
+# Disable tagged address ABI (TBI) on Android ARM64 to prevent Scudo abort
+echo ">>> Applying Android tagged pointers fix..."
+cd "$BUN_SRC"
+git apply --stat "$REPO_ROOT/patches/bun/android-tagged-pointers.patch" 2>/dev/null || true
+git apply "$REPO_ROOT/patches/bun/android-tagged-pointers.patch" 2>/dev/null || true
+echo "    Android tagged pointers fix applied"
+
 
 
 # --- Clone WebKit ---
