@@ -152,6 +152,13 @@ git apply --stat "$REPO_ROOT/patches/bun/android-resolver-logical-path.patch" 2>
 git apply "$REPO_ROOT/patches/bun/android-resolver-logical-path.patch" 2>/dev/null || true
 echo "    Android resolver logical path fix applied"
 
+# Use Termux TMPDIR for the node→bun shebang shim (fixes bun x)
+echo ">>> Applying Android bunx node shim fix..."
+cd "$BUN_SRC"
+git apply --stat "$REPO_ROOT/patches/bun/android-bunx-node-shim.patch" 2>/dev/null || true
+git apply "$REPO_ROOT/patches/bun/android-bunx-node-shim.patch" 2>/dev/null || true
+echo "    Android bunx node shim fix applied"
+
 
 
 # --- Clone WebKit ---

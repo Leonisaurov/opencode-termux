@@ -1,0 +1,112 @@
+diff --git a/src/cli/run_command.zig b/src/cli/run_command.zig
+index 5b26ae4..e850da8 100644
+--- a/src/cli/run_command.zig
++++ b/src/cli/run_command.zig
+@@ -600,22 +600,29 @@ pub const RunCommand = struct {
+         this_transpiler.configureLinker();
+     }
+ 
+-    pub const bun_node_dir = switch (Environment.os) {
+-        // This path is almost always a path to a user directory. So it cannot be inlined like
+-        // our uses of /tmp. You can use one of these functions instead:
+-        // - bun.windows.GetTempPathW (native)
+-        // - bun.fs.FileSystem.RealFS.platformTempDir (any platform)
+-        .windows => @compileError("Do not use RunCommand.bun_node_dir on Windows"),
+-
+-        .mac => "/private/tmp",
+-        else => if (Environment.isAndroid) "/data/local/tmp" else "/tmp",
+-    } ++ if (!Environment.isDebug)
+-        "/bun-node" ++ if (Environment.git_sha_short.len > 0) "-" ++ Environment.git_sha_short else ""
+-    else
+-        "/bun-node-debug";
++    var bun_node_dir_buf: bun.PathBuffer = undefined;
++    var bun_node_dir_once = bun.once(struct {
++        fn once() []const u8 {
++            // Use the platform temp dir (respects $TMPDIR/$TMP/$TEMP at runtime).
++            // The hardcoded /data/local/tmp used for Android is not writable on
++            // Termux, which made the `node`→`bun` shebang shim silently fail and
++            // `bun x` binaries run under the system Node.js instead.
++            const base = bun.fs.FileSystem.RealFS.platformTempDir();
++            const suffix = if (!Environment.isDebug)
++                "/bun-node" ++ if (Environment.git_sha_short.len > 0) "-" ++ Environment.git_sha_short else ""
++            else
++                "/bun-node-debug";
++            const len = std.fmt.bufPrint(&bun_node_dir_buf, "{s}{s}", .{ base, suffix }) catch unreachable;
++            return bun_node_dir_buf[0..len];
++        }
++    }.once);
++
++    pub fn bunNodeDir() []const u8 {
++        return bun_node_dir_once.call(.{});
++    }
+ 
+     pub fn bunNodeFileUtf8(allocator: std.mem.Allocator) ![:0]const u8 {
+-        if (!Environment.isWindows) return bun_node_dir;
++        if (!Environment.isWindows) return bunNodeDir();
+         var temp_path_buffer: bun.WPathBuffer = undefined;
+         var target_path_buffer: bun.PathBuffer = undefined;
+         const len = bun.windows.GetTempPathW(
+@@ -669,9 +676,9 @@ pub const RunCommand = struct {
+             }
+ 
+             if (Environment.isDebug) {
+-                std.fs.deleteTreeAbsolute(bun_node_dir) catch {};
++                std.fs.deleteTreeAbsolute(bunNodeDir()) catch {};
+             }
+-            const paths = .{ bun_node_dir ++ "/node", bun_node_dir ++ "/bun" };
++            const paths = .{ bunNodeDir() ++ "/node", bunNodeDir() ++ "/bun" };
+             inline for (paths) |path| {
+                 var retried = false;
+                 while (true) {
+@@ -681,7 +688,7 @@ pub const RunCommand = struct {
+                             if (retried)
+                                 return;
+ 
+-                            std.fs.makeDirAbsoluteZ(bun_node_dir) catch {};
++                            std.fs.makeDirAbsoluteZ(bunNodeDir()) catch {};
+ 
+                             retried = true;
+                             continue;
+@@ -695,9 +702,9 @@ pub const RunCommand = struct {
+             }
+ 
+             // The reason for the extra delim is because we are going to append the system PATH
+-            // later on. this is done by the caller, and explains why we are adding bun_node_dir
++            // later on. this is done by the caller, and explains why we are adding bunNodeDir()
+             // to the end of the path slice rather than the start.
+-            try PATH.appendSlice(bun_node_dir ++ .{std.fs.path.delimiter});
++            try PATH.appendSlice(bunNodeDir() ++ .{std.fs.path.delimiter});
+         } else if (Environment.isWindows) {
+             var target_path_buffer: bun.WPathBuffer = undefined;
+ 
+@@ -760,7 +767,7 @@ pub const RunCommand = struct {
+             }
+ 
+             // The reason for the extra delim is because we are going to append the system PATH
+-            // later on. this is done by the caller, and explains why we are adding bun_node_dir
++            // later on. this is done by the caller, and explains why we are adding bunNodeDir()
+             // to the end of the path slice rather than the start.
+             try bun.strings.toUTF8AppendToList(PATH, dir_slice[prefix.len..]);
+             try PATH.append(std.fs.path.delimiter);
+@@ -1848,7 +1855,7 @@ pub const RunCommand = struct {
+                 // Global: .../install/global/node_modules/pkg/sub/file.js
+                 if (strings.contains(path.text, "/install/cache/")) {
+                     const cache_idx = strings.indexOf(path.text, "/install/cache/") orelse 0;
+-                    const after_cache = path.text[cache_idx + "/install/cache/".len..];
++                    const after_cache = path.text[cache_idx + "/install/cache/".len ..];
+                     // Find @@ marker which separates version from hash
+                     if (strings.indexOf(after_cache, "@@")) |at_at| {
+                         // Work backwards from @@ to find the @ that starts the version
+diff --git a/src/resolver/fs.zig b/src/resolver/fs.zig
+index cb2762f..828eef8 100644
+--- a/src/resolver/fs.zig
++++ b/src/resolver/fs.zig
+@@ -579,7 +579,7 @@ pub const FileSystem = struct {
+                     ) catch |err| bun.handleOom(err);
+                 },
+                 .mac => "/private/tmp",
+-                else => if (comptime Environment.isAndroid) "/data/local/tmp" else "/tmp",
++                else => if (comptime Environment.isAndroid) "/data/data/com.termux/files/usr/tmp" else "/tmp",
+             };
+         }
+ 
