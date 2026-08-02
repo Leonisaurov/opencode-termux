@@ -1,5 +1,5 @@
 diff --git a/src/cli/run_command.zig b/src/cli/run_command.zig
-index 5b26ae4..920f37b 100644
+index 5b26ae4..80ccfd1 100644
 --- a/src/cli/run_command.zig
 +++ b/src/cli/run_command.zig
 @@ -608,7 +608,10 @@ pub const RunCommand = struct {
@@ -32,7 +32,22 @@ index 5b26ae4..920f37b 100644
              // to the end of the path slice rather than the start.
              try bun.strings.toUTF8AppendToList(PATH, dir_slice[prefix.len..]);
              try PATH.append(std.fs.path.delimiter);
-@@ -1848,7 +1851,7 @@ pub const RunCommand = struct {
+@@ -895,7 +898,13 @@ pub const RunCommand = struct {
+             if (force_using_bun) bun_node_exe else "",
+         ) catch false;
+ 
+-        var needs_to_force_bun = force_using_bun or !found_node;
++        // On Android/Termux the install backend is symlink (hardlinks are
++        // unsupported in the app sandbox), so node_modules files are symlinks
++        // into the install cache. The system Node.js cannot resolve that
++        // layout: it follows symlinks to the flat cache, where transitive
++        // deps are absent. Bun must be the runtime for package bins so its
++        // resolver keeps the logical node_modules path (see isBunCachePath).
++        var needs_to_force_bun = force_using_bun or !found_node or (comptime Environment.isAndroid);
+         var optional_bun_self_path: string = "";
+ 
+         var new_path_len: usize = PATH.len + 2;
+@@ -1848,7 +1857,7 @@ pub const RunCommand = struct {
                  // Global: .../install/global/node_modules/pkg/sub/file.js
                  if (strings.contains(path.text, "/install/cache/")) {
                      const cache_idx = strings.indexOf(path.text, "/install/cache/") orelse 0;
@@ -41,7 +56,7 @@ index 5b26ae4..920f37b 100644
                      // Find @@ marker which separates version from hash
                      if (strings.indexOf(after_cache, "@@")) |at_at| {
                          // Work backwards from @@ to find the @ that starts the version
-@@ -2029,7 +2032,31 @@ pub const RunCommand = struct {
+@@ -2029,7 +2038,31 @@ pub const RunCommand = struct {
              );
          };
  
