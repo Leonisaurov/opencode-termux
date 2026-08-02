@@ -117,6 +117,14 @@ git apply "$REPO_ROOT/patches/bun/android-platform-fallback.patch" 2>/dev/null |
     echo "    Android platform fallback fix applied"
     echo "    Android global resolve fallback fix applied"
 
+# Apply bun ghost package redirect (peer dep/direct dep "bun" → local ghost folder,
+# avoids downloading bun@npm whose postinstall fails on Android)
+echo ">>> Applying Android bun ghost package redirect..."
+cd "$BUN_SRC"
+git apply --stat "$REPO_ROOT/patches/bun/android-bun-ghost.patch" 2>/dev/null || echo "    ⚠️  Skipped (already applied?)"
+git apply "$REPO_ROOT/patches/bun/android-bun-ghost.patch" 2>/dev/null || echo "    ⚠️  Skipped (already applied?)"
+echo "    Android bun ghost package redirect applied"
+
 # Apply TinyCC configuration changes for Android
 echo ">>> Applying TinyCC Android configuration..."
 cd "$BUN_SRC"

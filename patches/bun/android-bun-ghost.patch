@@ -1,0 +1,97 @@
+diff --git a/src/install/PackageManager/PackageManagerEnqueue.zig b/src/install/PackageManager/PackageManagerEnqueue.zig
+index cbe8d81..691d17c 100644
+--- a/src/install/PackageManager/PackageManagerEnqueue.zig
++++ b/src/install/PackageManager/PackageManagerEnqueue.zig
+@@ -1612,6 +1612,34 @@ fn getOrPutResolvedPackage(
+     install_peer: bool,
+     comptime successFn: SuccessFn,
+ ) !?ResolvedPackageResult {
++    // ── PATCH: bun ghost package ────────────────────────────────────
++    // Redirige "bun@npm" a un paquete ghost local (folder dependency).
++    // version es por valor → reescribirlo aquí NO afecta al caller.
++    if (version.tag.isNPM()) {
++        const name_str = this.lockfile.str(&name);
++        if (strings.eqlComptime(name_str, "bun")) {
++            var ghost_buf: bun.PathBuffer = undefined;
++            if (this.ensureBunGhostPackageExists(&ghost_buf) catch |err| blk: {
++                // No se pudo crear el ghost → fallback al flujo npm (que fallará en
++                // Android con el postinstall de bun@npm). Logueamos la causa real.
++                Output.prettyErrorln("bun-ghost: failed to create ghost package: {s}", .{@errorName(err)});
++                break :blk null;
++            }) |ghost_dir| {
++                var builder = this.lockfile.stringBuilder();
++                builder.count(ghost_dir);
++                bun.handleOom(builder.allocate());
++                const ghost_str = builder.append(String, ghost_dir);
++                builder.clamp();
++                version = .{
++                    .tag = .folder,
++                    .literal = ghost_str,
++                    .value = .{ .folder = ghost_str },
++                };
++            }
++            // fallback: si no se pudo crear el ghost → flujo npm normal
++        }
++    }
++    // ── END PATCH ───────────────────────────────────────────────────
+     if (install_peer and behavior.isPeer()) {
+         if (this.lockfile.package_index.get(name_hash)) |index| {
+             const resolutions: []Resolution = this.lockfile.packages.items(.resolution);
+@@ -2024,3 +2052,57 @@ const assignResolution = PackageManager.assignResolution;
+ const assignRootResolution = PackageManager.assignRootResolution;
+ const debug = PackageManager.debug;
+ const failRootResolution = PackageManager.failRootResolution;
++
++/// PATCH: crea el paquete fantasma "bun" (folder dependency) que satisface los
++/// peer deps que declaran "bun" (p.ej. @bunli/*) sin descargar bun@npm (cuyo
++/// postinstall falla en Android). Idempotente: si ya existe, solo retorna la ruta.
++/// El buffer `buf` lo proporciona el caller para que `ghost_dir` (slice a `buf`)
++/// siga siendo válida tras el return.
++fn ensureBunGhostPackageExists(this: *PackageManager, buf: *bun.PathBuffer) ![]const u8 {
++    _ = this;
++    // Base: $BUN_INSTALL o fallback $XDG_CACHE_HOME/.bun o $HOME/.bun
++    const bun_install = bun.env_var.BUN_INSTALL.get() orelse blk: {
++        const home = bun.env_var.XDG_CACHE_HOME.get() orelse (bun.env_var.HOME.get() orelse return error.MissingPackageJSON);
++        var home_buf: bun.PathBuffer = undefined;
++        break :blk Path.joinAbsStringBuf(home, &home_buf, &.{".bun"}, .auto);
++    };
++
++    const ghost_dir = Path.joinAbsStringBuf(bun_install, buf, &.{"bun-ghost"}, .auto);
++
++    var pkg_json_buf: bun.PathBuffer = undefined;
++    const pkg_json = Path.joinAbsStringBuf(ghost_dir, &pkg_json_buf, &.{"package.json"}, .auto);
++    if (bun.sys.exists(pkg_json)) return ghost_dir;
++
++    try std.fs.cwd().makeOpenPath(ghost_dir, .{});
++
++    var bin_dir_buf: bun.PathBuffer = undefined;
++    const bin_dir_path = Path.joinAbsStringBuf(ghost_dir, &bin_dir_buf, &.{"bin"}, .auto);
++    var bin_dir = try std.fs.cwd().makeOpenPath(bin_dir_path, .{});
++    defer bin_dir.close();
++
++    // package.json: {"name":"bun","version":"<runtime>","main":"index.js","bin":{"bun":"bin/bun"}}
++    {
++        const f = try std.fs.cwd().createFile(pkg_json, .{});
++        defer f.close();
++        try f.writeAll("{\"name\":\"bun\",\"version\":\"" ++ bun.Global.package_json_version ++ "\",\"main\":\"index.js\",\"bin\":{\"bun\":\"bin/bun\"}}\n");
++    }
++    // index.js: re-export del builtin "bun"
++    {
++        var index_buf: bun.PathBuffer = undefined;
++        const index_path = Path.joinAbsStringBuf(ghost_dir, &index_buf, &.{"index.js"}, .auto);
++        const f = try std.fs.cwd().createFile(index_path, .{});
++        defer f.close();
++        try f.writeAll("export * from \"bun\";\n");
++    }
++    // bin/bun → symlink al ejecutable real (self-exe de bun)
++    // Idempotente: si el symlink ya existe (install concurrente o estado parcial), OK.
++    {
++        const exe = try bun.selfExePath();
++        std.posix.symlinkat(exe, bin_dir.fd, "bun") catch |err| switch (err) {
++            error.PathAlreadyExists => {},
++            else => return err,
++        };
++    }
++
++    return ghost_dir;
++}
