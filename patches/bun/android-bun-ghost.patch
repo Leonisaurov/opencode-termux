@@ -1,14 +1,15 @@
 diff --git a/src/install/PackageManager/PackageManagerEnqueue.zig b/src/install/PackageManager/PackageManagerEnqueue.zig
-index cbe8d81..54b7739 100644
+index cbe8d81..f42f2d0 100644
 --- a/src/install/PackageManager/PackageManagerEnqueue.zig
 +++ b/src/install/PackageManager/PackageManagerEnqueue.zig
-@@ -1612,6 +1612,34 @@ fn getOrPutResolvedPackage(
+@@ -1612,6 +1612,57 @@ fn getOrPutResolvedPackage(
      install_peer: bool,
      comptime successFn: SuccessFn,
  ) !?ResolvedPackageResult {
 +    // ── PATCH: bun ghost package ────────────────────────────────────
-+    // Redirige "bun@npm" a un paquete ghost local (folder dependency).
-+    // version es por valor → reescribirlo aquí NO afecta al caller.
++    // "bun@npm" → paquete fantasma local (folder) satisfaciendo peer deps
++    // sin descargar bun@npm (postinstall falla en Android). Resuelve inline
++    // (no se puede mutar `version`: params const en Zig 0.15).
 +    if (version.tag.isNPM()) {
 +        const name_str = this.lockfile.str(&name);
 +        if (strings.eqlComptime(name_str, "bun")) {
@@ -19,25 +20,47 @@ index cbe8d81..54b7739 100644
 +                Output.prettyErrorln("bun-ghost: failed to create ghost package: {s}", .{@errorName(err)});
 +                break :blk null;
 +            }) |ghost_dir| {
-+                var builder = this.lockfile.stringBuilder();
-+                builder.count(ghost_dir);
-+                bun.handleOom(builder.allocate());
-+                const ghost_str = builder.append(String, ghost_dir);
-+                builder.clamp();
-+                version = .{
-+                    .tag = .folder,
-+                    .literal = ghost_str,
-+                    .value = .{ .folder = ghost_str },
-+                };
++                // Replica la rama sintética folder (patrón :1892-1927 del case .folder):
++                // paquete sintético sin disco, sin scripts → el postinstall nunca corre.
++                var name_slice = this.lockfile.str(&name);
++                var package = Lockfile.Package{};
++                {
++                    var builder = this.lockfile.stringBuilder();
++
++                    builder.count(name_slice);
++                    builder.count(ghost_dir);
++
++                    bun.handleOom(builder.allocate());
++
++                    name_slice = this.lockfile.str(&name);
++
++                    package.name = builder.append(String, name_slice);
++                    package.name_hash = name_hash;
++
++                    package.resolution = Resolution.init(.{
++                        .folder = builder.append(String, ghost_dir),
++                    });
++
++                    package.scripts.filled = true;
++                    package.meta.setHasInstallScript(false);
++
++                    builder.clamp();
++                }
++
++                // these are always new
++                package = bun.handleOom(this.lockfile.appendPackage(package));
++
++                successFn(this, dependency_id, package.meta.id);
++                return .{ .package = this.lockfile.packages.get(package.meta.id), .is_first_time = true };
 +            }
-+            // fallback: si no se pudo crear el ghost → flujo npm normal
++            // fallback: ghost no creado → flujo npm normal (sin interceptar)
 +        }
 +    }
 +    // ── END PATCH ───────────────────────────────────────────────────
      if (install_peer and behavior.isPeer()) {
          if (this.lockfile.package_index.get(name_hash)) |index| {
              const resolutions: []Resolution = this.lockfile.packages.items(.resolution);
-@@ -2024,3 +2052,57 @@ const assignResolution = PackageManager.assignResolution;
+@@ -2024,3 +2075,57 @@ const assignResolution = PackageManager.assignResolution;
  const assignRootResolution = PackageManager.assignRootResolution;
  const debug = PackageManager.debug;
  const failRootResolution = PackageManager.failRootResolution;
@@ -50,19 +73,19 @@ index cbe8d81..54b7739 100644
 +fn ensureBunGhostPackageExists(this: *PackageManager, buf: *bun.PathBuffer) ![]const u8 {
 +    _ = this;
 +    // Base: $BUN_INSTALL o fallback $XDG_CACHE_HOME/.bun o $HOME/.bun
-+    const bun_install = bun.env_var.BUN_INSTALL.get() orelse blk: {
-+        const home = bun.env_var.XDG_CACHE_HOME.get() orelse (bun.env_var.HOME.get() orelse return error.MissingPackageJSON);
-+        var home_buf: bun.PathBuffer = undefined;
-+        break :blk Path.joinAbsStringBuf(home, &home_buf, &.{".bun"}, .auto);
-+    };
-+
-+    const ghost_dir = Path.joinAbsStringBuf(bun_install, buf, &.{"bun-ghost"}, .auto);
++    // home_buf vive en el scope de la FUNCIÓN (no dentro de un blk) para que el
++    // slice resultante no sea un puntero colgante a stack (UB).
++    var home_buf: bun.PathBuffer = undefined;
++    const home = bun.env_var.XDG_CACHE_HOME.get() orelse (bun.env_var.HOME.get() orelse return error.MissingPackageJSON);
++    const base = bun.env_var.BUN_INSTALL.get() orelse Path.joinAbsStringBuf(home, &home_buf, &.{".bun"}, .auto);
++    const ghost_dir = Path.joinAbsStringBuf(base, buf, &.{"bun-ghost"}, .auto);
 +
 +    var pkg_json_buf: bun.PathBuffer = undefined;
 +    const pkg_json = Path.joinAbsStringBuf(ghost_dir, &pkg_json_buf, &.{"package.json"}, .auto);
 +    if (bun.sys.exists(pkg_json)) return ghost_dir;
 +
-+    try std.fs.cwd().makeOpenPath(ghost_dir, .{});
++    var ghost_root = try std.fs.cwd().makeOpenPath(ghost_dir, .{});
++    defer ghost_root.close();
 +
 +    var bin_dir_buf: bun.PathBuffer = undefined;
 +    const bin_dir_path = Path.joinAbsStringBuf(ghost_dir, &bin_dir_buf, &.{"bin"}, .auto);
