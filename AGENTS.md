@@ -139,6 +139,7 @@ source scripts/env.sh
 | 🟢 Hecho | Module graph transplant genera binario 185MB AArch64 funcional | ✅ Verificado |
 | 🟡 Media | Implementar build vía termux-docker + QEMU (elimina transplant) | ⏳ Pendiente |
 | 🟢 Hecho | `bun add -g bunli` resuelto con paquete fantasma `bun` (ghost folder) — ver `bun-ghost-fix.md` | ✅ Verificado (BuildID 7aba35f6) |
+| 🟢 Hecho | Warning transitivas en `bun add -g` es bug upstream #20376 — falso positivo funcional (deps importan OK); `--linker=isolated` rompe el ghost | ✅ Verificado |
 
 ## Build exitoso: runner ARM64 nativo
 

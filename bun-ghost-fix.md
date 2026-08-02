@@ -81,3 +81,27 @@ por el propio Bun (idempotente).
 | `5871cb5` | cache key incluye hash del parche ghost |
 | `20e0079` | función libre vs método |
 | `fab5250` | resolución inline sin mutar version (rediseño definitivo) |
+
+## Warning "Some transitive dependencies may not be fully installed" (bun add -g)
+
+Al instalar paquetes con muchas transitivas (p.ej. `bun add -g bunli`), Bun muestra:
+
+```
+⚠ Some transitive dependencies may not be fully installed.
+  Run bun install --cwd ~/.bun/install/global --production to fix.
+```
+
+**Veredicto: falso positivo funcional en nuestro caso. No es causado por el ghost.**
+
+- Es el **bug estándar de Bun #20376** (peer hoisting incorrecto con el linker hoisted; fix en PR #36300, aún abierto). El string no está indexado en grep.app → es reciente, y el fix sugerido por el warning **no hace nada** ("Checked 140 installs (no changes)").
+- Verificado empíricamente: las 4 deps que parecían faltar (`@babel/template`, `@babel/code-frame`, `marked`, `bun-ffi-structs`) **importan correctamente** con `import()`/`require()` real desde el contexto del global (el `import.meta.resolve` daba falsos negativos). `@opentui/core` carga OK (234 exports).
+- Test control: `bun add -g cowsay` NO produce el warning → es específico del árbol con muchas transitivas, no general.
+- `--linker=isolated` (workaround del mantenedor) **NO sirve en nuestro caso**: no elimina el warning y **rompe el ghost package** (`EACCES: failed to link package: bun@.../bun-ghost`) y no genera `bin/bunli`. El ghost folder solo funciona con el linker por defecto.
+
+## Warning "create_bun_cache_entries: command not found" (install.sh)
+
+Durante `./install.sh --just bun`, aparece `./install.sh: line 257: create_bun_cache_entries: command not found`.
+
+**Causa**: la función `create_bun_cache_entries()` estaba definida DESPUÉS de la invocación `main "$@"` en el script — en bash las funciones se registran secuencialmente, así que la llamada (dentro de `install_bun`) fallaba siempre. El `|| true` lo enmascaraba.
+
+**Además era obsoleto**: creaba directorios vacíos de cache para el peer dep "bun" (enfoque intermedio superado por el ghost patch). Se eliminó la llamada y la definición (código muerto). Cero impacto funcional: el stub de `@oven/bun-linux-aarch64-android` se instala por otra vía (`install_bun_stub`) y el peer dep "bun" lo satisface el ghost.

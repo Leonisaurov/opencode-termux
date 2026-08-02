@@ -253,9 +253,6 @@ install_bun() {
     # ── Install @oven/bun-linux-aarch64-android stub ──
     install_bun_stub || true
 
-    # ── Create cache entries for 'bun' peer dependency ──
-    create_bun_cache_entries || true
-
     # Verificar
     if command -v bun &>/dev/null; then
         local version
@@ -452,19 +449,3 @@ main() {
 }
 
 main "$@"
-
-# ── Cache entries for 'bun' runtime peer dependency ──────────────
-# This allows packages with "bun" as a peer dependency to resolve
-# without downloading from npm (the runtime itself satisfies it).
-create_bun_cache_entries() {
-    local bun_version="${BUN_VERSION:-1.3.14}"
-    local bun_cache="${HOME}/.bun/install/cache"
-
-    info "Creando cache entries para peer dependency 'bun'..."
-
-    mkdir -p "${bun_cache}/bun@${bun_version}@@@1/"
-    mkdir -p "${bun_cache}/@oven/bun-linux-aarch64-android@${bun_version}@@@1/"
-    mkdir -p "${bun_cache}/@oven/bun-linux-arm64@${bun_version}@@@1/"
-
-    info "Cache entries creados en: ${bun_cache}"
-}
