@@ -1,5 +1,5 @@
 diff --git a/src/install/PackageManager/PackageManagerEnqueue.zig b/src/install/PackageManager/PackageManagerEnqueue.zig
-index cbe8d81..691d17c 100644
+index cbe8d81..54b7739 100644
 --- a/src/install/PackageManager/PackageManagerEnqueue.zig
 +++ b/src/install/PackageManager/PackageManagerEnqueue.zig
 @@ -1612,6 +1612,34 @@ fn getOrPutResolvedPackage(
@@ -13,7 +13,7 @@ index cbe8d81..691d17c 100644
 +        const name_str = this.lockfile.str(&name);
 +        if (strings.eqlComptime(name_str, "bun")) {
 +            var ghost_buf: bun.PathBuffer = undefined;
-+            if (this.ensureBunGhostPackageExists(&ghost_buf) catch |err| blk: {
++            if (ensureBunGhostPackageExists(this, &ghost_buf) catch |err| blk: {
 +                // No se pudo crear el ghost → fallback al flujo npm (que fallará en
 +                // Android con el postinstall de bun@npm). Logueamos la causa real.
 +                Output.prettyErrorln("bun-ghost: failed to create ghost package: {s}", .{@errorName(err)});
