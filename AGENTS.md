@@ -71,7 +71,8 @@ El parche `patches/bun/android-standalone-raw-append.patch` añade ese fallback 
 | `patches/bun/android-global-shebang-fix.patch` | ✅ ACTIVO | `apply-patches.sh` | Fix shebangs (`node`→`bun`) en global install |
 | `patches/bun/android-global-transitive-deps.patch` | ✅ ACTIVO | `apply-patches.sh` | Fix transitive deps + resolver + standalone en global install |
 | `patches/bun/android-global-path-reconstruction.patch` | ✅ ACTIVO | `bun.js.zig`, `run_command.zig` | Reconstruye path global/node_modules/ desde cache para que module resolution funcione |
-| `patches/bun/android-skip-peer-dep-bun.patch` | ✅ ACTIVO | `apply-patches.sh` | Skip peer dep "bun" cuando runtime es bun (evita postinstall fallido) |
+| `patches/bun/android-skip-peer-dep-bun.patch` | 🗑️ SUSTITUIDO | (documentado en bun-fix.md) | No existía en disco; reemplazado por el enfoque del paquete fantasma (`android-bun-ghost.patch`), que satisface el peer en vez de ignorarlo |
+| `patches/bun/android-bun-ghost.patch` | ✅ ACTIVO | `apply-patches.sh` | Satisface peer/dep "bun" con paquete fantasma local (folder) — evita descargar bun@npm (postinstall falla en Android). Ver `bun-ghost-fix.md` |
 | `patches/webkit/android-support.patch` | ✅ ACTIVO | `apply-patches.sh` | JSC Android: polling traps, aligned_alloc |
 | `patches/zig/posix-android-sigaction.patch` | 🔄 APLICADO POR BUILD | `build-bun.sh` (implícito) | Al vendor/zig/ que Bun descarga |
 | `patches/bun/build-zig-no-link-obj.patch` | 📎 REFERENCIA | Inline con sed+python3 | Solo documentación, el parche real es inline |
@@ -86,6 +87,7 @@ El parche `patches/bun/android-standalone-raw-append.patch` añade ese fallback 
   - PR #30659 (abierto) intenta fixear el walk-up del global dir
   - PR #30473 (merged) deshabilitó global virtual store por defecto
   - PR #32182 (merged) fixea stale symlinks del global store
+  - **⚠️ No confundir**: el caso #25110 (transitivas en global) NO es el problema de `bun add -g bunli`. El problema real era el postinstall del peer dep `bun` (descargaba `bun@npm`, que falla en Android), resuelto con el paquete fantasma — ver `bun-ghost-fix.md`
 
 ## Cachés (actions/cache)
 
@@ -136,7 +138,7 @@ source scripts/env.sh
 | 🟢 Hecho | `fromExecutable()` parche funciona — test ./tmp/main.ts pasa | ✅ Verificado |
 | 🟢 Hecho | Module graph transplant genera binario 185MB AArch64 funcional | ✅ Verificado |
 | 🟡 Media | Implementar build vía termux-docker + QEMU (elimina transplant) | ⏳ Pendiente |
-| 🟡 Media | Evaluar si el bug #25110 de `bun add -g` aplica a nuestro Bun ARM64 | ⏳ Pendiente |
+| 🟢 Hecho | `bun add -g bunli` resuelto con paquete fantasma `bun` (ghost folder) — ver `bun-ghost-fix.md` | ✅ Verificado (BuildID 7aba35f6) |
 
 ## Build exitoso: runner ARM64 nativo
 
