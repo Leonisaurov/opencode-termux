@@ -1,8 +1,8 @@
 diff --git a/codex-rs/cli/src/debug_sandbox.rs b/codex-rs/cli/src/debug_sandbox.rs
-index 5f02f0eb82..513332a6e4 100644
+index 5f02f0eb82..bc1cf24fea 100644
 --- a/codex-rs/cli/src/debug_sandbox.rs
 +++ b/codex-rs/cli/src/debug_sandbox.rs
-@@ -92,11 +92,15 @@ pub async fn run_command_under_seatbelt(
+@@ -92,40 +92,48 @@ pub async fn run_command_under_seatbelt(
      anyhow::bail!("Seatbelt sandbox is only available on macOS");
  }
  
@@ -12,9 +12,67 @@ index 5f02f0eb82..513332a6e4 100644
      codex_linux_sandbox_exe: Option<PathBuf>,
      loader_overrides: LoaderOverrides,
  ) -> anyhow::Result<()> {
+-    let LandlockCommand {
+-        sandbox_state,
+-        permissions_profile,
+-        config_profile: _,
+-        cwd,
+-        include_managed_config,
+-        config_overrides,
+-        command,
+-    } = command;
+-    let managed_requirements_mode = ManagedRequirementsMode::for_profile_invocation(
+-        &permissions_profile,
+-        include_managed_config,
 +    #[cfg(target_os = "android")]
-+    anyhow::bail!("`codex sandbox` no es compatible con Android/Termux; ejecuta comandos directamente sin sandbox");
++    anyhow::bail!(
++        "`codex sandbox` no es compatible con Android/Termux; ejecuta comandos directamente sin sandbox"
+     );
+-    run_command_under_sandbox(
+-        DebugSandboxConfigOptions {
 +    #[cfg(target_os = "linux")]
-     let LandlockCommand {
-         sandbox_state,
-         permissions_profile,
++    {
++        let LandlockCommand {
+             sandbox_state,
+             permissions_profile,
++            config_profile: _,
+             cwd,
+-            managed_requirements_mode,
+-            loader_overrides,
+-        },
+-        command,
+-        config_overrides,
+-        codex_linux_sandbox_exe,
+-        SandboxType::Landlock,
+-        /*log_denials*/ false,
+-        &[],
+-    )
+-    .await
++            include_managed_config,
++            config_overrides,
++            command,
++        } = command;
++        let managed_requirements_mode = ManagedRequirementsMode::for_profile_invocation(
++            &permissions_profile,
++            include_managed_config,
++        );
++        run_command_under_sandbox(
++            DebugSandboxConfigOptions {
++                sandbox_state,
++                permissions_profile,
++                cwd,
++                managed_requirements_mode,
++                loader_overrides,
++            },
++            command,
++            config_overrides,
++            codex_linux_sandbox_exe,
++            SandboxType::Landlock,
++            /*log_denials*/ false,
++            &[],
++        )
++        .await
++    }
+ }
+ 
+ pub async fn run_command_under_windows_sandbox(

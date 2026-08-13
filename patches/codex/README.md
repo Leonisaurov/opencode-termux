@@ -21,7 +21,7 @@ Orden **numérico** estricto (01 → 09). Cada parche toca un único archivo:
 | 02 | `codex-rs/sandboxing/src/lib.rs` | Extiende cfg `target_os = "linux"` → `any(linux, android)` para bwrap y `system_bwrap_warning` |
 | 03 | `codex-rs/sandboxing/src/manager.rs` | `get_platform_sandbox` en Android devuelve `None` (sin sandbox) |
 | 04 | `codex-rs/cli/src/main.rs` | `HostSandboxArgs` = `LandlockCommand` y llamada a `run_command_under_landlock` en Android |
-| 05 | `codex-rs/cli/src/debug_sandbox.rs` | `run_command_under_landlock` compilable en Android: bail con mensaje "no compatible con Android/Termux" |
+| 05 | `codex-rs/cli/src/debug_sandbox.rs` | `run_command_under_landlock` compilable en Android: cfg `any(linux, android)`, `bail!` divergente en android, y **todo el cuerpo linux envuelto en `#[cfg(target_os = "linux")] { ... }`** (sin código muerto type-checkeado en android) |
 | 06 | `codex-rs/linux-sandbox/Cargo.toml` | Dependencias target `any(linux, android)` |
 | 07 | `codex-rs/linux-sandbox/src/main.rs` | En Android imprime "no soportado" y exit(1) en vez de llamar `run_main()` |
 | 08 | `codex-rs/code-mode-protocol/build.rs` | En Android **no** usa `protoc-bin-vendored` (binarios glibc) → fallback `protoc` de Termux (paquete `protobuf`); CI linux intacto |
@@ -45,3 +45,4 @@ por lo que `git apply` (p1 implícito) funciona sin ajustes.
 - `git apply` 01-09 en orden sobre worktree limpio: OK.
 - Aplicados todos sobre el worktree limpio: el diff resultante es **byte-idéntico**
   al diff del checkout modificado (`git -C codex diff HEAD`).
+- Sintaxis del archivo tocado por el parche 05 validada con `rustfmt --check` (stable, exit OK).
