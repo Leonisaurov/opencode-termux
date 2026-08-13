@@ -1,0 +1,31 @@
+diff --git a/codex-rs/sandboxing/src/lib.rs b/codex-rs/sandboxing/src/lib.rs
+index 95b143c0ec..163da5a8c0 100644
+--- a/codex-rs/sandboxing/src/lib.rs
++++ b/codex-rs/sandboxing/src/lib.rs
+@@ -1,4 +1,4 @@
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ mod bwrap;
+ mod denial;
+ pub mod landlock;
+@@ -10,9 +10,9 @@ mod spawn;
+ mod violation;
+ mod windows;
+ 
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ pub use bwrap::find_system_bwrap_in_path;
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ pub use bwrap::system_bwrap_warning;
+ pub use codex_windows_sandbox::WindowsSandboxProxySettingsMode;
+ pub use denial::is_likely_sandbox_denied;
+@@ -47,7 +47,7 @@ pub use windows::windows_sandbox_uses_elevated_backend;
+ 
+ use codex_protocol::error::CodexErr;
+ 
+-#[cfg(not(target_os = "linux"))]
++#[cfg(not(any(target_os = "linux", target_os = "android")))]
+ pub fn system_bwrap_warning(
+     _permission_profile: &codex_protocol::models::PermissionProfile,
+ ) -> Option<String> {

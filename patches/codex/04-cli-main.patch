@@ -1,0 +1,41 @@
+diff --git a/codex-rs/cli/src/main.rs b/codex-rs/cli/src/main.rs
+index b22ff80b1e..9890d70ec7 100644
+--- a/codex-rs/cli/src/main.rs
++++ b/codex-rs/cli/src/main.rs
+@@ -428,15 +428,15 @@ impl clap::FromArgMatches for SessionTuiCli {
+ 
+ #[cfg(target_os = "macos")]
+ type HostSandboxArgs = codex_cli::SeatbeltCommand;
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ type HostSandboxArgs = codex_cli::LandlockCommand;
+ #[cfg(target_os = "windows")]
+ type HostSandboxArgs = codex_cli::WindowsCommand;
+ 
+-#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
++#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows", target_os = "android")))]
+ type HostSandboxArgs = UnsupportedSandboxArgs;
+ 
+-#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
++#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows", target_os = "android")))]
+ #[derive(Debug, Parser)]
+ struct UnsupportedSandboxArgs {
+     /// Layer $CODEX_HOME/<name>.config.toml on top of the base user config.
+@@ -1526,7 +1526,7 @@ async fn cli_main(
+                 loader_overrides,
+             )
+             .await?;
+-            #[cfg(target_os = "linux")]
++            #[cfg(any(target_os = "linux", target_os = "android"))]
+             codex_cli::run_command_under_landlock(
+                 sandbox_cli,
+                 arg0_paths.codex_linux_sandbox_exe.clone(),
+@@ -1540,7 +1540,7 @@ async fn cli_main(
+                 loader_overrides,
+             )
+             .await?;
+-            #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
++            #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows", target_os = "android")))]
+             {
+                 let _ = loader_overrides;
+                 anyhow::bail!("`codex sandbox` is not supported on this operating system");

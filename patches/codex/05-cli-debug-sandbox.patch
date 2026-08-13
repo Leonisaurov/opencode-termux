@@ -1,0 +1,20 @@
+diff --git a/codex-rs/cli/src/debug_sandbox.rs b/codex-rs/cli/src/debug_sandbox.rs
+index 5f02f0eb82..513332a6e4 100644
+--- a/codex-rs/cli/src/debug_sandbox.rs
++++ b/codex-rs/cli/src/debug_sandbox.rs
+@@ -92,11 +92,15 @@ pub async fn run_command_under_seatbelt(
+     anyhow::bail!("Seatbelt sandbox is only available on macOS");
+ }
+ 
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ pub async fn run_command_under_landlock(
+     command: LandlockCommand,
+     codex_linux_sandbox_exe: Option<PathBuf>,
+     loader_overrides: LoaderOverrides,
+ ) -> anyhow::Result<()> {
++    #[cfg(target_os = "android")]
++    anyhow::bail!("`codex sandbox` no es compatible con Android/Termux; ejecuta comandos directamente sin sandbox");
++    #[cfg(target_os = "linux")]
+     let LandlockCommand {
+         sandbox_state,
+         permissions_profile,

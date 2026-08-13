@@ -1,0 +1,20 @@
+diff --git a/codex-rs/code-mode-protocol/build.rs b/codex-rs/code-mode-protocol/build.rs
+index d8d8bbff32..6bd2a2382e 100644
+--- a/codex-rs/code-mode-protocol/build.rs
++++ b/codex-rs/code-mode-protocol/build.rs
+@@ -5,7 +5,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
+     println!("cargo:rerun-if-changed=src/grpc");
+ 
+     let mut config = tonic_prost_build::Config::new();
++    // CODEX-TERMUX-ANDROID-PATCH: protoc-bin-vendored 3.2.0 only ships
++    // linux/macos/windows binaries and the linux-aarch64 one is glibc (cannot
++    // run on Termux/bionic). On Android, skip protoc_executable entirely so
++    // prost-build falls back to protoc_from_env(): $PROTOC or `protoc` on PATH
++    // (native Termux package `protobuf`). Other platforms keep the vendored
++    // protoc so CI (linux) is unaffected.
++    #[cfg(not(target_os = "android"))]
+     config.protoc_executable(protoc_bin_vendored::protoc_bin_path()?);
++    // CODEX-TERMUX-ANDROID-PATCH-END
+     let proto_files = glob::glob("src/grpc/*.proto")?.collect::<Result<Vec<_>, _>>()?;
+ 
+     tonic_prost_build::configure()

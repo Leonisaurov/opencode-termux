@@ -1,0 +1,13 @@
+diff --git a/codex-rs/sandboxing/src/manager.rs b/codex-rs/sandboxing/src/manager.rs
+index cf4cb90c8d..da7d7fc47e 100644
+--- a/codex-rs/sandboxing/src/manager.rs
++++ b/codex-rs/sandboxing/src/manager.rs
+@@ -62,6 +62,8 @@ pub fn get_platform_sandbox(windows_sandbox_enabled: bool) -> Option<SandboxType
+         Some(SandboxType::MacosSeatbelt)
+     } else if cfg!(target_os = "linux") {
+         Some(SandboxType::LinuxSeccomp)
++    } else if cfg!(target_os = "android") {
++        None
+     } else if cfg!(target_os = "windows") {
+         if windows_sandbox_enabled {
+             Some(SandboxType::WindowsRestrictedToken)

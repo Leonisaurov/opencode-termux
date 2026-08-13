@@ -1,0 +1,232 @@
+# build-codex.yml
+#
+# Cross-compile de OpenAI Codex CLI (openai/codex, Rust) para Termux/Android
+# aarch64 (bionic) en runner x86_64 (ubuntu-latest).
+#
+# A diferencia de build-opencode.yml NO requiere runner ARM64 nativo: cargo
+# cross-compila puro contra el NDK (cargo build --release
+# --target aarch64-linux-android). NO usa Bun/Zig/libopentui.
+#
+# Flujo:
+#   1. Instala deps de build (build-essential/cmake/perl para openssl-sys
+#      vendored, onig_sys y aws-lc-rs; protoc-bin-vendored descarga solo en
+#      build-time y funciona en host linux).
+#   2. Restaura del cache: toolchain Rust (codex-rust-*), registro/git de
+#      cargo (codex-cargo-*) y el NDK r28b recortado a aarch64 (codex-ndk-*).
+#   3. Instala el NDK r28b solo si el cache falla y lo recorta a la ABI
+#      aarch64 (ahorra ~2 GB).
+#   4. scripts/build-codex-ci.sh: clona openai/codex al ref CODEX_REF (commit
+#      o tag), aplica patches/codex/*.patch, instala la toolchain Rust del
+#      rust-toolchain.toml y cross-compila codex-tui + codex-linux-sandbox +
+#      codex-cli.
+#   5. Empaqueta codex-v<version>-android-aarch64.zip, sube artifact y crea
+#      Release cuando github.ref es tag v* o input release=true.
+#
+# CAMINO FÁCIL DE UPGRADE: cambiar el ref en scripts/env.sh (CODEX_REF) o el
+# input codex_ref (commit/tag) → la cache key de cargo
+# (codex-cargo-<ref>-<patch hashes>) cambia automáticamente → cache miss →
+# rebuild. Nada más que tocar.
+#
+# NOTA: el binario DENTRO del zip se llama `codex-android` (el script lo copia
+# con ese nombre); el comando de instalación del release lo renombra a `codex`.
+
+name: Build Codex (Android aarch64)
+
+on:
+  workflow_dispatch:
+    inputs:
+      codex_ref:
+        description: 'Commit sha (40 hex) o tag de openai/codex a portar'
+        required: false
+        default: '50ef7395faee1d0e2d01730f9636aa06091c7be3'
+      codex_version:
+        description: 'Versión para el asset (default: 0.134.0-alpha.3; si vacío se deriva del tag/sha del checkout)'
+        required: false
+        default: '0.134.0-alpha.3'
+      release:
+        description: 'Publicar Release con el asset'
+        required: false
+        type: boolean
+        default: false
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-codex-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ANDROID_NDK_HOME: /opt/android-ndk
+
+jobs:
+  build-codex:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Dependencias de build ──
+      # openssl-sys vendored necesita perl/make; onig_sys es C puro; aws-lc-rs
+      # necesita cmake; protobuf-compiler es OBLIGATORIO: el build.rs de
+      # code-mode-protocol usa #[cfg(target_os = "android")] (el cfg refleja el
+      # TARGET, no el host) → en CI (target=android) protoc-bin-vendored NO se
+      # usa y se necesita `protoc` real en PATH. file se usa en la verificación
+      # del binario en el script; unzip es para el NDK r28b (instalado abajo).
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake perl pkg-config m4 zip unzip file protobuf-compiler
+
+      # ── Cache: toolchain Rust (1.95.0 del rust-toolchain.toml) ──
+      # Si cambia el channel de codex-rs/rust-toolchain.toml, actualizar la key.
+      - name: Cache Rust toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.rustup/toolchains
+          key: codex-rust-1.95.0
+
+      # ── Cache: registro + git de cargo (por ref + hashes de los parches) ──
+      # La key incluye el ref (commit/tag) y el hash de patches/codex/*.patch:
+      # cualquier cambio de ref o de parches invalida el cache automáticamente.
+      # En eventos push inputs.codex_ref es vacío → fallback al pin por defecto.
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: codex-cargo-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-${{ hashFiles('patches/codex/*.patch') }}
+
+      # ── Cache: NDK r28b recortado a aarch64 ──
+      # actions/cache restaura/escribe como el usuario runner: /opt no es
+      # escribible sin sudo, así que se prepara el dir con chown antes.
+      - name: Prepare NDK directory
+        run: |
+          sudo mkdir -p "$ANDROID_NDK_HOME"
+          sudo chown -R "$(id -u):$(id -g)" "$ANDROID_NDK_HOME"
+
+      - name: Cache Android NDK r28b
+        id: cache-ndk
+        uses: actions/cache@v4
+        with:
+          path: /opt/android-ndk
+          key: codex-ndk-r28b
+
+      # ── Instalar NDK r28b ──
+      # Solo si el cache no lo restauró. Guard interno con test -d (el cache
+      # podría restaurar la estructura de otra key vía prefix fallback).
+      # Se RECORTA a la ABI aarch64: se borra todo lo que no sea
+      # aarch64-linux-android* en sysroot/usr/lib y las platforms no-arm64.
+      - name: Install Android NDK r28b (trimmed to aarch64)
+        if: steps.cache-ndk.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          if [ -x "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android-clang" ]; then
+            echo ">>> NDK ya presente, skip"
+            exit 0
+          fi
+          echo ">>> Descargando android-ndk-r28b..."
+          curl -fsSL "https://dl.google.com/android/repository/android-ndk-r28b-linux.zip" \
+            -o "$RUNNER_TEMP/ndk.zip"
+          mkdir -p "$RUNNER_TEMP/ndk-extract"
+          unzip -q "$RUNNER_TEMP/ndk.zip" -d "$RUNNER_TEMP/ndk-extract"
+          sudo mv "$RUNNER_TEMP/ndk-extract/android-ndk-r28b"/* "$ANDROID_NDK_HOME/"
+          rm -rf "$RUNNER_TEMP/ndk.zip" "$RUNNER_TEMP/ndk-extract"
+
+          # ── Recorte de ABIs (solo aarch64) ──
+          SYSROOT_LIB="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib"
+          for triple in "$SYSROOT_LIB"/*/; do
+            case "$triple" in
+              */aarch64-linux-android*/) ;;   # conservar
+              *) sudo rm -rf "$triple";;
+            esac
+          done
+          # platforms/: conservar solo arch-arm64
+          for arch_dir in "$ANDROID_NDK_HOME"/platforms/android-*/arch-*/; do
+            case "$arch_dir" in
+              */arch-arm64/) ;;               # conservar
+              *) sudo rm -rf "$arch_dir";;
+            esac
+          done
+
+          # ── Validación: clang aarch64 (con o sin sufijo API) ──
+          NDK_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          if [ -x "$NDK_BIN/aarch64-linux-android-clang" ]; then
+            echo ">>> NDK OK: aarch64-linux-android-clang"
+          elif [ -x "$NDK_BIN/aarch64-linux-android24-clang" ]; then
+            echo ">>> NDK OK: aarch64-linux-android24-clang (el script creará el symlink sin sufijo)"
+          else
+            echo "ERROR: clang aarch64 no encontrado en $NDK_BIN" >&2
+            exit 1
+          fi
+
+      # ── Cross-compilar Codex (scripts/build-codex-ci.sh) ──
+      # El script clona openai/codex@$CODEX_REF, aplica patches/codex/*.patch,
+      # instala la toolchain Rust del rust-toolchain.toml y compila
+      # codex-tui + codex-linux-sandbox + codex-cli → $WORK_DIR/codex-android
+      # + codex-v<version>-android-aarch64.zip. Emite version= a GITHUB_OUTPUT
+      # (el prefijo 'v' se quita en la normalización del script).
+      - name: Cross-compile Codex
+        id: build
+        env:
+          CODEX_REF: ${{ inputs.codex_ref }}
+          # En push de tag v* inputs.codex_version es vacío → se usa
+          # github.ref_name (p.ej. v0.134.0-alpha.3); el script normaliza
+          # quitando la 'v' inicial → 0.134.0-alpha.3.
+          CODEX_VERSION: ${{ inputs.codex_version || github.ref_name }}
+          JOBS: '2'
+          ANDROID_NDK_HOME: /opt/android-ndk
+        run: |
+          bash scripts/build-codex-ci.sh
+
+      # ── Subir artifact ──
+      # El zip vive en el WORK_DIR default del script: $REPO_ROOT/build/codex-ci
+      # (REPO_ROOT = workspace). Nombre real: codex-v<version>-android-aarch64.zip.
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-android-aarch64-${{ steps.build.outputs.version }}
+          path: ${{ github.workspace }}/build/codex-ci/*.zip
+          if-no-files-found: error
+
+      # ── Release (tag v* o input release=true) ──
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', steps.build.outputs.version) }}
+          files: ${{ github.workspace }}/build/codex-ci/*.zip
+          body: |
+            ## Codex CLI ${{ steps.build.outputs.version }} for Android/Termux (aarch64)
+
+            Cross-compilado desde [openai/codex](https://github.com/openai/codex)
+            (Rust puro, sin Bun/Zig) contra bionic del Android NDK r28b en
+            runner x86_64.
+
+            | Campo | Valor |
+            |-------|-------|
+            | Crate | `codex` (openai/codex @ `${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}`) |
+            | Target | `aarch64-linux-android` (API 24, bionic) |
+            | Toolchain | Rust `1.95.0` (`codex-rs/rust-toolchain.toml`) |
+            | Asset | `codex-v${{ steps.build.outputs.version }}-android-aarch64.zip` |
+
+            ### Instalación
+
+            El binario dentro del zip se llama `codex-android`; renómbralo a `codex`:
+
+            ```bash
+            unzip codex-v${{ steps.build.outputs.version }}-android-aarch64.zip -d "$PREFIX/bin"
+            mv "$PREFIX/bin/codex-android" "$PREFIX/bin/codex"
+            chmod +x "$PREFIX/bin/codex"
+            codex --version
+            ```
+
+            > Si usas un emulador/versión distinta o quieres el port local,
+            > revisa `codex_build.sh` (build Termux) y `patches/codex/README.md`.
+          draft: false
+          prerelease: false
+          update_release_body: true

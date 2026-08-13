@@ -16,6 +16,10 @@ export ZIG_VERSION="${ZIG_VERSION:-0.15.2}"
 export OPENCODE_VERSION="${OPENCODE_VERSION:-1.18.6}"
 export ANDROID_API="${ANDROID_API:-24}"
 
+# Codex CLI (openai/codex) — pin del port Android (ver patches/codex/README.md)
+export CODEX_REF="${CODEX_REF:-50ef7395faee1d0e2d01730f9636aa06091c7be3}"
+export CODEX_VERSION="${CODEX_VERSION:-0.134.0-alpha.3}"
+
 # Android NDK
 export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-/opt/android-ndk}"
 export ANDROID_ABI=arm64-v8a
