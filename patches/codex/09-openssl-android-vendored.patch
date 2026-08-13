@@ -1,0 +1,15 @@
+diff --git a/codex-rs/core/Cargo.toml b/codex-rs/core/Cargo.toml
+index 7e6e4576d0..5be9a06fe1 100644
+--- a/codex-rs/core/Cargo.toml
++++ b/codex-rs/core/Cargo.toml
+@@ -132,6 +132,10 @@ openssl-sys = { workspace = true, features = ["vendored"] }
+ [target.aarch64-unknown-linux-musl.dependencies]
+ openssl-sys = { workspace = true, features = ["vendored"] }
+ 
++# Build OpenSSL from source for Android builds.
++[target.aarch64-linux-android.dependencies]
++openssl-sys = { workspace = true, features = ["vendored"] }
++
+ [target.'cfg(unix)'.dependencies]
+ codex-shell-escalation = { workspace = true }
+ 

@@ -13,7 +13,7 @@ Generado desde el checkout local (`git -C codex diff HEAD`) en la rama `main` de
 
 ## Parches y orden de aplicación
 
-Orden **numérico** estricto (01 → 08). Cada parche toca un único archivo:
+Orden **numérico** estricto (01 → 09). Cada parche toca un único archivo:
 
 | # | Archivo | Propósito |
 |---|---------|-----------|
@@ -25,6 +25,7 @@ Orden **numérico** estricto (01 → 08). Cada parche toca un único archivo:
 | 06 | `codex-rs/linux-sandbox/Cargo.toml` | Dependencias target `any(linux, android)` |
 | 07 | `codex-rs/linux-sandbox/src/main.rs` | En Android imprime "no soportado" y exit(1) en vez de llamar `run_main()` |
 | 08 | `codex-rs/code-mode-protocol/build.rs` | En Android **no** usa `protoc-bin-vendored` (binarios glibc) → fallback `protoc` de Termux (paquete `protobuf`); CI linux intacto |
+| 09 | `codex-rs/core/Cargo.toml` | Activa `vendored` de openssl-sys para `[target.aarch64-linux-android.dependencies]` → openssl-src cross-compilado en CI (sin openssl del sistema); `openssl-src` ya está en Cargo.lock, `--locked` intacto |
 
 ## Comando de aplicación
 
@@ -40,6 +41,7 @@ por lo que `git apply` (p1 implícito) funciona sin ajustes.
 ## Validación
 
 - `git apply --check` individual: 8/8 OK sobre worktree limpio en `50ef7395`.
-- `git apply --check` conjunto (wildcard): OK.
+- `git apply --check` conjunto (wildcard 01-09): OK.
+- `git apply` 01-09 en orden sobre worktree limpio: OK.
 - Aplicados todos sobre el worktree limpio: el diff resultante es **byte-idéntico**
   al diff del checkout modificado (`git -C codex diff HEAD`).
