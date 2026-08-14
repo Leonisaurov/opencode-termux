@@ -151,10 +151,20 @@ jobs:
             rusty-v8-android-${{ inputs.v8_version }}-
 
       # ── Build desde fuente (30-90 min en frío) ──
+      # BINDGEN_EXTRA_CLANG_ARGS: el build.rs del crate v8 no tiene rama android
+      # en build_binding() → bindgen corre contra el target del host (x86_64)
+      # sin el sysroot del NDK y falla con
+      # "/usr/include/features-time64.h: fatal error: 'bits/wordsize.h' file not found"
+      # (issues #1604 y CI AuTsing). bindgen 0.72 respeta estas vars (la variante
+      # target-específica <TARGET> con guiones→guiones_bajos tiene precedencia);
+      # el sysroot es el del NDK r26c que descarga el build.rs a
+      # third_party/android_ndk (host x86_64 del runner, API 24).
       - name: Build rusty_v8 sandbox from source
         env:
           V8_FROM_SOURCE: "1"
           SCCACHE_IDLE_TIMEOUT: "0"
+          BINDGEN_EXTRA_CLANG_ARGS: "--target=aarch64-linux-android24 --sysroot=${{ github.workspace }}/upstream-rusty-v8/third_party/android_ndk/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android: "--target=aarch64-linux-android24 --sysroot=${{ github.workspace }}/upstream-rusty-v8/third_party/android_ndk/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
         working-directory: upstream-rusty-v8
         run: cargo +1.91.0 build --locked --release --target aarch64-linux-android --features v8_enable_sandbox
 
