@@ -91,6 +91,12 @@ CODEX_SRC="${CODEX_SRC:-$CODEX_REPO/codex-rs}"
 CODEX_REF="${CODEX_REF:-50ef7395faee1d0e2d01730f9636aa06091c7be3}"
 CODEX_VERSION="${CODEX_VERSION:-}"
 JOBS="${JOBS:-2}"
+# CODEX_BINS: binarios a compilar/empaquetar (el workflow lo pasa como input
+# `bins` vía env CODEX_BINS). Nombres de binario separados por espacios →
+# crates del workspace: codex→codex-cli, codex-tui, codex-linux-sandbox,
+# codex-code-mode-host. Permite builds parciales (p.ej. SOLO el host
+# codex-code-mode-host) reutilizando el cache de sccache del CI.
+CODEX_BINS="${CODEX_BINS:-codex codex-tui codex-linux-sandbox codex-code-mode-host}"
 # API level de bionic objetivo. Política del repo: 24 (mínimo para Termux 64-bit,
 # igual que el port kilo, target aarch64-linux-android.24). OJO: NO bajar de 23 —
 # `openpty` (portable_pty/codex_utils_pty) solo existe en bionic desde API 23; un
@@ -235,12 +241,18 @@ mapfile -t EXPECTED_FILES < <(grep -h '^diff --git a/' "${PATCH_FILES[@]}" | sed
 [ "${#EXPECTED_FILES[@]}" -eq "${#PATCH_FILES[@]}" ] || die "los parches no tocan exactamente un archivo cada uno (revisa patches/codex)"
 
 # Verifica que el worktree tenga EXACTAMENTE los archivos de los parches modificados
-# y nada más (ni untracked, ni staged, ni otros cambios).
+# (o creados) y nada más (ni staged, ni otros cambios).
+# Los parches solo tocan archivos ya existentes salvo 16-bionic-stubs-build.patch,
+# que CREA codex-rs/code-mode-host/build.rs: `git apply` deja los archivos nuevos
+# como untracked (`?? ` en --porcelain), no como ` M ` → se aceptan ambos para
+# los archivos esperados.
 verify_patched_state() {
     local line=""
     local -a actual=()
     while IFS= read -r line; do
         if [[ "$line" =~ ^\ M\ (.*)$ ]]; then
+            actual+=("${BASH_REMATCH[1]}")
+        elif [[ "$line" =~ ^\?\?\ (.*)$ ]]; then
             actual+=("${BASH_REMATCH[1]}")
         else
             echo "ERROR: estado inesperado en $CODEX_REPO: '$line'" >&2
@@ -315,49 +327,98 @@ echo "   fetch completo ($(elapsed)s)"
 echo ":: [4/5] setup_rusty_v8 (artefacto librusty_v8 para codex-code-mode-host)..."
 setup_rusty_v8
 
+# ── Stubs bionic + compiler-rt del NDK para el link del host ──
+# codex-code-mode-host (crate v8, use_custom_libcxx) referencia símbolos que
+# bionic API 24 no exporta: __clear_cache (compiler-rt del NDK), aligned_alloc,
+# strtof_l y strtod_l. Se compila scripts/bionic-stubs.c contra el clang del NDK
+# ($api_clang, API $ANDROID_API) a $CODEX_SRC/target/bionic-stubs.o (target/ está
+# gitignored → no rompe verify_patched_state) y se localiza
+# libclang_rt.builtins-aarch64-android.a del NDK. Las rutas llegan al link vía el
+# build.rs del crate host (parche 16) leyendo las env vars — NO vía RUSTFLAGS
+# (reemplazaría los rustflags del .cargo/config.toml parcheado).
+echo ":: [4/5] Stubs bionic + compiler-rt del NDK (link del host)..."
+mkdir -p "$CODEX_SRC/target"
+"$api_clang" -c -O2 -Wall -Wextra "$REPO_ROOT/scripts/bionic-stubs.c" -o "$CODEX_SRC/target/bionic-stubs.o" \
+    || die "falló la compilación de scripts/bionic-stubs.c con $api_clang (API $ANDROID_API)"
+export CODEX_BIONIC_STUBS_O="$CODEX_SRC/target/bionic-stubs.o"
+CODEX_CLANG_RT_BUILTINS="$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" \
+    -name 'libclang_rt.builtins-aarch64-android.a' 2>/dev/null | head -1 || true)"
+[ -n "$CODEX_CLANG_RT_BUILTINS" ] || die "no se encontró libclang_rt.builtins-aarch64-android.a en $ANDROID_NDK_HOME/toolchains/llvm/prebuilt"
+export CODEX_CLANG_RT_BUILTINS
+echo "   stubs bionic: $CODEX_BIONIC_STUBS_O"
+echo "   compiler-rt:  $CODEX_CLANG_RT_BUILTINS"
+
+# CODEX_BINS → crates (-p). Mapa nombre de binario → crate del workspace.
+bin_to_crate() {
+    case "$1" in
+        codex)                echo "codex-cli" ;;
+        codex-tui)            echo "codex-tui" ;;
+        codex-linux-sandbox)  echo "codex-linux-sandbox" ;;
+        codex-code-mode-host) echo "codex-code-mode-host" ;;
+        *) echo "" ;;
+    esac
+}
+PACKAGES_ARGS=()
+for bin in $CODEX_BINS; do
+    crate="$(bin_to_crate "$bin")"
+    [ -n "$crate" ] || die "CODEX_BINS contiene un binario desconocido: '$bin' (válidos: codex, codex-tui, codex-linux-sandbox, codex-code-mode-host)"
+    PACKAGES_ARGS+=("-p" "$crate")
+done
+echo ":: [4/5] bins a compilar: $CODEX_BINS"
 echo ":: [4/5] cargo build --release --locked --target aarch64-linux-android (JOBS=$JOBS)..."
 start_timer
-cargo build --release --locked --target aarch64-linux-android -j "$JOBS" -p codex-tui -p codex-linux-sandbox -p codex-code-mode-host -p codex-cli
+cargo build --release --locked --target aarch64-linux-android -j "$JOBS" "${PACKAGES_ARGS[@]}"
 echo "   build completo ($(elapsed)s)"
 
 # ── [5/5] Empaquetar ──
+# Solo se copian/verifican/empaquetan los binarios de CODEX_BINS. Un binario
+# listado pero no compilado se omite (p.ej. build SOLO del host no produce
+# codex-android y eso no es un error); si NO se empaqueta nada, fail-fast.
 start_timer
-CODEX_BIN="$CODEX_SRC/target/aarch64-linux-android/release/codex"
-[ -f "$CODEX_BIN" ] && [ -x "$CODEX_BIN" ] || die "binario no encontrado o no ejecutable: $CODEX_BIN"
-
 echo ":: [5/5] Empaquetando..."
-cp "$CODEX_BIN" "$WORK_DIR/codex-android"
-chmod +x "$WORK_DIR/codex-android"
+ZIP_FILES=()
+for bin in $CODEX_BINS; do
+    bin_src="$CODEX_SRC/target/aarch64-linux-android/release/$bin"
+    if [ -f "$bin_src" ] && [ -x "$bin_src" ]; then
+        dst="$WORK_DIR/$bin"
+        [ "$bin" = "codex" ] && dst="$WORK_DIR/codex-android"   # renombre histórico en el zip
+        cp "$bin_src" "$dst"
+        chmod +x "$dst"
+        ZIP_FILES+=("$(basename "$dst")")
+        echo "   binario: $dst ($(du -h "$dst" | cut -f1))"
+        echo "   file: $(file "$dst")"
+    else
+        echo "   binario no presente (omitido): $bin"
+    fi
+done
+[ "${#ZIP_FILES[@]}" -gt 0 ] || die "ningún binario de CODEX_BINS ($CODEX_BINS) se compiló en $CODEX_SRC/target/aarch64-linux-android/release"
 
-echo "   file: $(file "$WORK_DIR/codex-android")"
+# Verificación de arquitectura de los binarios empaquetados (readelf si está
+# disponible; fallback file).
 if command -v readelf >/dev/null 2>&1; then
-    readelf -h "$WORK_DIR/codex-android" | grep -q 'Machine:.*AArch64' \
-        || die "readelf -h: Machine no es AArch64 (¿build host por error?)"
-    echo "   readelf: Machine AArch64 OK"
+    for f in "${ZIP_FILES[@]}"; do
+        readelf -h "$WORK_DIR/$f" | grep -q 'Machine:.*AArch64' \
+            || die "readelf -h $f: Machine no es AArch64 (¿build host por error?)"
+    done
+    echo "   readelf: Machine AArch64 OK (${#ZIP_FILES[@]} binarios)"
 else
-    file "$WORK_DIR/codex-android" | grep -q 'aarch64' \
-        || die "file: no parece binario aarch64"
+    for f in "${ZIP_FILES[@]}"; do
+        file "$WORK_DIR/$f" | grep -q 'aarch64' \
+            || die "file $f: no parece binario aarch64"
+    done
     echo "   file: aarch64 OK (readelf no disponible)"
 fi
-
-# codex-code-mode-host: runtime companion (V8 embebido) que el CLI busca como
-# binario hermano (current_exe.parent()/codex-code-mode-host). Va junto a
-# codex-android dentro del zip de release.
-CODE_MODE_HOST_BIN="$CODEX_SRC/target/aarch64-linux-android/release/codex-code-mode-host"
-[ -f "$CODE_MODE_HOST_BIN" ] && [ -x "$CODE_MODE_HOST_BIN" ] \
-    || die "binario no encontrado o no ejecutable: $CODE_MODE_HOST_BIN"
-cp "$CODE_MODE_HOST_BIN" "$WORK_DIR/codex-code-mode-host"
-chmod +x "$WORK_DIR/codex-code-mode-host"
-echo "   file: $(file "$WORK_DIR/codex-code-mode-host")"
 
 # Log informativo de los NEEDED reales del host (libc++ estático embebido del
 # crate v8 vs libc++_shared.so dinámico). NO fail-fast: solo diagnóstico para
 # el output del build (ver Codex-port.md "Requisito runtime").
-if command -v readelf >/dev/null 2>&1; then
-    echo "   [NEEDED] codex-code-mode-host:"
-    readelf -d "$WORK_DIR/codex-code-mode-host" | grep NEEDED || echo "   [NEEDED] <sin entradas NEEDED>"
-else
-    echo "   [NEEDED] readelf no disponible; file: $(file "$WORK_DIR/codex-code-mode-host" | cut -d: -f2-)"
+if [ -f "$WORK_DIR/codex-code-mode-host" ]; then
+    if command -v readelf >/dev/null 2>&1; then
+        echo "   [NEEDED] codex-code-mode-host:"
+        readelf -d "$WORK_DIR/codex-code-mode-host" | grep NEEDED || echo "   [NEEDED] <sin entradas NEEDED>"
+    else
+        echo "   [NEEDED] readelf no disponible; file: $(file "$WORK_DIR/codex-code-mode-host" | cut -d: -f2-)"
+    fi
 fi
 
 # Versión: CODEX_VERSION explícita o derivada con git describe sobre la raíz del
@@ -387,7 +448,7 @@ fi
 
 ZIP_NAME="codex-v${CODEX_VERSION}-android-aarch64.zip"
 command -v zip >/dev/null 2>&1 || die "zip no está instalado (apt install zip)"
-( cd "$WORK_DIR" && zip -q -j "$ZIP_NAME" codex-android codex-code-mode-host )
+( cd "$WORK_DIR" && zip -q -j "$ZIP_NAME" "${ZIP_FILES[@]}" )
 
 # Emitir la versión para los pasos siguientes del workflow (GITHUB_OUTPUT / GITHUB_ENV)
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
@@ -399,8 +460,9 @@ fi
 
 echo ""
 echo ":: Build completado ($(elapsed_total)s total)"
-echo "   Binario:  $WORK_DIR/codex-android ($(du -h "$WORK_DIR/codex-android" | cut -f1))"
-echo "   Host:     $WORK_DIR/codex-code-mode-host ($(du -h "$WORK_DIR/codex-code-mode-host" | cut -f1))"
+for f in "${ZIP_FILES[@]}"; do
+    echo "   $f: $WORK_DIR/$f ($(du -h "$WORK_DIR/$f" | cut -f1))"
+done
 echo "   Versión:  $CODEX_VERSION"
 echo "   Zip:      $WORK_DIR/$ZIP_NAME"
 ls -lh "$WORK_DIR/$ZIP_NAME" | awk '{print "   " $5 " " $NF}'

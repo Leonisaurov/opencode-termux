@@ -118,7 +118,10 @@ default `150.4.0`). Los 3 artefactos publicados:
   `./codex-code-mode-host` (raíz, junto a `./codex-android`).
 - **CI**: `scripts/build-codex-ci.sh` hace lo mismo (`setup_rusty_v8` +
   `-p codex-code-mode-host`) y el zip de release incluye `codex-code-mode-host`
-  junto a `codex-android`.
+  junto a `codex-android`. El CI usa **sccache** (cache de compilación de cargo,
+  key por ref + hashes de `patches/codex/*.patch`) para no recompilar todos los
+  crates en cada run, y el input `bins` permite compilar SOLO el host
+  (`codex-code-mode-host`) sin tocar el resto.
 - **Instalación**: `install.sh` (`--just codex` o default) instala `codex` y
   `codex-code-mode-host` en `$PREFIX/bin`.
 - Con `RUSTY_V8_ARCHIVE` + `RUSTY_V8_SRC_BINDING_PATH` el crate `v8` **no
@@ -138,6 +141,27 @@ readelf -d "$PREFIX/bin/codex-code-mode-host" | grep NEEDED
 
 Si apareciera `libc++_shared.so` en el NEEDED, instala el paquete Termux
 `libc++`: `pkg install libc++`.
+
+### Link del host contra bionic API 24 (stubs)
+
+`librusty_v8.a` precompilado referencia 4 símbolos que **bionic API 24 no
+exporta**: `__clear_cache` (vive en compiler-rt del NDK), `aligned_alloc`
+(API 28 en bionic), `strtof_l` y `strtod_l` (glibc). El link del host los
+resuelve con:
+
+- **`scripts/bionic-stubs.c`** — stubs compilados contra el clang del NDK
+  (`aarch64-linux-android24-clang -c -O2 -Wall -Wextra`) →
+  `target/bionic-stubs.o` (define `__clear_cache`/`aligned_alloc`/`strtof_l`/
+  `strtod_l`).
+- **`libclang_rt.builtins-aarch64-android.a`** del NDK (find en
+  `toolchains/llvm/prebuilt`).
+
+Ambas rutas se inyectan al link vía el **build.rs del crate host**
+(`codex-rs/code-mode-host/build.rs`, parche 16) leyendo las env vars
+`CODEX_BIONIC_STUBS_O` y `CODEX_CLANG_RT_BUILTINS` que exportan
+`scripts/build-codex-ci.sh` (CI) y `codex_build.sh` (Termux) — **NO vía
+RUSTFLAGS** (un RUSTFLAGS global reemplazaría los rustflags del
+`.cargo/config.toml` parcheado, que ya incluyen `target-feature=-crt-static`).
 
 ### Cómo verificar
 

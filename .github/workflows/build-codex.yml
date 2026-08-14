@@ -48,6 +48,11 @@ on:
         required: false
         type: boolean
         default: false
+      bins:
+        description: 'Binarios a compilar/empaquetar (espacios; default: codex codex-tui codex-linux-sandbox codex-code-mode-host)'
+        required: false
+        type: string
+        default: 'codex codex-tui codex-linux-sandbox codex-code-mode-host'
   push:
     tags:
       - 'v*'
@@ -164,6 +169,36 @@ jobs:
             exit 1
           fi
 
+      # ── sccache (release binario de mozilla, patrón de build-rusty-v8-android.yml) ──
+      # Cache de compilación de cargo en CI: evita recompilar crates de codex
+      # (codex-core es el más caro) cuando el input `bins` pide solo el host
+      # (codex-code-mode-host) o cuando cambia un parche. SCCACHE_DIR va DENTRO
+      # del checkout para incluirlo en el cache key.
+      - name: Install sccache
+        run: |
+          set -euo pipefail
+          SCCACHE_VERSION="v0.8.2"
+          SCCACHE_PLATFORM="x86_64-unknown-linux-musl"
+          curl -fsSL "https://github.com/mozilla/sccache/releases/download/${SCCACHE_VERSION}/sccache-${SCCACHE_VERSION}-${SCCACHE_PLATFORM}.tar.gz" \
+            -o "$RUNNER_TEMP/sccache.tar.gz"
+          tar -xzf "$RUNNER_TEMP/sccache.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/sccache-${SCCACHE_VERSION}-${SCCACHE_PLATFORM}" >> "$GITHUB_PATH"
+          echo "SCCACHE_DIR=${{ github.workspace }}/.sccache-codex" >> "$GITHUB_ENV"
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+
+      # ── Cache de sccache (key por ref + hashes de los parches) ──
+      # El Cargo.lock de codex vive DENTRO del checkout que el build script clona
+      # en build/codex-ci/codex (no disponible para hashFiles en el workflow) →
+      # la key usa el ref + patches: el ref pinnea el lockfile y los parches
+      # invalidan cuando cambian.
+      - name: Cache sccache (codex build)
+        uses: actions/cache@v4
+        with:
+          path: .sccache-codex
+          key: codex-sccache-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-${{ hashFiles('patches/codex/*.patch') }}
+          restore-keys: |
+            codex-sccache-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-
+
       # ── Cross-compilar Codex (scripts/build-codex-ci.sh) ──
       # El script clona openai/codex@$CODEX_REF, aplica patches/codex/*.patch,
       # instala la toolchain Rust del rust-toolchain.toml y compila
@@ -178,8 +213,12 @@ jobs:
           # github.ref_name (p.ej. v0.134.0-alpha.3); el script normaliza
           # quitando la 'v' inicial → 0.134.0-alpha.3.
           CODEX_VERSION: ${{ inputs.codex_version || github.ref_name }}
+          # Binarios a compilar/empaquetar (input `bins`; vacío en push de tag →
+          # el script aplica su default de los 4 binarios).
+          CODEX_BINS: ${{ inputs.bins }}
           JOBS: '2'
           ANDROID_NDK_HOME: /opt/android-ndk
+          SCCACHE_IDLE_TIMEOUT: '0'
         run: |
           bash scripts/build-codex-ci.sh
 

@@ -53,7 +53,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 compute_fingerprint() {
     local fp=""
-    fp+="fingerprint_version=2\n"
+    fp+="fingerprint_version=3\n"
 
     local codex_head="" codex_dirty="" st=""
     if git -C "$CODEX_SRC" rev-parse HEAD >/dev/null 2>&1; then
@@ -127,6 +127,14 @@ compute_fingerprint() {
     local host_out_sha="missing"
     [ -f "$OUTPUT_HOST" ] && host_out_sha="$(sha256sum "$OUTPUT_HOST" 2>/dev/null | cut -c1-16)"
     fp+="code_mode_host_output_sha=${host_out_sha}\n"
+
+    # bionic_stubs.c: el link del host (codex-code-mode-host) inyecta estos
+    # stubs bionic (scripts/bionic-stubs.c: __clear_cache/aligned_alloc/
+    # strtof_l/strtod_l) + compiler-rt del NDK vía el build.rs del crate
+    # (parche 16). Un cambio en el stub invalida el rebuild del host.
+    local bionic_stubs_sha="missing"
+    [ -f "$SCRIPT_DIR/scripts/bionic-stubs.c" ] && bionic_stubs_sha="$(sha256sum "$SCRIPT_DIR/scripts/bionic-stubs.c" | cut -c1-16)"
+    fp+="bionic_stubs_sha=${bionic_stubs_sha}\n"
 
     echo -e "$fp"
 }
@@ -365,7 +373,30 @@ export CC_aarch64_linux_android="${NDK_CLANG_PREFIX}-clang"
 export CXX_aarch64_linux_android="${NDK_CLANG_PREFIX}-clang++"
 export PATH="$NDK_TOOLCHAIN/bin:$PATH"
 
-export RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=-crt-static"
+# ── Stubs bionic + compiler-rt del NDK para el link del host ──
+# codex-code-mode-host (crate v8, use_custom_libcxx) referencia símbolos que
+# bionic API 24 no exporta: __clear_cache (compiler-rt del NDK), aligned_alloc,
+# strtof_l y strtod_l. Se compila scripts/bionic-stubs.c contra el clang del NDK
+# local a $CODEX_SRC/target/bionic-stubs.o (target/ está gitignored → no toca
+# el fingerprint del checkout) y se localiza libclang_rt.builtins del NDK (en
+# Termux el prebuilt es linux-aarch64; el find cubre cualquier prebuilt/*). Las
+# rutas llegan al link vía el build.rs del crate host (parche 16) leyendo las
+# env vars — NO vía RUSTFLAGS: un RUSTFLAGS global reemplazaría los rustflags
+# del .cargo/config.toml parcheado (que ya incluyen target-feature=-crt-static).
+mkdir -p "$CODEX_SRC/target"
+"$NDK_TOOLCHAIN/bin/${NDK_CLANG_PREFIX}-clang" -c -O2 -Wall -Wextra \
+    "$SCRIPT_DIR/scripts/bionic-stubs.c" -o "$CODEX_SRC/target/bionic-stubs.o" \
+    || { echo "ERROR: falló la compilación de scripts/bionic-stubs.c (API $API)" >&2; exit 1; }
+export CODEX_BIONIC_STUBS_O="$CODEX_SRC/target/bionic-stubs.o"
+CODEX_CLANG_RT_BUILTINS="$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" \
+    -name 'libclang_rt.builtins-aarch64-android.a' 2>/dev/null | head -1 || true)"
+[ -n "$CODEX_CLANG_RT_BUILTINS" ] || {
+    echo "ERROR: no se encontró libclang_rt.builtins-aarch64-android.a en $ANDROID_NDK_HOME/toolchains/llvm/prebuilt" >&2
+    exit 1
+}
+export CODEX_CLANG_RT_BUILTINS
+echo "   stubs bionic: $CODEX_BIONIC_STUBS_O"
+echo "   compiler-rt:  $CODEX_CLANG_RT_BUILTINS"
 
 echo ":: [2/4] Preparando target Rust, artefacto rusty_v8 y fetching deps..."
 start_timer
