@@ -1,0 +1,15 @@
+diff --git a/codex-rs/core/src/installation_id.rs b/codex-rs/core/src/installation_id.rs
+index a42e6b6d83..b12956e63e 100644
+--- a/codex-rs/core/src/installation_id.rs
++++ b/codex-rs/core/src/installation_id.rs
+@@ -29,6 +29,10 @@ pub async fn resolve_installation_id(codex_home: &AbsolutePathBuf) -> Result<Str
+         }
+ 
+         let mut file = options.open(&path)?;
++        // CODEX-TERMUX-ANDROID-PATCH: Rust std has no File::lock support on
++        // Android/bionic (returns ErrorKind::Unsupported), which broke the
++        // embedded app server startup. Single-user environment: skip the flock.
++        #[cfg(not(target_os = "android"))]
+         file.lock()?;
+ 
+         #[cfg(unix)]

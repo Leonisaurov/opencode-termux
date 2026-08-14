@@ -26,6 +26,7 @@ Orden **numérico** estricto (01 → 09). Cada parche toca un único archivo:
 | 07 | `codex-rs/linux-sandbox/src/main.rs` | En Android imprime "no soportado" y exit(1) en vez de llamar `run_main()` |
 | 08 | `codex-rs/code-mode-protocol/build.rs` | En Android **no** usa `protoc-bin-vendored` (binarios glibc) → fallback `protoc` de Termux (paquete `protobuf`); CI linux intacto |
 | 09 | `codex-rs/core/Cargo.toml` | Activa `vendored` de openssl-sys para `[target.aarch64-linux-android.dependencies]` → openssl-src cross-compilado en CI (sin openssl del sistema); `openssl-src` ya está en Cargo.lock, `--locked` intacto |
+| 10 | `codex-rs/core/src/installation_id.rs` | Salta el `file.lock()?` en Android (`#[cfg(not(target_os = "android"))]`): Rust std no soporta flock en bionic (ErrorKind::Unsupported) y rompía el arranque del app server embebido ("failed to start embedded app server") |
 
 ## Comando de aplicación
 
