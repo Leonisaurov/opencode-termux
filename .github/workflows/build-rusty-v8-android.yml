@@ -82,6 +82,21 @@ jobs:
             && git apply "${{ github.workspace }}/patches/rusty-v8/android-ndk-args.patch"
           echo "::notice::android_ndk_version/android_ndk_root re-declared in build/config/android/config.gni"
 
+      # ── Sysroot Debian Bullseye amd64 (build tools del host) ──
+      # El toolchain host clang_x64_for_rust_host_build_tools (build tools del
+      # host, p.ej. diplomat) requiere el sysroot del host en gn gen; sin él
+      # //build/config/sysroot.gni falla con "Missing sysroot
+      # (//build/linux/debian_bullseye_amd64-sysroot)". install-sysroot.py es
+      # parte del submódulo build/ (denoland/chromium_build) y descarga/extrae
+      # el sysroot a build/linux/debian_bullseye_amd64-sysroot (misma ruta
+      # estándar de chromium build usada por carbonyl y v8_module_deps).
+      - name: Install amd64 sysroot (host build tools)
+        run: |
+          set -euo pipefail
+          cd upstream-rusty-v8
+          python3 build/linux/sysroot_scripts/install-sysroot.py --arch=amd64
+          echo "::notice::debian_bullseye_amd64-sysroot installed for host build tools"
+
       # ── Deps del sistema ──
       # libclang-19: lo usa el configure de GN vía LIBCLANG_PATH; el resto
       # (python3/curl/git/unzip) son del flujo de build/descarga de V8.
