@@ -43,6 +43,11 @@ CODEX_SRC="${CODEX_SRC:-$CODEX_REPO/codex-rs}"
 CODEX_REF="${CODEX_REF:-50ef7395faee1d0e2d01730f9636aa06091c7be3}"
 CODEX_VERSION="${CODEX_VERSION:-}"
 JOBS="${JOBS:-2}"
+# API level de bionic objetivo. Política del repo: 24 (mínimo para Termux 64-bit,
+# igual que el port kilo, target aarch64-linux-android.24). OJO: NO bajar de 23 —
+# `openpty` (portable_pty/codex_utils_pty) solo existe en bionic desde API 23; un
+# linker de API 21 produce "undefined symbol: openpty" en el linkeo.
+ANDROID_API="${ANDROID_API:-24}"
 
 # CODEX_REF acepta commit sha (40 hex) O tag (los parches de openai/codex usan
 # tags rust-v* / codex-rs-v*). Si el ref no existe, el fetch de [1/5] falla con
@@ -69,23 +74,38 @@ for dir in "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/*/bin; do
 done
 [ -n "$NDK_BIN" ] || die "no se encontró toolchains/llvm/prebuilt/*/bin con aarch64-linux-android*-clang en $ANDROID_NDK_HOME"
 
-# El config.toml parcheado usa el nombre SIN sufijo API. Si el NDK solo trae los
-# sufijados (aarch64-linux-androidNN-clang), creamos el symlink (runners efímeros).
-if [ ! -x "$NDK_BIN/aarch64-linux-android-clang" ]; then
-    local_suff="$(ls "$NDK_BIN"/aarch64-linux-android[0-9]*-clang 2>/dev/null | head -1 || true)"
-    if [ -n "$local_suff" ]; then
-        ln -sf "$(basename "$local_suff")" "$NDK_BIN/aarch64-linux-android-clang"
-        echo "   symlink: aarch64-linux-android-clang -> $(basename "$local_suff") (config.toml parcheado usa nombre sin sufijo)"
-    else
-        die "el config.toml parcheado referencia 'aarch64-linux-android-clang' pero no existe (ni sufijado) en $NDK_BIN"
-    fi
+# El config.toml parcheado usa el nombre SIN sufijo API ("aarch64-linux-android-clang").
+# El NDK solo trae los sufijados (aarch64-linux-androidNN-clang) → creamos/forzamos el
+# symlink al clang del API correcto (ANDROID_API). BUG histórico: el glob alfabético
+# `aarch64-linux-android[0-9]*-clang | head -1` elegía el API más bajo (21), y bionic de
+# API 21 no exporta `openpty` (≥23) → "undefined symbol: openpty" en el linkeo (CI run #4).
+api_clang="$NDK_BIN/aarch64-linux-android${ANDROID_API}-clang"
+if [ ! -x "$api_clang" ]; then
+    echo "ERROR: no existe $api_clang (API $ANDROID_API, política del repo)" >&2
+    echo "  clangs aarch64 disponibles en $NDK_BIN:" >&2
+    ls "$NDK_BIN"/aarch64-linux-android*-clang 2>/dev/null >&2 || true
+    die "el NDK en $ANDROID_NDK_HOME no incluye aarch64-linux-android${ANDROID_API}-clang"
 fi
+# ln -sf: idempotente y corrige symlinks previos que apunten a otro API.
+ln -sf "$(basename "$api_clang")" "$NDK_BIN/aarch64-linux-android-clang"
+
+# Verificación de API (fail-fast): el symlink debe resolver al clang del API correcto.
+link_target="$(readlink "$NDK_BIN/aarch64-linux-android-clang" 2>/dev/null || true)"
+case "$link_target" in
+    "aarch64-linux-android${ANDROID_API}-clang"|"$api_clang")
+        echo "   symlink OK: aarch64-linux-android-clang -> $link_target (API $ANDROID_API)"
+        ;;
+    *)
+        die "el symlink aarch64-linux-android-clang apunta a '$link_target' (esperado aarch64-linux-android${ANDROID_API}-clang)"
+        ;;
+esac
 
 mkdir -p "$WORK_DIR"
 echo "== Codex Android Build (CI) =="
 echo "   Ref:        $CODEX_REF"
 echo "   Work dir:   $WORK_DIR"
 echo "   NDK bin:    $NDK_BIN"
+echo "   API:        $ANDROID_API"
 echo "   JOBS:       $JOBS"
 
 # ── [1/5] Clonar openai/codex al ref (raíz del checkout: CODEX_REPO) ──
