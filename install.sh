@@ -1,15 +1,36 @@
 #!/usr/bin/env bash
 # Instalador de opencode-termux
-# Uso: ./install.sh [--just bun|opencode|all] [--help]
+#
+# Descarga los 3 componentes (bun, opencode, libopentui.so) desde las
+# GitHub Releases del repo $GITHUB_REPO (assets publicados por el workflow
+# build-opencode.yml, paso "Package release assets").
+#
+# Uso: ./install.sh [--just bun|opencode|opentui] [--release <tag>] [--help]
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VERSION="1.0.0"
+VERSION="1.1.0"
+GITHUB_REPO="Leonisaurov/opencode-termux"
+BUN_VERSION="1.3.14"
+RELEASE_TAG="latest"          # "latest" o un tag concreto (ej: v1.18.11) vía --release
 INSTALL_PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
 INSTALL_BUN=false
 INSTALL_OPENCODE=false
+INSTALL_OPENTUI=false
+INSTALL_CODEX=false
 FIX_GLOBAL_BINS=false
+RELEASE_JSON=""
+
+# Patrones (grep -E) de los nombres de assets publicados por los workflows de
+# build. Los assets llevan la versión del componente (variable en cada release),
+# por eso se matchean por patrón en vez de hardcodear el nombre completo.
+BUN_ASSET_PATTERN='bun-v[0-9.]+-android-aarch64\.tar\.gz'
+OPENCODE_ASSET_PATTERN='opencode-v[0-9.]+-android-aarch64\.zip'
+OPENTUI_ASSET_PATTERN='libopentui-android-aarch64\.tar\.gz'
+# El patrón de codex acepta prereleases: la versión real lleva sufijo
+# `-alpha.N-` entre la versión y `-android` (ej: codex-v0.134.0-alpha.10-...).
+CODEX_ASSET_PATTERN='codex-v[0-9][0-9A-Za-z._+-]*-android-aarch64\.zip'
 
 # Colors
 RED='\033[0;31m'
@@ -22,6 +43,12 @@ warn()  { echo -e "${YELLOW}[!]${NC} $1" >&2; }
 error() { echo -e "${RED}[✗]${NC} $1" >&2; }
 
 check_arch() {
+    # file puede no estar instalado en Termux; en ese caso no se puede
+    # verificar la arquitectura (se advierte, no se aborta).
+    if ! command -v file &>/dev/null; then
+        warn "'file' no está instalado (pkg install file) — no se pudo verificar la arquitectura"
+        return 0
+    fi
     local file_info
     file_info=$(file "$1" 2>/dev/null || echo "")
     if ! echo "$file_info" | grep -q "ARM aarch64\|AArch64\|aarch64"; then
@@ -39,16 +66,33 @@ USO:
     ./install.sh [OPCIONES]
 
 OPCIONES:
-    --just bun         Instala solo Bun
-    --just opencode    Instala solo OpenCode (futuro)
+    --just <comp>      Instala solo un componente: bun, opencode, opentui o codex
     --all              Instala todo (default)
+    --release <tag>    Descarga de un tag concreto (ej: v1.18.11) en vez de latest
     --prefix <path>    Directorio de instalación (default: \$PREFIX)
     --fix-global-bins  Repara binarios globales (reemplaza symlinks por wrappers)
     --version          Muestra versión
     --help             Muestra esta ayuda
 
+COMPONENTES (descargados de GitHub Releases de $GITHUB_REPO):
+    bun               Bun Android parchado (aarch64)      → \$PREFIX/bin/bun
+    opencode          OpenCode standalone (aarch64)        → \$PREFIX/bin/opencode
+    opentui           libopentui.so (aarch64-linux-musl)   → \$PREFIX/lib/libopentui.so
+                      (opencode standalone lleva el .so embebido; este asset
+                       es solo para builds/desarrollo custom)
+    codex             Codex CLI (aarch64)                  → \$PREFIX/bin/codex
+                      + codex-code-mode-host               → \$PREFIX/bin/codex-code-mode-host
+                      (libc++ estático embebido del crate v8 — NO requiere
+                       libc++_shared.so; verifícalo con:
+                       readelf -d \$PREFIX/bin/codex-code-mode-host | grep NEEDED)
+
 EJEMPLOS:
+    ./install.sh                        # instala bun + opencode + opentui + codex
     ./install.sh --just bun
+    ./install.sh --just opencode
+    ./install.sh --just opentui
+    ./install.sh --just codex
+    ./install.sh --release v1.18.11     # tag específico
     ./install.sh --just bun --prefix /custom/path
 EOF
     exit 0
@@ -63,12 +107,15 @@ parse_args() {
                 case "$1" in
                     bun) INSTALL_BUN=true ;;
                     opencode) INSTALL_OPENCODE=true ;;
-                    all) INSTALL_BUN=true; INSTALL_OPENCODE=true ;;
+                    opentui) INSTALL_OPENTUI=true ;;
+                    codex) INSTALL_CODEX=true ;;
+                    all) INSTALL_BUN=true; INSTALL_OPENCODE=true; INSTALL_OPENTUI=true; INSTALL_CODEX=true ;;
                     *) error "Opción inválida: $1"; exit 1 ;;
                 esac
                 shift
                 ;;
-            --all) INSTALL_BUN=true; INSTALL_OPENCODE=true; shift ;;
+            --all) INSTALL_BUN=true; INSTALL_OPENCODE=true; INSTALL_OPENTUI=true; INSTALL_CODEX=true; shift ;;
+            --release) RELEASE_TAG="$2"; shift 2 ;;
             --prefix) INSTALL_PREFIX="$2"; shift 2 ;;
             --fix-global-bins) FIX_GLOBAL_BINS=true; shift ;;
             --version) echo "opencode-termux-installer v$VERSION"; exit 0 ;;
@@ -78,9 +125,11 @@ parse_args() {
     done
 
     # Default: instalar todo
-    if ! $INSTALL_BUN && ! $INSTALL_OPENCODE; then
+    if ! $INSTALL_BUN && ! $INSTALL_OPENCODE && ! $INSTALL_OPENTUI && ! $INSTALL_CODEX; then
         INSTALL_BUN=true
         INSTALL_OPENCODE=true
+        INSTALL_OPENTUI=true
+        INSTALL_CODEX=true
     fi
 }
 
@@ -104,127 +153,96 @@ check_env() {
     fi
 }
 
-# ── Find or download Bun ────────────────────────────────────────────
-find_bun_binary() {
-    # 1. Buscar en .bun-artifact/
-    local local_bun
-    local_bun=$(find "$SCRIPT_DIR/.bun-artifact" -name "bun" -type f 2>/dev/null | head -1)
-    if [ -n "$local_bun" ] && [ -x "$local_bun" ]; then
-        echo "$local_bun"
-        return 0
+# ── Release helpers (GitHub Releases, sin gh) ───────────────────────
+# Consulta la release (latest o un tag concreto) vía la API de GitHub y
+# guarda el JSON completo en RELEASE_JSON. Con curl no se necesita gh ni auth.
+fetch_release_json() {
+    local url
+    if [ "$RELEASE_TAG" = "latest" ]; then
+        url="https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
+    else
+        url="https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${RELEASE_TAG}"
     fi
 
-    # 2. Buscar en build/
-    local_bun=$(find "$SCRIPT_DIR/build" -name "bun" -type f 2>/dev/null | head -1)
-    if [ -n "$local_bun" ] && [ -x "$local_bun" ]; then
-        echo "$local_bun"
-        return 0
+    info "Consultando release ${RELEASE_TAG} de ${GITHUB_REPO}..."
+
+    RELEASE_JSON=$(curl -fsSL "$url" 2>/dev/null) || {
+        error "No hay release ${RELEASE_TAG} disponible en ${GITHUB_REPO}."
+        error "Los assets se publican desde el workflow de build. Para crearla:"
+        error "  gh workflow run build-opencode.yml --ref update-v1.18.6 -f release=true"
+        error "  # o pushea un tag v*:  git tag v1.18.11 && git push origin v1.18.11"
+        exit 1
+    }
+
+    # Respuesta de error de la API (ej: repo inexistente o respuesta no-JSON)
+    if echo "$RELEASE_JSON" | grep -q '"message"'; then
+        error "La API de GitHub respondió con un error:"
+        echo "$RELEASE_JSON" | grep -m1 '"message"' | sed -E 's/.*"message": *"([^"]+)".*/\1/'
+        exit 1
     fi
 
-    # 3. Buscar en bun-source/build/
-    local_bun=$(find "$SCRIPT_DIR/bun-source" -name "bun" -type f 2>/dev/null | head -1)
-    if [ -n "$local_bun" ] && [ -x "$local_bun" ]; then
-        echo "$local_bun"
-        return 0
+    # Si era "latest", quedarse con el tag real para los mensajes
+    local resolved_tag
+    resolved_tag=$(echo "$RELEASE_JSON" | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' || true)
+    if [ -n "$resolved_tag" ] && [ "$resolved_tag" != "null" ]; then
+        RELEASE_TAG="$resolved_tag"
+        info "Release encontrada: $RELEASE_TAG"
     fi
-
-    return 1
 }
 
-download_bun() {
-    info "Descargando Bun desde GitHub Actions..."
+# Devuelve la URL de descarga del asset cuyo nombre matchea el patrón $1.
+asset_url() {
+    echo "$RELEASE_JSON" \
+        | grep -oE 'https://[^"]+' \
+        | grep -E "$1" \
+        | head -n 1 \
+        || true
+}
 
-    if ! command -v gh &>/dev/null; then
-        error "No se encontró 'gh' (GitHub CLI)."
-        warn "Instálalo con: pkg install gh && gh auth login"
-        warn "O construye Bun localmente con: ./scripts/apply-patches.sh && ./scripts/build-bun.sh"
+download_asset() {
+    # $1: nombre descriptivo; $2: URL; $3: archivo destino
+    info "Descargando $1..."
+    if ! curl -fsSL -o "$3" "$2" 2>/dev/null; then
+        rm -f "$3"
+        error "No se pudo descargar $1 desde la release ${RELEASE_TAG}"
         return 1
     fi
-
-    local tmp_dir
-    tmp_dir="$(mktemp -d)"
-
-    # Obtener el run ID del último exitoso (solo de nuestra branch)
-    local run_id
-    run_id=$(gh run list --repo Leonisaurov/opencode-termux \
-        --workflow build-bun.yml \
-        --status success \
-        --branch update-v1.18.6 \
-        --limit 1 \
-        --json databaseId \
-        -q '.[0].databaseId' 2>/dev/null) || true
-
-    if [ -z "$run_id" ] || [ "$run_id" = "null" ]; then
-        rm -rf "$tmp_dir"
-        error "No se encontró ningún workflow exitoso reciente de build-bun.yml"
-        error "Ejecuta: gh workflow run build-bun.yml --ref update-v1.18.6"
-        return 1
-    fi
-
-    info "Descargando artifact del run #${run_id}..."
-    if ! gh run download "$run_id" \
-        --repo Leonisaurov/opencode-termux \
-        --dir "$tmp_dir" 2>/dev/null; then
-        rm -rf "$tmp_dir"
-        error "No se pudo descargar el artifact del run #${run_id}"
-        return 1
-    fi
-
-    local bun_bin
-    bun_bin=$(find "$tmp_dir" -name "bun" -type f 2>/dev/null | head -1)
-    if [ -z "$bun_bin" ]; then
-        rm -rf "$tmp_dir"
-        error "No se encontró el binario 'bun' en el artifact descargado"
-        return 1
-    fi
-
-    chmod +x "$bun_bin"
-
-    # Verificar nombre del artifact esperado
-    local artifact_name
-    artifact_name=$(basename "$(find "$tmp_dir" -maxdepth 1 -type d 2>/dev/null | tail -1)" 2>/dev/null || echo "")
-    if [ -n "$artifact_name" ] && [[ "$artifact_name" != "bun-android-aarch64"* ]]; then
-        warn "Artifact inesperado: '$artifact_name' (se esperaba bun-android-aarch64-*)"
-    fi
-
-    # Copiar a ubicación estable antes de limpiar
-    local dest="$SCRIPT_DIR/.bun-artifact/bun-downloaded"
-    mkdir -p "$(dirname "$dest")"
-    cp "$bun_bin" "$dest"
-    chmod +x "$dest"
-    rm -rf "$tmp_dir"
-    echo "$dest"
     return 0
 }
 
 # ── Install Bun ─────────────────────────────────────────────────────
 install_bun() {
-    info "Instalando Bun..."
-
-    local bun_bin
-    bun_bin=$(find_bun_binary) || true
-
-    if [ -z "$bun_bin" ]; then
-        warn "No se encontró binario local de Bun."
-        if command -v gh &>/dev/null; then
-            if ! bun_bin=$(download_bun); then
-                bun_bin=""
-            fi
-        else
-            error "No hay 'gh' disponible. Opciones:"
-            error "  1. Instala gh: pkg install gh && gh auth login"
-            error "  2. Construye Bun: gh workflow run build-bun.yml --ref update-v1.18.6"
-            error "  3. O usa un binario pre-existente en .bun-artifact/"
-            return 1
-        fi
-    fi
-
-    if [ -z "$bun_bin" ]; then
+    local url
+    url=$(asset_url "$BUN_ASSET_PATTERN")
+    if [ -z "$url" ]; then
+        error "La release ${RELEASE_TAG} no contiene el asset de bun ($BUN_ASSET_PATTERN)"
         return 1
     fi
 
+    local tmp_dir
+    tmp_dir="$(mktemp -d "${TMPDIR:-/data/data/com.termux/files/usr/tmp}/installer-bun.XXXXXX")"
+
+    local asset="$tmp_dir/bun-android.tar.gz"
+    download_asset "Bun Android (aarch64)" "$url" "$asset" || { rm -rf "$tmp_dir"; return 1; }
+
+    if ! tar tzf "$asset" >/dev/null 2>&1; then
+        rm -rf "$tmp_dir"
+        error "El asset de bun no es un tar.gz válido (descarga corrupta o response de error de la API)"
+        return 1
+    fi
+
+    mkdir -p "$tmp_dir/x"
+    tar xzf "$asset" -C "$tmp_dir/x"
+    local bun_bin="$tmp_dir/x/bun"
+    if [ ! -f "$bun_bin" ]; then
+        rm -rf "$tmp_dir"
+        error "No se encontró el binario 'bun' dentro del asset descargado"
+        return 1
+    fi
+
+    chmod +x "$bun_bin"
     if ! check_arch "$bun_bin"; then
-        warn "El binario no parece ser ARM64"
+        warn "El binario de bun no parece ser ARM64"
     fi
 
     if [ -f "$INSTALL_PREFIX/bin/bun" ]; then
@@ -236,7 +254,8 @@ install_bun() {
             echo -n "¿Sobrescribir? [s/N] " >&2
             read -r resp
             if [ "$resp" != "s" ] && [ "$resp" != "S" ]; then
-                info "Instalación cancelada."
+                info "Instalación de bun cancelada."
+                rm -rf "$tmp_dir"
                 return 0
             fi
         else
@@ -247,6 +266,8 @@ install_bun() {
 
     cp "$bun_bin" "$INSTALL_PREFIX/bin/bun"
     chmod +x "$INSTALL_PREFIX/bin/bun"
+    rm -rf "$tmp_dir"
+
     # ── Install target runtime cache ──
     install_bun_target || true
 
@@ -414,6 +435,173 @@ WRAPPER
     fi
 }
 
+# ── Install OpenCode ────────────────────────────────────────────────
+install_opencode() {
+    local url
+    url=$(asset_url "$OPENCODE_ASSET_PATTERN")
+    if [ -z "$url" ]; then
+        error "La release ${RELEASE_TAG} no contiene el asset de opencode ($OPENCODE_ASSET_PATTERN)"
+        return 1
+    fi
+
+    local tmp_dir
+    tmp_dir="$(mktemp -d "${TMPDIR:-/data/data/com.termux/files/usr/tmp}/installer-opencode.XXXXXX")"
+
+    local asset="$tmp_dir/opencode.zip"
+    download_asset "OpenCode standalone (aarch64)" "$url" "$asset" || { rm -rf "$tmp_dir"; return 1; }
+
+    if ! unzip -t "$asset" >/dev/null 2>&1; then
+        rm -rf "$tmp_dir"
+        error "El asset de opencode no es un zip válido (descarga corrupta o response de error de la API)"
+        return 1
+    fi
+
+    mkdir -p "$tmp_dir/x"
+    if ! unzip -q "$asset" -d "$tmp_dir/x" 2>/dev/null; then
+        rm -rf "$tmp_dir"
+        error "No se pudo descomprimir el asset (¿instalaste unzip? → pkg install unzip)"
+        return 1
+    fi
+
+    local opencode_bin="$tmp_dir/x/opencode"
+    if [ ! -f "$opencode_bin" ]; then
+        rm -rf "$tmp_dir"
+        error "No se encontró el binario 'opencode' dentro del zip"
+        return 1
+    fi
+
+    chmod +x "$opencode_bin"
+    if ! check_arch "$opencode_bin"; then
+        warn "El binario de opencode no parece ser ARM64"
+    fi
+
+    cp "$opencode_bin" "$INSTALL_PREFIX/bin/opencode"
+    chmod +x "$INSTALL_PREFIX/bin/opencode"
+    rm -rf "$tmp_dir"
+
+    info "OpenCode instalado en $INSTALL_PREFIX/bin/opencode"
+    info "  (el binario standalone incluye el runtime Bun Android y libopentui.so embebidos)"
+}
+
+# ── Install libopentui.so ───────────────────────────────────────────
+# Solo para builds/desarrollo custom: opencode standalone lleva el .so
+# embebido. El tar.gz del workflow contiene aarch64-linux-musl/libopentui.so,
+# por eso se extrae con --strip-components=1.
+install_opentui() {
+    local url
+    url=$(asset_url "$OPENTUI_ASSET_PATTERN")
+    if [ -z "$url" ]; then
+        error "La release ${RELEASE_TAG} no contiene el asset de libopentui.so ($OPENTUI_ASSET_PATTERN)"
+        return 1
+    fi
+
+    local tmp_dir
+    tmp_dir="$(mktemp -d "${TMPDIR:-/data/data/com.termux/files/usr/tmp}/installer-opentui.XXXXXX")"
+
+    local asset="$tmp_dir/opentui.tar.gz"
+    download_asset "libopentui.so (aarch64)" "$url" "$asset" || { rm -rf "$tmp_dir"; return 1; }
+
+    if ! tar tzf "$asset" >/dev/null 2>&1; then
+        rm -rf "$tmp_dir"
+        error "El asset de libopentui.so no es un tar.gz válido (descarga corrupta o response de error de la API)"
+        return 1
+    fi
+
+    mkdir -p "$tmp_dir/x"
+    tar xzf "$asset" --strip-components=1 -C "$tmp_dir/x"
+    local so_file="$tmp_dir/x/libopentui.so"
+    if [ ! -f "$so_file" ]; then
+        rm -rf "$tmp_dir"
+        error "No se encontró libopentui.so dentro del asset descargado"
+        return 1
+    fi
+
+    if ! check_arch "$so_file"; then
+        warn "libopentui.so no parece ser ARM64"
+    fi
+
+    mkdir -p "$INSTALL_PREFIX/lib"
+    cp "$so_file" "$INSTALL_PREFIX/lib/libopentui.so"
+    rm -rf "$tmp_dir"
+
+    info "libopentui.so instalado en $INSTALL_PREFIX/lib/libopentui.so"
+    info "  (para desarrollo/build local; opencode standalone lo lleva embebido)"
+}
+
+# ── Install Codex CLI ────────────────────────────────────────────────
+# El zip de la release contiene `codex-android` (binario principal) y
+# `codex-code-mode-host` (runtime companion con V8 embebido para el modo code).
+# codex-android se renombra a `codex` al instalar; codex-code-mode-host debe
+# quedar como binario hermano en $PREFIX/bin (el CLI lo busca como
+# current_exe.parent()/codex-code-mode-host).
+install_codex() {
+    local url
+    url=$(asset_url "$CODEX_ASSET_PATTERN")
+    if [ -z "$url" ]; then
+        error "La release ${RELEASE_TAG} no contiene el asset de codex ($CODEX_ASSET_PATTERN)"
+        return 1
+    fi
+
+    local tmp_dir
+    tmp_dir="$(mktemp -d "${TMPDIR:-/data/data/com.termux/files/usr/tmp}/installer-codex.XXXXXX")"
+
+    local asset="$tmp_dir/codex.zip"
+    download_asset "Codex CLI (aarch64)" "$url" "$asset" || { rm -rf "$tmp_dir"; return 1; }
+
+    if ! unzip -t "$asset" >/dev/null 2>&1; then
+        rm -rf "$tmp_dir"
+        error "El asset de codex no es un zip válido (descarga corrupta o response de error de la API)"
+        return 1
+    fi
+
+    mkdir -p "$tmp_dir/x"
+    if ! unzip -q "$asset" -d "$tmp_dir/x" 2>/dev/null; then
+        rm -rf "$tmp_dir"
+        error "No se pudo descomprimir el asset (¿instalaste unzip? → pkg install unzip)"
+        return 1
+    fi
+
+    local codex_bin="$tmp_dir/x/codex-android"
+    if [ ! -f "$codex_bin" ]; then
+        rm -rf "$tmp_dir"
+        error "No se encontró el binario 'codex-android' dentro del zip"
+        return 1
+    fi
+
+    chmod +x "$codex_bin"
+    if ! check_arch "$codex_bin"; then
+        warn "El binario de codex no parece ser ARM64"
+    fi
+
+    cp "$codex_bin" "$INSTALL_PREFIX/bin/codex"
+    chmod +x "$INSTALL_PREFIX/bin/codex"
+
+    # codex-code-mode-host: runtime companion (V8 embebido); sin él el modo code
+    # falla cerrado ("Code Mode is unavailable"). Va junto a codex en $PREFIX/bin.
+    local host_bin="$tmp_dir/x/codex-code-mode-host"
+    if [ ! -f "$host_bin" ]; then
+        rm -rf "$tmp_dir"
+        error "No se encontró 'codex-code-mode-host' dentro del zip (el zip de release debe incluirlo)"
+        return 1
+    fi
+
+    chmod +x "$host_bin"
+    if ! check_arch "$host_bin"; then
+        warn "El binario de codex-code-mode-host no parece ser ARM64"
+    fi
+
+    cp "$host_bin" "$INSTALL_PREFIX/bin/codex-code-mode-host"
+    chmod +x "$INSTALL_PREFIX/bin/codex-code-mode-host"
+    rm -rf "$tmp_dir"
+
+    info "Codex instalado en $INSTALL_PREFIX/bin/codex"
+    info "  codex-code-mode-host instalado en $INSTALL_PREFIX/bin/codex-code-mode-host"
+    warn "  codex-code-mode-host usa libc++ estático embebido (use_custom_libcxx del crate v8):"
+    warn "  NO debería requerir libc++_shared.so. Verifícalo con:"
+    warn "    readelf -d $INSTALL_PREFIX/bin/codex-code-mode-host | grep NEEDED"
+    warn "  (si apareciera libc++_shared.so, instala el paquete Termux libc++: pkg install libc++)"
+}
+
 # ── Main ────────────────────────────────────────────────────────────
 main() {
     echo ""
@@ -432,6 +620,9 @@ main() {
 
     check_env
 
+    # Resolver la release una sola vez (la comparten todos los componentes)
+    fetch_release_json
+
     if $INSTALL_BUN; then
         install_bun || {
             error "Fallo la instalación de Bun"
@@ -440,7 +631,24 @@ main() {
     fi
 
     if $INSTALL_OPENCODE; then
-        info "OpenCode: aún no implementado (futuro)"
+        install_opencode || {
+            error "Fallo la instalación de OpenCode"
+            exit 1
+        }
+    fi
+
+    if $INSTALL_OPENTUI; then
+        install_opentui || {
+            error "Fallo la instalación de libopentui.so"
+            exit 1
+        }
+    fi
+
+    if $INSTALL_CODEX; then
+        install_codex || {
+            error "Fallo la instalación de Codex"
+            exit 1
+        }
     fi
 
     echo ""

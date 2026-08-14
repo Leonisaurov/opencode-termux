@@ -32,6 +32,54 @@ BUILD_START_TS=$(date +%s)
 elapsed_total() { local end=$(date +%s); echo $((end - BUILD_START_TS)); }
 die() { echo "ERROR: $*" >&2; exit 1; }
 
+# ── Artefacto rusty_v8 para codex-code-mode-host ──
+# Descarga los 3 artefactos (archive .a.gz + binding .rs + manifest .sha256) de
+# la Release `rusty-v8-v${V8_VERSION}` del repo del port. Fail-fast: si la
+# descarga o la verificación (manifest de EXACTAMENTE 2 líneas + sha256sum -c)
+# falla, aborta con mensaje de lanzar primero build-rusty-v8-android.yml.
+# Idempotente: si los 3 archivos ya existen y el manifest verifica, no re-descarga.
+setup_rusty_v8() {
+    local base="$RUSTY_V8_REPO"
+    base="https://github.com/${base}/releases/download/rusty-v8-v${V8_VERSION}"
+    mkdir -p "$RUSTY_V8_DIR"
+
+    local need_download=0 f=""
+    for f in "$RUSTY_V8_MANIFEST_NAME" "$RUSTY_V8_ARCHIVE_NAME" "$RUSTY_V8_BINDING_NAME"; do
+        [ -f "$RUSTY_V8_DIR/$f" ] || need_download=1
+    done
+    if [ "$need_download" = "1" ]; then
+        echo "   Descargando artefacto rusty_v8 v${V8_VERSION} (${RUSTY_V8_REPO})..."
+        for f in "$RUSTY_V8_MANIFEST_NAME" "$RUSTY_V8_ARCHIVE_NAME" "$RUSTY_V8_BINDING_NAME"; do
+            echo "     - $f"
+            if ! curl -fsSL -o "$RUSTY_V8_DIR/$f" "$base/$f"; then
+                rm -f "$RUSTY_V8_DIR/$f"
+                echo "ERROR: no se pudo descargar $base/$f" >&2
+                echo "       El artefacto lo genera el workflow build-rusty-v8-android.yml del repo del port" >&2
+                echo "       (compila librusty_v8 desde fuente con V8_FROM_SOURCE=1 y lo publica en la" >&2
+                echo "       Release rusty-v8-v${V8_VERSION}). Lánzalo primero (gh workflow run" >&2
+                echo "       build-rusty-v8-android.yml -f v8_version=${V8_VERSION}) o descarga los 3" >&2
+                echo "       archivos manualmente a $RUSTY_V8_DIR:" >&2
+                echo "         $RUSTY_V8_ARCHIVE_NAME" >&2
+                echo "         $RUSTY_V8_BINDING_NAME" >&2
+                echo "         $RUSTY_V8_MANIFEST_NAME" >&2
+                exit 1
+            fi
+        done
+    fi
+
+    # Validación del manifest: exactamente 2 líneas ("sha256  nombre" por archivo)
+    # y checksums correctos contra los archivos descargados.
+    local lines=""
+    lines="$(wc -l < "$RUSTY_V8_DIR/$RUSTY_V8_MANIFEST_NAME" | tr -d ' ')"
+    [ "$lines" = "2" ] || die "manifest rusty_v8 inválido: $lines líneas (esperado 2): $RUSTY_V8_DIR/$RUSTY_V8_MANIFEST_NAME"
+    ( cd "$RUSTY_V8_DIR" && sha256sum -c "$RUSTY_V8_MANIFEST_NAME" ) \
+        || die "checksum rusty_v8 falló (artefacto corrupto); borra $RUSTY_V8_DIR y reintenta"
+
+    export RUSTY_V8_ARCHIVE="$RUSTY_V8_DIR/$RUSTY_V8_ARCHIVE_NAME"
+    export RUSTY_V8_SRC_BINDING_PATH="$RUSTY_V8_DIR/$RUSTY_V8_BINDING_NAME"
+    echo "   rusty_v8 listo: $RUSTY_V8_ARCHIVE"
+}
+
 # ── Config ──
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 PATCHES_DIR="${PATCHES_DIR:-$REPO_ROOT/patches/codex}"
@@ -48,6 +96,43 @@ JOBS="${JOBS:-2}"
 # `openpty` (portable_pty/codex_utils_pty) solo existe en bionic desde API 23; un
 # linker de API 21 produce "undefined symbol: openpty" en el linkeo.
 ANDROID_API="${ANDROID_API:-24}"
+
+# ── Artefacto rusty_v8 (crate v8 = 150.4.0) para codex-code-mode-host ──
+# El binario `codex-code-mode-host` (runtime companion con V8 embebido) depende
+# de `v8 = "=150.4.0"` (rusty_v8, feature v8_enable_sandbox → ptrcomp_sandbox).
+# No existe prebuilt para aarch64-linux-android: el workflow
+# build-rusty-v8-android.yml lo compila desde fuente (V8_FROM_SOURCE=1, NDK r26c)
+# y publica los 3 artefactos en la Release `rusty-v8-v<V8_VERSION>` del repo.
+# Con RUSTY_V8_ARCHIVE + RUSTY_V8_SRC_BINDING_PATH exportados, el build.rs del
+# crate v8 NO descarga ni compila V8 (solo linkea el .a) → el resto del host
+# (tonic/axum/tokio/prost) ya compila para Android con el parche 08 y deps en
+# Cargo.lock. Fuente de verdad de la versión: scripts/env.sh (CODEX_V8_VERSION);
+# override con V8_VERSION.
+V8_VERSION="${V8_VERSION:-${CODEX_V8_VERSION:-}}"
+if [ -z "$V8_VERSION" ] && [ -f "$REPO_ROOT/scripts/env.sh" ]; then
+    # Parse tolerante de CODEX_V8_VERSION sin source de env.sh (evita efectos
+    # laterales: banner + defaults de JOBS/ANDROID_NDK_HOME/REPO_ROOT). Maneja
+    # los dos formatos posibles:
+    #   export CODEX_V8_VERSION="${CODEX_V8_VERSION:-150.4.0}"  → param default
+    #   export CODEX_V8_VERSION="150.4.0"                        → literal
+    v8_env_line="$(grep -E '^[[:space:]]*export[[:space:]]+CODEX_V8_VERSION=' "$REPO_ROOT/scripts/env.sh" | head -1 || true)"
+    if [ -n "$v8_env_line" ]; then
+        v8_env_line="${v8_env_line#*=}"
+        v8_env_line="${v8_env_line%\"}"; v8_env_line="${v8_env_line#\"}"
+        if [[ "$v8_env_line" =~ ^\$\{.*:-(.*)\}$ ]]; then
+            V8_VERSION="${BASH_REMATCH[1]}"
+        else
+            V8_VERSION="$v8_env_line"
+        fi
+    fi
+fi
+V8_VERSION="${V8_VERSION:-150.4.0}"
+# Repo que publica la Release del artefacto (en CI = este repo; override local).
+RUSTY_V8_REPO="${RUSTY_V8_REPO:-${GITHUB_REPOSITORY:-Leonisaurov/opencode-termux}}"
+RUSTY_V8_DIR="${RUSTY_V8_DIR:-${RUNNER_TEMP:-$WORK_DIR}/rusty-v8}"
+RUSTY_V8_ARCHIVE_NAME="librusty_v8_ptrcomp_sandbox_release_aarch64-linux-android.a.gz"
+RUSTY_V8_BINDING_NAME="src_binding_ptrcomp_sandbox_release_aarch64-linux-android.rs"
+RUSTY_V8_MANIFEST_NAME="rusty_v8_ptrcomp_sandbox_release_aarch64-linux-android.sha256"
 
 # CODEX_REF acepta commit sha (40 hex) O tag (los parches de openai/codex usan
 # tags rust-v* / codex-rs-v*). Si el ref no existe, el fetch de [1/5] falla con
@@ -226,9 +311,13 @@ start_timer
 cargo fetch --locked --target aarch64-linux-android
 echo "   fetch completo ($(elapsed)s)"
 
+# Artefacto librusty_v8 para codex-code-mode-host (fail-fast si no está publicado)
+echo ":: [4/5] setup_rusty_v8 (artefacto librusty_v8 para codex-code-mode-host)..."
+setup_rusty_v8
+
 echo ":: [4/5] cargo build --release --locked --target aarch64-linux-android (JOBS=$JOBS)..."
 start_timer
-cargo build --release --locked --target aarch64-linux-android -j "$JOBS" -p codex-tui -p codex-linux-sandbox -p codex-cli
+cargo build --release --locked --target aarch64-linux-android -j "$JOBS" -p codex-tui -p codex-linux-sandbox -p codex-code-mode-host -p codex-cli
 echo "   build completo ($(elapsed)s)"
 
 # ── [5/5] Empaquetar ──
@@ -249,6 +338,26 @@ else
     file "$WORK_DIR/codex-android" | grep -q 'aarch64' \
         || die "file: no parece binario aarch64"
     echo "   file: aarch64 OK (readelf no disponible)"
+fi
+
+# codex-code-mode-host: runtime companion (V8 embebido) que el CLI busca como
+# binario hermano (current_exe.parent()/codex-code-mode-host). Va junto a
+# codex-android dentro del zip de release.
+CODE_MODE_HOST_BIN="$CODEX_SRC/target/aarch64-linux-android/release/codex-code-mode-host"
+[ -f "$CODE_MODE_HOST_BIN" ] && [ -x "$CODE_MODE_HOST_BIN" ] \
+    || die "binario no encontrado o no ejecutable: $CODE_MODE_HOST_BIN"
+cp "$CODE_MODE_HOST_BIN" "$WORK_DIR/codex-code-mode-host"
+chmod +x "$WORK_DIR/codex-code-mode-host"
+echo "   file: $(file "$WORK_DIR/codex-code-mode-host")"
+
+# Log informativo de los NEEDED reales del host (libc++ estático embebido del
+# crate v8 vs libc++_shared.so dinámico). NO fail-fast: solo diagnóstico para
+# el output del build (ver Codex-port.md "Requisito runtime").
+if command -v readelf >/dev/null 2>&1; then
+    echo "   [NEEDED] codex-code-mode-host:"
+    readelf -d "$WORK_DIR/codex-code-mode-host" | grep NEEDED || echo "   [NEEDED] <sin entradas NEEDED>"
+else
+    echo "   [NEEDED] readelf no disponible; file: $(file "$WORK_DIR/codex-code-mode-host" | cut -d: -f2-)"
 fi
 
 # Versión: CODEX_VERSION explícita o derivada con git describe sobre la raíz del
@@ -278,7 +387,7 @@ fi
 
 ZIP_NAME="codex-v${CODEX_VERSION}-android-aarch64.zip"
 command -v zip >/dev/null 2>&1 || die "zip no está instalado (apt install zip)"
-( cd "$WORK_DIR" && zip -q -j "$ZIP_NAME" codex-android )
+( cd "$WORK_DIR" && zip -q -j "$ZIP_NAME" codex-android codex-code-mode-host )
 
 # Emitir la versión para los pasos siguientes del workflow (GITHUB_OUTPUT / GITHUB_ENV)
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
@@ -291,6 +400,7 @@ fi
 echo ""
 echo ":: Build completado ($(elapsed_total)s total)"
 echo "   Binario:  $WORK_DIR/codex-android ($(du -h "$WORK_DIR/codex-android" | cut -f1))"
+echo "   Host:     $WORK_DIR/codex-code-mode-host ($(du -h "$WORK_DIR/codex-code-mode-host" | cut -f1))"
 echo "   Versión:  $CODEX_VERSION"
 echo "   Zip:      $WORK_DIR/$ZIP_NAME"
 ls -lh "$WORK_DIR/$ZIP_NAME" | awk '{print "   " $5 " " $NF}'

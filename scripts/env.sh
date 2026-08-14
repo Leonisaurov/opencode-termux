@@ -13,12 +13,16 @@ export BUN_TAG="bun-v${BUN_VERSION}"
 export WEBKIT_COMMIT="${WEBKIT_COMMIT:-017930ebf915121f8f593bef61cbbca82d78132d}"
 export ICU_VERSION="${ICU_VERSION:-75.1}"
 export ZIG_VERSION="${ZIG_VERSION:-0.15.2}"
-export OPENCODE_VERSION="${OPENCODE_VERSION:-1.18.6}"
+export OPENCODE_VERSION="${OPENCODE_VERSION:-1.18.11}"
 export ANDROID_API="${ANDROID_API:-24}"
 
 # Codex CLI (openai/codex) — pin del port Android (ver patches/codex/README.md)
 export CODEX_REF="${CODEX_REF:-50ef7395faee1d0e2d01730f9636aa06091c7be3}"
 export CODEX_VERSION="${CODEX_VERSION:-0.134.0-alpha.3}"
+# Versión del crate v8 (denoland/rusty_v8) del binario codex-code-mode-host:
+# el artefacto aarch64-linux-android se genera con build-rusty-v8-android.yml y
+# se publica en la Release rusty-v8-v<CODEX_V8_VERSION> del repo del port.
+export CODEX_V8_VERSION="${CODEX_V8_VERSION:-150.4.0}"
 
 # Android NDK
 export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-/opt/android-ndk}"
@@ -43,8 +47,12 @@ export WORK_DIR="${WORK_DIR:-${REPO_ROOT}/build}"
 export BUN_SRC="${WORK_DIR}/bun-src"
 export WEBKIT_SRC="${WORK_DIR}/webkit-src"
 export OPENTUI_SRC="${WORK_DIR}/opentui-src"
-# OpenCode source: checkout raíz con los cambios (commit b018a924, rama nested-perm-fix)
-export OPENCODE_SRC="${REPO_ROOT}/opencode-src"
+# v1.18.11 es la versión canónica (CI: clona anomalyco/opencode@v1.18.11 por su
+# cuenta vía el input `opencode_version` del workflow). OPENCODE_SRC es el
+# checkout de trabajo canónico para builds LOCALES: `opencode-src-latest`
+# (rama latest-prs = v1.18.11 + ports locales). El antiguo checkout v1.18.6
+# (`build/opencode-src`) fue ELIMINADO (4 ago 2026) — ya no existe en build/.
+export OPENCODE_SRC="${REPO_ROOT}/build/opencode-src-latest"
 export ICU_SRC="${WORK_DIR}/icu-src"
 
 export DEPS_PREFIX="${WORK_DIR}/deps-android/prefix"

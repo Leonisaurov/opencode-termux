@@ -216,14 +216,27 @@ jobs:
 
             ### Instalación
 
-            El binario dentro del zip se llama `codex-android`; renómbralo a `codex`:
+            El zip contiene **dos binarios**: `codex-android` (CLI principal) y
+            `codex-code-mode-host` (runtime companion con V8 embebido). Instala
+            ambos en `$PREFIX/bin` y renombra `codex-android` a `codex`:
 
             ```bash
             unzip codex-v${{ steps.build.outputs.version }}-android-aarch64.zip -d "$PREFIX/bin"
             mv "$PREFIX/bin/codex-android" "$PREFIX/bin/codex"
-            chmod +x "$PREFIX/bin/codex"
+            chmod +x "$PREFIX/bin/codex" "$PREFIX/bin/codex-code-mode-host"
             codex --version
             ```
+
+            `codex-code-mode-host` usa el libc++ ESTÁTICO de V8 embebido
+            (feature `use_custom_libcxx` del crate v8) → NO debería requerir
+            `libc++_shared.so`. Verifícalo con:
+
+            ```bash
+            readelf -d "$PREFIX/bin/codex-code-mode-host" | grep NEEDED
+            ```
+
+            Si apareciera `libc++_shared.so`, instala el paquete Termux `libc++`
+            (`pkg install libc++`).
 
             > Si usas un emulador/versión distinta o quieres el port local,
             > revisa `codex_build.sh` (build Termux) y `patches/codex/README.md`.
