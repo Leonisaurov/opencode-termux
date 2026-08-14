@@ -190,7 +190,8 @@ rustc --version
 echo "   toolchain lista ($(elapsed)s)"
 
 # ── [4/5] Cross-compile ──
-# El config.toml parcheado ya define target-feature=-crt-static y link-self-contained=no
+# El config.toml parcheado ya define target-feature=-crt-static (link-self-contained=no se
+# eliminó: NO soportado en targets *-linux-android con rustc 1.95.0 → error al linkear bins)
 # → NO exportar RUSTFLAGS (evitaría el config.toml o duplicaría flags).
 export PATH="$NDK_BIN:$PATH"
 export CARGO_INCREMENTAL=0

@@ -17,7 +17,7 @@ Orden **numérico** estricto (01 → 09). Cada parche toca un único archivo:
 
 | # | Archivo | Propósito |
 |---|---------|-----------|
-| 01 | `codex-rs/.cargo/config.toml` | Sección `[target.aarch64-linux-android]` (linker NDK, rustflags: `-crt-static`, `link-self-contained=no`, `split-debuginfo=off`, lld, build-id none) |
+| 01 | `codex-rs/.cargo/config.toml` | Sección `[target.aarch64-linux-android]` (linker NDK, ar llvm-ar, rustflags: `target-feature=-crt-static`, `split-debuginfo=off`, `debuginfo=line-tables-only`, `force-frame-pointers=yes`, `--build-id=none`, `-fuse-ld=lld`). **`link-self-contained=no` NO se usa** (flag no soportado en targets `*-linux-android` con rustc 1.95.0 → error al linkear bins) |
 | 02 | `codex-rs/sandboxing/src/lib.rs` | Extiende cfg `target_os = "linux"` → `any(linux, android)` para bwrap y `system_bwrap_warning` |
 | 03 | `codex-rs/sandboxing/src/manager.rs` | `get_platform_sandbox` en Android devuelve `None` (sin sandbox) |
 | 04 | `codex-rs/cli/src/main.rs` | `HostSandboxArgs` = `LandlockCommand` y llamada a `run_command_under_landlock` en Android |
