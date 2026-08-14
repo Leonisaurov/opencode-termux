@@ -54,6 +54,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     steps:
+      # ── Checkout del repo del port (trae patches/rusty-v8/ a $GITHUB_WORKSPACE) ──
+      - name: Check out port repo
+        uses: actions/checkout@v4
+
       # ── Checkout de denoland/rusty_v8 al tag v<V8_VERSION> ──
       # submodules: recursive es OBLIGATORIO (V8 source es un submodule).
       - name: Check out denoland/rusty_v8
@@ -63,6 +67,20 @@ jobs:
           ref: v${{ inputs.v8_version }}
           path: upstream-rusty-v8
           submodules: recursive
+
+      # ── Parche: re-declarar android_ndk_* en build/config/android/config.gni ──
+      # El fork denoland/chromium_build eliminó el declare_args() de
+      # android_ndk_root/android_ndk_version; sin ellos gn gen falla con
+      # "Undefined identifier ANDROID_NDK_VERSION_ROLL=${android_ndk_version}_1"
+      # en //build/config/android/BUILD.gn:37. El build.rs del crate descarga el
+      # NDK r26c y lo renombra a third_party/android_ndk (raíz del crate) →
+      # android_ndk_root = "//third_party/android_ndk".
+      - name: Apply Android NDK args patch (rusty_v8)
+        run: |
+          cd upstream-rusty-v8
+          git apply --check "${{ github.workspace }}/patches/rusty-v8/android-ndk-args.patch" \
+            && git apply "${{ github.workspace }}/patches/rusty-v8/android-ndk-args.patch"
+          echo "::notice::android_ndk_version/android_ndk_root re-declared in build/config/android/config.gni"
 
       # ── Deps del sistema ──
       # libclang-19: lo usa el configure de GN vía LIBCLANG_PATH; el resto

@@ -1,0 +1,19 @@
+diff --git a/build/config/android/config.gni b/build/config/android/config.gni
+--- a/build/config/android/config.gni
++++ b/build/config/android/config.gni
+@@ -157,7 +157,14 @@
+     }
+   }
+ 
+-  android_ndk_root = "//third_party/android_toolchain/ndk"
++  declare_args() {
++    # NDK root/version re-declared: denoland/chromium_build removed the original
++    # declare_args(); the crate's build.rs downloads NDK r26c and renames it to
++    # //third_party/android_ndk (relative to the crate root).
++    android_ndk_root = "//third_party/android_ndk"
++    android_ndk_version = "r26c"
++    android_ndk_major_version = 26
++  }
+ 
+   public_android_sdk_root = "//third_party/android_sdk/public"
+   public_android_sdk_platform_version = "37.0"
