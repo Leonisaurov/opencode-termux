@@ -1,0 +1,38 @@
+diff --git a/codex-rs/rmcp-client/src/oauth/refresh_lock.rs b/codex-rs/rmcp-client/src/oauth/refresh_lock.rs
+index 9d1ecf9e60..f5ab219871 100644
+--- a/codex-rs/rmcp-client/src/oauth/refresh_lock.rs
++++ b/codex-rs/rmcp-client/src/oauth/refresh_lock.rs
+@@ -69,7 +69,13 @@ impl RefreshCredentialLock {
+         let mut reported_contention = false;
+         timeout(acquire_timeout, async {
+             loop {
+-                match file.try_lock() {
++                // CODEX-TERMUX-ANDROID-PATCH: std::fs::File::try_lock is unsupported on
++                // Android/bionic (ErrorKind::Unsupported); single-user env → always acquired.
++                #[cfg(not(target_os = "android"))]
++                let lock_result = file.try_lock();
++                #[cfg(target_os = "android")]
++                let lock_result = Ok(());
++                match lock_result {
+                     Ok(()) => return Ok(()),
+                     Err(std::fs::TryLockError::WouldBlock) => {
+                         if !reported_contention {
+diff --git a/codex-rs/rmcp-client/src/oauth/store_lock.rs b/codex-rs/rmcp-client/src/oauth/store_lock.rs
+index b053f4e5ae..9d558b808e 100644
+--- a/codex-rs/rmcp-client/src/oauth/store_lock.rs
++++ b/codex-rs/rmcp-client/src/oauth/store_lock.rs
+@@ -91,7 +91,13 @@ impl OAuthStoreLock {
+         let mut reported_contention = false;
+ 
+         loop {
+-            match file.try_lock() {
++            // CODEX-TERMUX-ANDROID-PATCH: std::fs::File::try_lock is unsupported on
++            // Android/bionic (ErrorKind::Unsupported); single-user env → always acquired.
++            #[cfg(not(target_os = "android"))]
++            let lock_result = file.try_lock();
++            #[cfg(target_os = "android")]
++            let lock_result = Ok(());
++            match lock_result {
+                 Ok(()) => return Ok(Self { _file: file }),
+                 Err(std::fs::TryLockError::WouldBlock) if started.elapsed() >= acquire_timeout => {
+                     return Err(OAuthStoreLockFailure::Timeout {

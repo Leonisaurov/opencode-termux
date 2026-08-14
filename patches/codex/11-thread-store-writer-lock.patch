@@ -1,0 +1,47 @@
+diff --git a/codex-rs/thread-store/src/local/writer_lock.rs b/codex-rs/thread-store/src/local/writer_lock.rs
+index f6b2c8564b..bf46060acb 100644
+--- a/codex-rs/thread-store/src/local/writer_lock.rs
++++ b/codex-rs/thread-store/src/local/writer_lock.rs
+@@ -61,7 +61,14 @@ impl WriterLockCoordinator {
+                 ),
+             })?;
+ 
+-        match file.try_lock() {
++        // CODEX-TERMUX-ANDROID-PATCH: std::fs::File::try_lock is unsupported on
++        // Android/bionic (ErrorKind::Unsupported); single-user env, no real
++        // cross-process contention → treat the lock as always acquired.
++        #[cfg(not(target_os = "android"))]
++        let lock_result = file.try_lock();
++        #[cfg(target_os = "android")]
++        let lock_result = Ok(());
++        match lock_result {
+             Ok(()) => {}
+             Err(std::fs::TryLockError::WouldBlock) => {
+                 return Err(ThreadStoreError::Conflict {
+@@ -106,6 +113,11 @@ impl WriterLockCoordinator {
+                     path.display()
+                 ),
+             })?;
++        // CODEX-TERMUX-ANDROID-PATCH: std::fs::File::lock is unsupported on
++        // Android/bionic (ErrorKind::Unsupported) — this broke thread/start in
++        // the TUI bootstrap ("failed to acquire thread writer coordination
++        // lock"); skip the flock in this single-user environment.
++        #[cfg(not(target_os = "android"))]
+         file.lock().map_err(|err| ThreadStoreError::Internal {
+             message: format!(
+                 "failed to acquire thread writer coordination lock {}: {err}",
+@@ -140,7 +152,13 @@ impl WriterLockCoordinator {
+                     continue;
+                 }
+             };
+-            match file.try_lock() {
++            // CODEX-TERMUX-ANDROID-PATCH: try_lock unsupported on Android/bionic →
++            // treat stale-lock inspection as "acquired" (cleanup works, no spurious warn).
++            #[cfg(not(target_os = "android"))]
++            let lock_result = file.try_lock();
++            #[cfg(target_os = "android")]
++            let lock_result = Ok(());
++            match lock_result {
+                 Ok(()) => {
+                     drop(file);
+                     if let Err(err) = fs::remove_file(&path)

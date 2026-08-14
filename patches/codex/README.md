@@ -13,7 +13,7 @@ Generado desde el checkout local (`git -C codex diff HEAD`) en la rama `main` de
 
 ## Parches y orden de aplicación
 
-Orden **numérico** estricto (01 → 09). Cada parche toca un único archivo:
+Orden **numérico** estricto (01 → 14). Cada parche toca un único archivo (14 toca dos archivos del mismo crate):
 
 | # | Archivo | Propósito |
 |---|---------|-----------|
@@ -27,6 +27,10 @@ Orden **numérico** estricto (01 → 09). Cada parche toca un único archivo:
 | 08 | `codex-rs/code-mode-protocol/build.rs` | En Android **no** usa `protoc-bin-vendored` (binarios glibc) → fallback `protoc` de Termux (paquete `protobuf`); CI linux intacto |
 | 09 | `codex-rs/core/Cargo.toml` | Activa `vendored` de openssl-sys para `[target.aarch64-linux-android.dependencies]` → openssl-src cross-compilado en CI (sin openssl del sistema); `openssl-src` ya está en Cargo.lock, `--locked` intacto |
 | 10 | `codex-rs/core/src/installation_id.rs` | Salta el `file.lock()?` en Android (`#[cfg(not(target_os = "android"))]`): Rust std no soporta flock en bionic (ErrorKind::Unsupported) y rompía el arranque del app server embebido ("failed to start embedded app server") |
+| 11 | `codex-rs/thread-store/src/local/writer_lock.rs` | Neutraliza los flock del thread-store en Android: `try_lock` → siempre `Ok(())` (adquirir writer y limpiar locks stale) y salta `file.lock()` del coordination lock (rompía `thread/start` en el bootstrap TUI: "failed to acquire thread writer coordination lock") |
+| 12 | `codex-rs/message-history/src/lib.rs` | Neutraliza flock del historial en Android: `try_lock` en `append_entry` y `try_lock_shared` en `lookup_history_entry` → siempre adquiridos (`Ok(())`) |
+| 13 | `codex-rs/rollout/src/maintenance.rs` | `try_acquire_rollout_maintenance_lock`: `try_lock` → siempre `Ok(())` en Android (mantiene compresión/migración de rollouts operativas) |
+| 14 | `codex-rs/rmcp-client/src/oauth/store_lock.rs` + `refresh_lock.rs` | Neutraliza los flock OAuth de MCP en Android: `try_lock` → siempre `Ok(())` en `OAuthStoreLock::acquire_in` y `RefreshCredentialLock::acquire_in` (login/refresh OAuth MCP no fallan) |
 
 ## Comando de aplicación
 
@@ -42,8 +46,8 @@ por lo que `git apply` (p1 implícito) funciona sin ajustes.
 ## Validación
 
 - `git apply --check` individual: 8/8 OK sobre worktree limpio en `50ef7395`.
-- `git apply --check` conjunto (wildcard 01-09): OK.
-- `git apply` 01-09 en orden sobre worktree limpio: OK.
+- `git apply --check` conjunto (wildcard 01-14): OK.
+- `git apply` 01-14 en orden sobre worktree limpio: OK.
 - Aplicados todos sobre el worktree limpio: el diff resultante es **byte-idéntico**
   al diff del checkout modificado (`git -C codex diff HEAD`).
-- Sintaxis del archivo tocado por el parche 05 validada con `rustfmt --check` (stable, exit OK).
+- Sintaxis de los archivos tocados por los parches 05 y 10-14 validada con `rustfmt --check` (stable, exit OK).
