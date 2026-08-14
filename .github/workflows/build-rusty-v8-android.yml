@@ -82,6 +82,22 @@ jobs:
             && git apply "${{ github.workspace }}/patches/rusty-v8/android-ndk-args.patch"
           echo "::notice::android_ndk_version/android_ndk_root re-declared in build/config/android/config.gni"
 
+      # ── Parche: rama android en build_binding() del build.rs ──
+      # El crate v8 (rusty_v8) NO tiene rama target_os == "android" en
+      # build_binding() → bindgen corre contra el target del host sin sysroot del
+      # NDK y falla con "bits/wordsize.h not found". El parche añade la rama con
+      # --target=aarch64-linux-android24 y --sysroot=<raíz del crate>/third_party/
+      # android_ndk/toolchains/llvm/prebuilt/linux-x86_64/sysroot (el NDK r26c que
+      # el propio build.rs descarga). Solo afecta al bindgen del crate; las host
+      # tools x86_64 del ninja quedan intactas (por eso NO se usan
+      # BINDGEN_EXTRA_CLANG_ARGS_*).
+      - name: Apply bindgen android sysroot patch (rusty_v8)
+        run: |
+          cd upstream-rusty-v8
+          git apply --check "${{ github.workspace }}/patches/rusty-v8/bindgen-android-sysroot.patch" \
+            && git apply "${{ github.workspace }}/patches/rusty-v8/bindgen-android-sysroot.patch"
+          echo "::notice::build_binding() patched with android sysroot for bindgen"
+
       # ── Sysroot Debian Bullseye amd64 (build tools del host) ──
       # El toolchain host clang_x64_for_rust_host_build_tools (build tools del
       # host, p.ej. diplomat) requiere el sysroot del host en gn gen; sin él
@@ -138,6 +154,11 @@ jobs:
       # de la compilación de V8; build = clang de Chromium descargado por el
       # build.rs + src_binding.rs generado (build_dir a 2 niveles sobre OUT_DIR);
       # sccache = cache de objetos C++/Rust.
+      # NOTA: build.rs NO está en la key del hashFiles a propósito: el parche
+      # bindgen-android-sysroot.patch modifica build.rs, pero solo fuerza la
+      # re-ejecución del build script (cargo la detecta vía rerun-if-changed,
+      # rápida) y el gn_out cacheado (V8 ya compilado) sigue siendo válido.
+      # Incluirlo invalidaría el cache en cada cambio del parche sin aportar nada.
       - name: Cache V8 source build (NDK + clang + gn_out + build + sccache)
         uses: actions/cache@v4
         with:
@@ -146,28 +167,26 @@ jobs:
             upstream-rusty-v8/target/aarch64-linux-android/release/gn_out
             upstream-rusty-v8/target/aarch64-linux-android/release/build
             upstream-rusty-v8/target/sccache
-          key: rusty-v8-android-${{ inputs.v8_version }}-${{ hashFiles('upstream-rusty-v8/git_submodule_status.txt', 'upstream-rusty-v8/Cargo.lock', 'upstream-rusty-v8/build.rs') }}
+          key: rusty-v8-android-${{ inputs.v8_version }}-${{ hashFiles('upstream-rusty-v8/git_submodule_status.txt', 'upstream-rusty-v8/Cargo.lock') }}
           restore-keys: |
             rusty-v8-android-${{ inputs.v8_version }}-
 
       # ── Build desde fuente (30-90 min en frío) ──
-      # BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android: el build.rs del crate v8
-      # no tiene rama android en build_binding() → bindgen corre contra el target
-      # del host (x86_64) sin el sysroot del NDK y falla con
-      # "/usr/include/features-time64.h: fatal error: 'bits/wordsize.h' file not found"
-      # (issues #1604 y CI AuTsing). bindgen 0.72 respeta la variante target-específica
-      # <TARGET> con guiones→guiones_bajos, que solo aplica cuando el TARGET de cargo
-      # es aarch64-linux-android; las host tools x86_64 del ninja de V8
-      # (clang_x64_for_rust_host_build_tools, que pasan --target=x86_64-unknown-linux-gnu)
-      # no la ven y no deben verse afectadas (una BINDGEN_EXTRA_CLANG_ARGS genérica las
-      # rompería con "unsupported option '-msse3' for target 'aarch64-linux-android24'").
-      # el sysroot es el del NDK r26c que descarga el build.rs a
-      # third_party/android_ndk (host x86_64 del runner, API 24).
+      # NO se definen BINDGEN_EXTRA_CLANG_ARGS ni BINDGEN_EXTRA_CLANG_ARGS_
+      # aarch64_linux_android: el build script del crate corre con
+      # TARGET=aarch64-linux-android y bindgen hereda el entorno, así que las
+      # variables se filtran TAMBIÉN a los bindgens de las host tools x86_64 del
+      # ninja de V8 (clang_x64_for_rust_host_build_tools, que pasan
+      # --target=x86_64-unknown-linux-gnu) y los rompen con "unsupported option
+      # '-msse3' for target 'aarch64-linux-android24'". En su lugar,
+      # patches/rusty-v8/bindgen-android-sysroot.patch añade la rama android en
+      # build_binding() del build.rs (--target=aarch64-linux-android24 + --sysroot
+      # del NDK r26c en third_party/android_ndk), que solo afecta al bindgen del
+      # crate.
       - name: Build rusty_v8 sandbox from source
         env:
           V8_FROM_SOURCE: "1"
           SCCACHE_IDLE_TIMEOUT: "0"
-          BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android: "--target=aarch64-linux-android24 --sysroot=${{ github.workspace }}/upstream-rusty-v8/third_party/android_ndk/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
         working-directory: upstream-rusty-v8
         run: cargo +1.91.0 build --locked --release --target aarch64-linux-android --features v8_enable_sandbox
 

@@ -1,0 +1,24 @@
+diff --git a/build.rs b/build.rs
+--- a/build.rs
++++ b/build.rs
+@@ -246,6 +246,19 @@
+       "arm64-apple-ios"
+     };
+     clang_args.push(format!("--target={clang_target}"));
+-  }
++  } else if target_os == "android" {
++    // Android: point bindgen at the NDK sysroot that this build.rs downloads to
++    // third_party/android_ndk (r26c, host linux-x86_64) and set the matching
++    // clang target triple so the V8 headers parse against bionic (API 24).
++    // Without an explicit --target, bindgen inherits the crate's
++    // TARGET=aarch64-linux-android but runs the host clang (x86_64) against
++    // host headers and fails with "bits/wordsize.h not found".
++    let current_dir = env::current_dir().unwrap();
++    let sysroot = current_dir.join(
++      "third_party/android_ndk/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
++    );
++    clang_args.push("--target=aarch64-linux-android24".to_string());
++    clang_args.push(format!("--sysroot={}", sysroot.display()));
++  }
+ 
+   let bindings = bindgen::Builder::default()
