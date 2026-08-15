@@ -1,17 +1,19 @@
-diff --git a/codex-rs/Cargo.toml b/codex-rs/Cargo.toml
-index e776322fa1..d930d88e85 100644
---- a/codex-rs/Cargo.toml
-+++ b/codex-rs/Cargo.toml
-@@ -491,6 +491,12 @@ zstd = "0.13"
- wiremock = "0.6"
- zeroize = "1.8.2"
+diff --git a/codex-rs/code-mode-host/Cargo.toml b/codex-rs/code-mode-host/Cargo.toml
+index 71c1237d20..514f490686 100644
+--- a/codex-rs/code-mode-host/Cargo.toml
++++ b/codex-rs/code-mode-host/Cargo.toml
+@@ -34,6 +34,14 @@ tracing = { workspace = true }
+ tracing-subscriber = { workspace = true }
+ uuid = { workspace = true, features = ["v4"] }
  
-+# Build OpenSSL from source for Android builds. Workspace-wide so that any
-+# combination of bins (including code-mode-host alone) resolves openssl-sys
-+# vendored instead of failing pkg-config/OPENSSL_DIR resolution.
++# Build OpenSSL from source for Android builds. This crate's own graph does not
++# contain openssl-sys (only codex-core pulls it in, via codex-cli), so this
++# [target.*] section exists to unify the vendored feature across builds that
++# include this crate. It must live on a real package manifest: the workspace
++# root Cargo.toml is a virtual manifest and cargo rejects [target.*] sections.
 +[target.aarch64-linux-android.dependencies]
 +openssl-sys = { workspace = true, features = ["vendored"] }
 +
- [workspace.lints]
- rust = {}
- 
+ [dev-dependencies]
+ codex-code-mode = { workspace = true }
+ codex-utils-cargo-bin = { workspace = true }
