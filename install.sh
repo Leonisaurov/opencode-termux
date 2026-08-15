@@ -538,8 +538,25 @@ install_codex() {
     local url
     url=$(asset_url "$CODEX_ASSET_PATTERN")
     if [ -z "$url" ]; then
-        error "La release ${RELEASE_TAG} no contiene el asset de codex ($CODEX_ASSET_PATTERN)"
-        return 1
+        # Fallback (solo codex): la release "latest" puede ser de otro componente
+        # (ej: opencode) y no llevar el asset de codex. Recorrer todas las releases
+        # (más recientes primero) y usar el primer asset que matchee el patrón.
+        local releases releases_url
+        releases_url="https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=100"
+        info "Asset de codex no encontrado en la release ${RELEASE_TAG}; buscando en releases anteriores..."
+        releases=$(curl -fsSL "$releases_url" 2>/dev/null || true)
+        if [ -n "$releases" ]; then
+            url=$(echo "$releases" \
+                | grep -oE 'https://[^"]+' \
+                | grep -E "$CODEX_ASSET_PATTERN" \
+                | head -n 1 \
+                || true)
+        fi
+        if [ -z "$url" ]; then
+            error "La release ${RELEASE_TAG} no contiene el asset de codex ($CODEX_ASSET_PATTERN)"
+            return 1
+        fi
+        info "Usando el asset de codex más reciente disponible en releases anteriores"
     fi
 
     local tmp_dir

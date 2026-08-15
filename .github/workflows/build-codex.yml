@@ -55,7 +55,7 @@ on:
         default: 'codex codex-tui codex-linux-sandbox codex-code-mode-host'
   push:
     tags:
-      - 'v*'
+      - 'codex-v*'
 
 permissions:
   contents: write
@@ -209,9 +209,9 @@ jobs:
         id: build
         env:
           CODEX_REF: ${{ inputs.codex_ref }}
-          # En push de tag v* inputs.codex_version es vacío → se usa
-          # github.ref_name (p.ej. v0.134.0-alpha.3); el script normaliza
-          # quitando la 'v' inicial → 0.134.0-alpha.3.
+          # En push de tag codex-v* inputs.codex_version es vacío → se usa
+          # github.ref_name (p.ej. codex-v0.134.0-alpha.3); el script normaliza
+          # quitando el prefijo codex-v → 0.134.0-alpha.3.
           CODEX_VERSION: ${{ inputs.codex_version || github.ref_name }}
           # Binarios a compilar/empaquetar (input `bins`; vacío en push de tag →
           # el script aplica su default de los 4 binarios).
@@ -232,12 +232,15 @@ jobs:
           path: ${{ github.workspace }}/build/codex-ci/*.zip
           if-no-files-found: error
 
-      # ── Release (tag v* o input release=true) ──
+      # ── Release (tag codex-v* o input release=true) ──
+      # Con tag codex-v* la release se crea como v$VERSION (no github.ref_name,
+      # que sería codex-v0.134.0-alpha.3), así el tag de la release es el mismo
+      # formato que el nombre del asset y no el de los tags v* de opencode.
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.release == 'true'
+        if: startsWith(github.ref, 'refs/tags/codex-v') || github.event.inputs.release == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', steps.build.outputs.version) }}
+          tag_name: ${{ format('v{0}', steps.build.outputs.version) }}
           files: ${{ github.workspace }}/build/codex-ci/*.zip
           body: |
             ## Codex CLI ${{ steps.build.outputs.version }} for Android/Termux (aarch64)

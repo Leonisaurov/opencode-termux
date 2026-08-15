@@ -20,6 +20,11 @@ android-ndk-*/
 *.deb
 *.zip
 
+# codex (checkout local + binarios del port)
+codex/
+codex-android
+codex-code-mode-host
+
 # OS files
 .DS_Store
 Thumbs.db

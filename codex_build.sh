@@ -45,6 +45,32 @@ RUSTY_V8_MANIFEST_NAME="rusty_v8_ptrcomp_sandbox_release_aarch64-linux-android.s
 
 mkdir -p "$MARKERS"
 
+# ── Fuente de codex compartida con CI (mismo ref + mismos parches) ──
+# Alinea el checkout local codex/ al mismo mecanismo que el CI
+# (scripts/codex-prepare-source.sh): verifica el ref pinneado de env.sh y aplica
+# los parches de patches/codex con verify_patched_state. Idempotente: si el
+# worktree ya tiene los parches exactos (caso actual), no toca nada.
+# Parse tolerante de CODEX_REF sin source de env.sh (evita efectos laterales:
+# banner + defaults). Maneja los dos formatos posibles:
+#   export CODEX_REF="${CODEX_REF:-50ef7395...}"  → param default
+#   export CODEX_REF="50ef7395..."                → literal
+CODEX_REF_LOCAL=""
+if [ -f "$REPO_ROOT/scripts/env.sh" ]; then
+    codex_ref_line="$(grep -E '^[[:space:]]*export[[:space:]]+CODEX_REF=' "$REPO_ROOT/scripts/env.sh" | head -1 || true)"
+    if [ -n "$codex_ref_line" ]; then
+        codex_ref_line="${codex_ref_line#*=}"
+        codex_ref_line="${codex_ref_line%\"}"; codex_ref_line="${codex_ref_line#\"}"
+        if [[ "$codex_ref_line" =~ ^\$\{.*:-(.*)\}$ ]]; then
+            CODEX_REF_LOCAL="${BASH_REMATCH[1]}"
+        else
+            CODEX_REF_LOCAL="$codex_ref_line"
+        fi
+    fi
+fi
+[ -n "$CODEX_REF_LOCAL" ] || { echo "ERROR: no se pudo extraer CODEX_REF de scripts/env.sh" >&2; exit 1; }
+echo ":: preparando fuente de codex en $CODEX_SRC (ref $CODEX_REF_LOCAL)..."
+bash "$REPO_ROOT/scripts/codex-prepare-source.sh" "$REPO_ROOT/codex" "$CODEX_REF_LOCAL" "$REPO_ROOT/patches/codex"
+
 start_timer() { START_TS=$(date +%s); }
 elapsed() { local end=$(date +%s); echo $((end - START_TS)); }
 
@@ -582,6 +608,10 @@ for bin in "${BINARIES[@]}"; do
         echo "   Auxiliar no hallado: $bin (puede no ser necesario en runtime)"
     fi
 done
+
+# Idempotencia del checkout: cargo (sin --locked) puede reescribir Cargo.lock;
+# se restaura para que el siguiente run del helper verifique parches exactos.
+git -C "$CODEX_SRC" checkout -- Cargo.lock 2>/dev/null || true
 
 echo ""
 echo ":: Build completado:"
