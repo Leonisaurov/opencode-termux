@@ -320,7 +320,9 @@ cd "$CODEX_SRC"
 
 echo ":: [4/5] cargo fetch (lockfile, target aarch64-linux-android)..."
 start_timer
-cargo fetch --locked --target aarch64-linux-android
+# sin --locked: los parches del port modifican Cargo.tomls del checkout y el
+# Cargo.lock de upstream queda desincronizado; cargo lo regenera (hay red).
+cargo fetch --target aarch64-linux-android
 echo "   fetch completo ($(elapsed)s)"
 
 # Artefacto librusty_v8 para codex-code-mode-host (fail-fast si no está publicado)
@@ -365,9 +367,11 @@ for bin in $CODEX_BINS; do
     PACKAGES_ARGS+=("-p" "$crate")
 done
 echo ":: [4/5] bins a compilar: $CODEX_BINS"
-echo ":: [4/5] cargo build --release --locked --target aarch64-linux-android (JOBS=$JOBS)..."
+echo ":: [4/5] cargo build --release --target aarch64-linux-android (JOBS=$JOBS)..."
 start_timer
-cargo build --release --locked --target aarch64-linux-android -j "$JOBS" "${PACKAGES_ARGS[@]}"
+# sin --locked (misma razón que el cargo fetch de arriba): cargo regenera el
+# Cargo.lock desincronizado por los parches del port (hay red).
+cargo build --release --target aarch64-linux-android -j "$JOBS" "${PACKAGES_ARGS[@]}"
 echo "   build completo ($(elapsed)s)"
 
 # ── [5/5] Empaquetar ──
