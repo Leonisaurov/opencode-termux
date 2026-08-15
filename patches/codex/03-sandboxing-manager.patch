@@ -1,13 +1,15 @@
 diff --git a/codex-rs/sandboxing/src/manager.rs b/codex-rs/sandboxing/src/manager.rs
-index cf4cb90c8d..da7d7fc47e 100644
+index cf4cb90c8d..2712b2b08e 100644
 --- a/codex-rs/sandboxing/src/manager.rs
 +++ b/codex-rs/sandboxing/src/manager.rs
-@@ -62,6 +62,8 @@ pub fn get_platform_sandbox(windows_sandbox_enabled: bool) -> Option<SandboxType
+@@ -60,7 +60,9 @@ pub enum SandboxablePreference {
+ pub fn get_platform_sandbox(windows_sandbox_enabled: bool) -> Option<SandboxType> {
+     if cfg!(target_os = "macos") {
          Some(SandboxType::MacosSeatbelt)
-     } else if cfg!(target_os = "linux") {
+-    } else if cfg!(target_os = "linux") {
++    } else if cfg!(any(target_os = "linux", target_os = "android")) {
++        // Android/Termux port: the sandbox exe is a proot wrapper
++        // (`codex-linux-sandbox`); the LinuxSeccomp path drives the spawn.
          Some(SandboxType::LinuxSeccomp)
-+    } else if cfg!(target_os = "android") {
-+        None
      } else if cfg!(target_os = "windows") {
          if windows_sandbox_enabled {
-             Some(SandboxType::WindowsRestrictedToken)
