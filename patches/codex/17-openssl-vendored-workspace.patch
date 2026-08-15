@@ -1,0 +1,17 @@
+diff --git a/codex-rs/Cargo.toml b/codex-rs/Cargo.toml
+index e776322fa1..d930d88e85 100644
+--- a/codex-rs/Cargo.toml
++++ b/codex-rs/Cargo.toml
+@@ -491,6 +491,12 @@ zstd = "0.13"
+ wiremock = "0.6"
+ zeroize = "1.8.2"
+ 
++# Build OpenSSL from source for Android builds. Workspace-wide so that any
++# combination of bins (including code-mode-host alone) resolves openssl-sys
++# vendored instead of failing pkg-config/OPENSSL_DIR resolution.
++[target.aarch64-linux-android.dependencies]
++openssl-sys = { workspace = true, features = ["vendored"] }
++
+ [workspace.lints]
+ rust = {}
+ 
