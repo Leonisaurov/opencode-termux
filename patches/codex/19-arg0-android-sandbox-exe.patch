@@ -1,0 +1,70 @@
+diff --git a/codex-rs/arg0/src/lib.rs b/codex-rs/arg0/src/lib.rs
+index 7951d2cb05..6cc65c13aa 100644
+--- a/codex-rs/arg0/src/lib.rs
++++ b/codex-rs/arg0/src/lib.rs
+@@ -255,6 +255,8 @@ where
+         codex_self_exe: current_exe.clone(),
+         codex_linux_sandbox_exe: if cfg!(target_os = "linux") {
+             linux_sandbox_exe_path(path_entry_guard.as_ref(), current_exe)
++        } else if cfg!(target_os = "android") {
++            android_linux_sandbox_exe_path()
+         } else {
+             None
+         },
+@@ -282,6 +284,56 @@ fn linux_sandbox_exe_path(
+         .or(current_exe)
+ }
+ 
++/// Android/Termux port: there is no bubblewrap and no arg0 alias on Android.
++/// The sandbox is a shell wrapper (`codex-linux-sandbox`, a proot-based script
++/// installed by the port). Resolve it from `CODEX_LINUX_SANDBOX_EXE` first, then
++/// look for `codex-linux-sandbox` in `PATH`; fall back to `None` when absent.
++fn android_linux_sandbox_exe_path() -> Option<PathBuf> {
++    if let Some(path) = std::env::var_os("CODEX_LINUX_SANDBOX_EXE") {
++        let path = PathBuf::from(path);
++        // Override explícito: se confía sin exigir shebang (puede apuntar a un
++        // wrapper que no es un script), solo se exige ejecutable.
++        if is_sandbox_wrapper_script(&path, /*require_shebang=*/ false) {
++            return Some(path);
++        }
++    }
++    for dir in std::env::split_paths(&std::env::var_os("PATH")?) {
++        let candidate = dir.join("codex-linux-sandbox");
++        if is_sandbox_wrapper_script(&candidate, /*require_shebang=*/ true) {
++            return Some(candidate);
++        }
++    }
++    None
++}
++
++/// True si `path` es un candidato válido para el wrapper del sandbox: archivo
++/// existente, EJECUTABLE (bit x del modo) y — cuando `require_shebang` — un
++/// script con shebang (primer byte `#`). El check de shebang descarta el stub
++/// ELF del port (`codex-linux-sandbox` compilado, que también puede aparecer en
++/// `$PREFIX/bin` y que simplemente imprime un error y sale): elegirlo haría
++/// fallar las tools cerrado. Lectura de solo 2 bytes: heurística barata.
++fn is_sandbox_wrapper_script(path: &Path, require_shebang: bool) -> bool {
++    use std::io::Read;
++    use std::os::unix::fs::PermissionsExt;
++
++    let md = match std::fs::metadata(path) {
++        Ok(md) => md,
++        Err(_) => return false,
++    };
++    if !md.is_file() || md.permissions().mode() & 0o111 == 0 {
++        return false;
++    }
++    if !require_shebang {
++        return true;
++    }
++    let mut f = match File::open(path) {
++        Ok(f) => f,
++        Err(_) => return false,
++    };
++    let mut buf = [0u8; 2];
++    f.read_exact(&mut buf).is_ok() && buf[0] == b'#'
++}
++
+ fn build_runtime() -> anyhow::Result<tokio::runtime::Runtime> {
+     let mut builder = tokio::runtime::Builder::new_multi_thread();
+     builder.enable_all();

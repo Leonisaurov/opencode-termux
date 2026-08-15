@@ -609,6 +609,30 @@ install_codex() {
 
     cp "$host_bin" "$INSTALL_PREFIX/bin/codex-code-mode-host"
     chmod +x "$INSTALL_PREFIX/bin/codex-code-mode-host"
+
+    # Sandbox de codex vía proot (aislamiento de filesystem sin root): con los parches
+    # 19/20 el runtime de codex resuelve codex_linux_sandbox_exe desde
+    # $CODEX_LINUX_SANDBOX_EXE o PATH y usa la ruta LinuxSeccomp → spawna este wrapper,
+    # que ejecuta las tools bajo proot (todo read-only salvo workspace y TMPDIR).
+    # El wrapper es OBLIGATORIO si se usa sandbox_mode restrictivo: con los parches
+    # 19/20, si el exe del sandbox no se resuelve, codex falla cerrado (por diseño).
+    if [ -f "$SCRIPT_DIR/scripts/codex-linux-sandbox" ]; then
+        cp "$SCRIPT_DIR/scripts/codex-linux-sandbox" "$INSTALL_PREFIX/bin/codex-linux-sandbox"
+        chmod +x "$INSTALL_PREFIX/bin/codex-linux-sandbox"
+        info "Sandbox de codex activado vía proot: $INSTALL_PREFIX/bin/codex-linux-sandbox"
+        warn "  El wrapper es OBLIGATORIO si usas sandbox_mode restrictivo (read-only o"
+        warn "  workspace-write): con los parches 19/20, sin él las tools fallan cerrado"
+        warn "  (por diseño). Aislamiento de FILESYSTEM (todo read-only salvo workspace y"
+        warn "  TMPDIR); la RED no queda aislada sin root (proot no tiene netns). Requisitos:"
+        warn "    - pkg install proot        (el wrapper usa \$PREFIX/bin/proot)"
+        warn "    - sandbox_mode = \"read-only\" o \"workspace-write\" en la config de codex"
+        warn "    - si proot está en otra ruta: export CODEX_SANDBOX_PROOT=<ruta>"
+    else
+        warn "No se encontró scripts/codex-linux-sandbox en este repo; el sandbox de codex"
+        warn "  NO estará disponible: con sandbox_mode restrictivo las tools fallan cerrado"
+        warn "  (por diseño). Usa sandbox_mode = \"disabled\" o instala este repo completo"
+        warn "  (el wrapper vive en scripts/ y install.sh lo copia a \$PREFIX/bin)."
+    fi
     rm -rf "$tmp_dir"
 
     info "Codex instalado en $INSTALL_PREFIX/bin/codex"

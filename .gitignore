@@ -22,6 +22,7 @@ android-ndk-*/
 
 # codex (checkout local + binarios del port)
 codex/
+!patches/codex/
 codex-android
 codex-code-mode-host
 

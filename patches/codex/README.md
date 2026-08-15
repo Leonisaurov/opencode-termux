@@ -13,7 +13,7 @@ Generado desde el checkout local (`git -C codex diff HEAD`) en la rama `main` de
 
 ## Parches y orden de aplicación
 
-Orden **numérico** estricto (01 → 18). Cada parche toca exactamente un archivo (requisito de `scripts/build-codex-ci.sh`); el 16 lo CREA (nuevo, queda como untracked `??` tras `git apply` — `verify_patched_state` acepta ` M ` y `??`):
+Orden **numérico** estricto (01 → 20). Cada parche toca exactamente un archivo (requisito de `scripts/build-codex-ci.sh`); el 16 lo CREA (nuevo, queda como untracked `??` tras `git apply` — `verify_patched_state` acepta ` M ` y `??`):
 
 | # | Archivo | Propósito |
 |---|---------|-----------|
@@ -35,6 +35,8 @@ Orden **numérico** estricto (01 → 18). Cada parche toca exactamente un archiv
 | 16 | `codex-rs/code-mode-host/build.rs` (NUEVO) | Build script del crate host que inyecta los link-args de los stubs bionic (`CODEX_BIONIC_STUBS_O`) y del compiler-rt del NDK (`CODEX_CLANG_RT_BUILTINS`) vía `cargo:rustc-link-arg` cuando las env vars están presentes (leídas de los build scripts del port). El crate v8 (use_custom_libcxx) referencia `__clear_cache`/`aligned_alloc`/`strtof_l`/`strtod_l` que bionic API 24 no exporta. Mecanismo scoped al crate, aditivo — NO usa RUSTFLAGS (reemplazaría los rustflags del config.toml) |
 | 17 | `codex-rs/code-mode-host/Cargo.toml` | `openssl-sys = { workspace = true, features = ["vendored"] }` en `[target.aarch64-linux-android.dependencies]` del **package manifest de code-mode-host** — necesario para builds parciales como solo code-mode-host. NO puede ir en el workspace root: es un virtual manifest (solo `[workspace]`) y cargo rechaza secciones `[target.*]` ahí (`error: this virtual manifest specifies a target section, which is not allowed`). El grafo de code-mode-host no contiene openssl-sys (solo `core` lo arrastra, vía codex-cli); la sección unifica la feature vendored cuando el build combina este crate con crates que sí lo traen |
 | 18 | `codex-rs/code-mode-host/src/main.rs` | Stub TLS asm (`.tdata` `.p2align 6`) en el bin del host: bionic ARM64 exige el PT_TLS con `p_align >= 64` y `p_vaddr % 64 == 0` (skew 0); V8 trae `thread_local` con alineación 8 y sin el stub el segmento TLS nace con skew != 0 y el linker64 aborta (`"executable's TLS segment is underaligned"`). Rust stable NO puede emitir `.tdata` nativo en android (`thread_local!` → emutls), de ahí `core::arch::global_asm!` con `.fill 64, 1, 0x2a` + ancla `#[used]` (evita que el linker descarte el stub) |
+| 19 | `codex-rs/arg0/src/lib.rs` | Activa el **sandbox de codex en Android** vía `codex_linux_sandbox_exe`: en la rama `target_os = "android"` resuelve el exe del sandbox desde la env `CODEX_LINUX_SANDBOX_EXE` (si está seteada y es un archivo) o buscando `codex-linux-sandbox` en los dirs de `PATH` (búsqueda manual con `split_paths`, sin `which`); si no lo encuentra → `None` (comportamiento previo). La rama linux queda intacta. El exe resuelto es el wrapper bash `scripts/codex-linux-sandbox` del port (instalado en `$PREFIX/bin` por `install.sh`), que ejecuta las tools bajo proot |
+| 20 | `codex-rs/sandboxing/src/manager.rs` | `get_platform_sandbox`: **android cae en `LinuxSeccomp`** igual que linux — la rama `cfg!(target_os = "linux")` pasa a `cfg!(any(target_os = "linux", target_os = "android"))` y se ELIMINA la rama `else if cfg!(target_os = "android") { None }` que introdujo el parche 03 (dejar android caer en el `else { None }` final NO serviría). Combinado con el 19, el runtime de codex spawna `codex-linux-sandbox --sandbox-policy-cwd … --permission-profile … -- <cmd>` y el wrapper proot aplica el aislamiento de filesystem |
 
 ## Comando de aplicación
 
@@ -49,9 +51,9 @@ por lo que `git apply` (p1 implícito) funciona sin ajustes.
 
 ## Validación
 
-- `git apply --check` individual: 18/18 OK sobre worktree limpio en `50ef7395`.
-- `git apply --check` conjunto (wildcard 01-18): OK.
-- `git apply` 01-18 en orden sobre worktree limpio: OK.
+- `git apply --check` individual: 20/20 OK sobre worktree limpio en `50ef7395`.
+- `git apply --check` conjunto (wildcard 01-20): OK.
+- `git apply` 01-20 en orden sobre worktree limpio: OK.
 - Aplicados todos sobre el worktree limpio: el diff resultante es **byte-idéntico**
   al diff del checkout modificado (`git -C codex diff HEAD`).
 - Sintaxis de los archivos tocados por los parches 05 y 10-15 validada con `rustfmt --check` (stable, exit OK).

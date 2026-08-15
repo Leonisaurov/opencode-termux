@@ -35,9 +35,9 @@ Compilar y ejecutar **OpenAI Codex CLI** (`codex-rs`) en **Termux** (Android), t
   - Sin `rustup`. Usa `cargo`/`rustc` del sistema.
   - Detecta `tcr` en `~/.local/bin` y lo agrega al `PATH` si existe.
   - Detecta NDK automáticamente en `ANDROID_NDK_HOME`, `$HOME/Android/Sdk/ndk/*`, `$PREFIX/opt/android-ndk`, `/opt/android-ndk`, `$HOME/android-ndk`.
-  - Fingerprint incremental en `build/.markers/build-fingerprint-codex`.
-  - Compila `codex-cli`, `codex-tui` y `codex-linux-sandbox` para `aarch64-linux-android`.
-  - Copia el binario final a `./codex-android`.
+  - Fingerprint incremental v3 en `build/.markers/build-fingerprint-codex` (skip total si nada cambió).
+  - Obtiene la fuente con el MISMO mecanismo que el CI: helper compartido `scripts/codex-prepare-source.sh` (verifica/clona el ref pinneado `CODEX_REF` desde `scripts/env.sh` y aplica `patches/codex/*.patch` 01..18 con `verify_patched_state`).
+  - Compila `codex-cli` (→ `./codex-android`), `codex-tui`, `codex-linux-sandbox` y **`codex-code-mode-host`** para `aarch64-linux-android` (tcr `-o 1000 -r 1024 -j 1` + reintentos anti-OOM; el host se copia a `./codex-code-mode-host`, junto a `./codex-android`).
 
 ## 4. Decisiones técnicas
 
@@ -49,17 +49,27 @@ Compilar y ejecutar **OpenAI Codex CLI** (`codex-rs`) en **Termux** (Android), t
 6. **`.cargo/config.toml`**: Se usa `linker = "aarch64-linux-android-clang"` y `ar = "llvm-ar"`. No se fuerza `crt-static` ni `link-self-contained` para usar la libc del sistema.
 7. **`debuginfo=trace-args` inválido**: corregido a `debuginfo=line-tables-only` porque `trace-args` no es un valor válido en esta toolchain.
 
-## 5. Próximos pasos
+## 5. Pendientes reales
 
-1. Ejecutar `./codex_build.sh` en Termux y verificar que `./codex-android` se genere.
-2. Correr `./codex-android --version` para sanity-check del binario.
-3. Probar TUI real en pty de Termux; verificar que `ratatui` + `crossterm` funcionen contra el backend de terminal.
-4. Si `cargo build` falla por dependencias nativas (OpenSSL, SQLite, V8), evaluar:
-   - Usar `openssl-sys` con `vendored` o prebuilt Android.
-   - Usar `libsqlite3-sys` con `bundled` si no encuentra SQLite bionic.
-   - Evaluar si `v8-poc` es necesario para el build de producción; si no, excluirlo.
-5. Evaluar si `syntect`/`two-face` compilan en Android; si no, gatearlos detrás de un feature condicional.
-6. Evaluar integración de `codex-linux-sandbox` en Android; por ahora es stub, pero si se necesita sandboxing real, investigar alternativas nativas (no bubblewrap).
+El port está **completo y publicado**: Release `v0.134.0-alpha.3` con el asset
+`codex-v0.134.0-alpha.3-android-aarch64.zip` (los 4 binarios), modo code
+funcional en Termux, build local (`./codex_build.sh`) y CI (`build-codex.yml`)
+compartiendo el mismo fuente. Todos los pasos históricos de esta sección
+(OpenSSL vía `vendored`, artefacto rusty_v8 para V8, sandbox stub, TUI en pty)
+quedaron resueltos y documentados en §8.
+
+Pendientes no bloqueantes:
+
+1. **Caveat del instalador**: `install.sh --just codex` resuelve primero
+   `releases/latest`; si esa release no trae asset de codex (p.ej. la publicó
+   opencode), cae al fallback `releases?per_page=100` ordenado por la API
+   (`created_at` desc) y toma el **primer** asset que matchee el patrón — sin
+   filtrar por la versión esperada. Si después de `v0.134.0-alpha.3` se publica
+   otra release con asset de codex, el fallback instalará esa. Para fijar
+   versión concreta: `./install.sh --release v0.134.0-alpha.3 --just codex` (el
+   tag de la release de codex es `v<version>`).
+2. **Regenerar `rusty-v8-v<CODEX_V8_VERSION>`** al subir la versión del crate
+   v8 (ver §8): el artefacto no tiene prebuilt Android y lo consumen CI y local.
 
 ## 6. Archivos de referencia
 
@@ -111,7 +121,10 @@ default `150.4.0`). Los 3 artefactos publicados:
 
 ### Cómo se integra
 
-- **Local (Termux)**: `codex_build.sh` descarga el artefacto a `build/rusty-v8/`
+- **Local (Termux)**: `codex_build.sh` usa el MISMO fuente que el CI (helper
+  compartido `scripts/codex-prepare-source.sh`: clona `CODEX_REF` de
+  `scripts/env.sh` + aplica `patches/codex/*.patch` 01..18 con
+  `verify_patched_state`), descarga el artefacto a `build/rusty-v8/`
   (idempotente, verifica el manifest con `sha256sum -c`), exporta
   `RUSTY_V8_ARCHIVE` + `RUSTY_V8_SRC_BINDING_PATH` y compila
   `-p codex-code-mode-host` junto a `codex-cli`; copia el binario a
@@ -120,27 +133,42 @@ default `150.4.0`). Los 3 artefactos publicados:
   `-p codex-code-mode-host`) y el zip de release incluye `codex-code-mode-host`
   junto a `codex-android`. El CI usa **sccache** (cache de compilación de cargo,
   key por ref + hashes de `patches/codex/*.patch`) para no recompilar todos los
-  crates en cada run, y el input `bins` permite compilar SOLO el host
-  (`codex-code-mode-host`) sin tocar el resto.
-- **Instalación**: `install.sh` (`--just codex` o default) instala `codex` y
-  `codex-code-mode-host` en `$PREFIX/bin`.
+  crates en cada run.
 - Con `RUSTY_V8_ARCHIVE` + `RUSTY_V8_SRC_BINDING_PATH` el crate `v8` **no
   necesita libclang ni NDK** en el build (solo linkea el `.a`); no se fuerza
   ninguna instalación extra.
 
-### Requisito runtime
+### Release e instalación
+
+- **Trigger**: push de tag `codex-v*` (NO `v*` — colisiona con los tags de
+  opencode) o input `release=true` en `build-codex.yml`. La Release se crea con
+  tag `v<version>` (softprops/action-gh-release normaliza el prefijo `codex-v`)
+  y el asset `codex-v<version>-android-aarch64.zip`.
+- **Input `bins`**: permite compilar/empaquetar solo un subconjunto (p.ej.
+  `codex-code-mode-host`) reutilizando el sccache del CI.
+- **Precedencia**: la Release `rusty-v8-v<CODEX_V8_VERSION>` DEBE publicarse
+  ANTES de correr `build-codex.yml` — `setup_rusty_v8` descarga sus 3 assets y
+  verifica el manifest con `sha256sum -c` (fail-fast si no está).
+- **Instalación**: `install.sh` (`--just codex` o default) descarga el zip con el
+  patrón `codex-v[0-9][0-9A-Za-z._+-]*-android-aarch64\.zip` desde
+  `releases/latest` y, si esa release no trae el asset (p.ej. la de opencode),
+  cae al fallback `releases?per_page=100` tomando el primer asset que matchee.
+  Instala `codex` (de `codex-android`) y `codex-code-mode-host` en `$PREFIX/bin`.
+
+### Requisito runtime (verificado)
 
 El crate `v8` usa `use_custom_libcxx` (feature default de rusty_v8) → el libc++
 de V8 queda **estático y embebido** en `librusty_v8.a`, NO se linkea
-`libc++_shared.so` dinámico. Por lo tanto **no debería requerir** el paquete
-Termux `libc++`. Verifícalo con:
+`libc++_shared.so` dinámico → **no requiere** el paquete Termux `libc++`.
+Verificado en esta sesión sobre el binario de la Release:
 
 ```bash
 readelf -d "$PREFIX/bin/codex-code-mode-host" | grep NEEDED
+# → libdl.so  liblog.so  libm.so  libc.so   (SIN libc++_shared.so)
 ```
 
 Si apareciera `libc++_shared.so` en el NEEDED, instala el paquete Termux
-`libc++`: `pkg install libc++`.
+`libc++`: `pkg install libc++` (indicaría un port roto, no el caso actual).
 
 ### Link del host contra bionic API 24 (stubs)
 
@@ -163,10 +191,55 @@ Ambas rutas se inyectan al link vía el **build.rs del crate host**
 RUSTFLAGS** (un RUSTFLAGS global reemplazaría los rustflags del
 `.cargo/config.toml` parcheado, que ya incluyen `target-feature=-crt-static`).
 
+Además, **`openssl-sys` vendored** se declara también en el package manifest de
+`code-mode-host` (parche 17) para habilitar builds parciales tipo solo host; no
+puede ir en el workspace root porque es un virtual manifest (cargo rechaza
+secciones `[target.*]` ahí).
+
+### TLS (p_align 64, skew 0)
+
+El host abortaba en Termux al arrancar:
+
+```
+executable's TLS segment is underaligned: alignment is 8 (skew 0)...
+needs to be at least 64
+```
+
+V8 trae `thread_local` con alineación 8; bionic ARM64 exige el PT_TLS con
+`p_align >= 64` y `p_vaddr % 64 == 0` (skew 0). **`termux-elf-cleaner` NO
+basta**: sube el p_align a 64 pero introduce skew 32 y el abort persiste
+(termux/termux-packages#8273). Fix: **parche 18**
+(`patches/codex/18-tls-align-stub.patch`) — stub asm `.tdata .p2align 6` vía
+`global_asm!` + ancla `#[used]` que fuerza p_align 64 y skew 0 (Rust stable NO
+emite `.tdata` nativo en android: `thread_local!` → emutls, de ahí el asm).
+
+### Por qué es el único port con modo code
+
+termux-user-repository (TUR) publica un paquete `codex` para Termux pero
+**omite `codex-code-mode-host`** → el modo code queda fail-closed ("Code Mode is
+unavailable"). Este port es el único que compila y publica el host (V8 desde
+fuente para `aarch64-linux-android` vía `build-rusty-v8-android.yml`) y lo
+instala como binario hermano de `codex`.
+
 ### Cómo verificar
 
 ```bash
 ls -l "$PREFIX/bin/codex" "$PREFIX/bin/codex-code-mode-host"   # ambos presentes
 ./codex-android                                                # sin warning "Code Mode is unavailable"
+
+file "$PREFIX/bin/codex-code-mode-host"                        # ELF aarch64, for Android 24, built by NDK r28b
+readelf -l "$PREFIX/bin/codex-code-mode-host" | grep -A2 TLS   # p_align 0x40 y p_vaddr % 64 == 0 (skew 0)
+readelf -d "$PREFIX/bin/codex-code-mode-host" | grep NEEDED    # libdl/liblog/libm/libc (sin libc++_shared.so)
 ```
+
+### Sandbox de codex en Android (proot)
+
+El sandbox de codex en Android usa el wrapper proot **`codex-linux-sandbox`**
+(instalado por `install.sh` en `$PREFIX/bin`). Es **obligatorio** si
+`sandbox_mode` es `read-only` o `workspace-write`: con los parches 19/20, sin el
+wrapper las tools fallan cerrado (por diseño). Es aislamiento de **conveniencia,
+no una frontera de seguridad**: el guest hereda el env del host y la red real
+(sin netns no hay red aislada); los dirs sensibles (`~/.ssh`, `~/.codex`,
+`~/.aws`, `~/.netrc`, `~/.config/gh`) están ocultos con binds vacíos, pero NO
+confíes secretos de producción dentro del sandbox.
 
