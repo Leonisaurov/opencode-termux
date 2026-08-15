@@ -1,8 +1,8 @@
 diff --git a/codex-rs/sandboxing/src/manager.rs b/codex-rs/sandboxing/src/manager.rs
-index da7d7fc47e..2712b2b0 100644
+index da7d7fc47e..2712b2b08e 100644
 --- a/codex-rs/sandboxing/src/manager.rs
 +++ b/codex-rs/sandboxing/src/manager.rs
-@@ -60,10 +60,10 @@ pub fn get_platform_sandbox(windows_sandbox_enabled: bool) -> Option<SandboxType
+@@ -60,10 +60,10 @@ pub fn get_platform_sandbox(windows_sandbox_enabled: bool) -> Option<SandboxType> {
  pub fn get_platform_sandbox(windows_sandbox_enabled: bool) -> Option<SandboxType> {
      if cfg!(target_os = "macos") {
          Some(SandboxType::MacosSeatbelt)
