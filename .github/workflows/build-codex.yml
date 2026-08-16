@@ -207,7 +207,7 @@ jobs:
           restore-keys: |
             codex-sccache-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-
 
-      # ── Cache: target Cargo incremental (la optimización principal) ──
+      # ── Cache: target Cargo (fingerprints y artefactos reutilizables) ──
       # El script usa CARGO_TARGET_DIR=build/codex-ci/target. Se restaura
       # aunque cambie un parche: Cargo verifica fingerprints contra el nuevo
       # checkout y conserva los crates/artifacts que siguen siendo válidos.

@@ -247,11 +247,11 @@ echo "   toolchain lista ($(elapsed)s)"
 # eliminó: NO soportado en targets *-linux-android con rustc 1.95.0 → error al linkear bins)
 # → NO exportar RUSTFLAGS (evitaría el config.toml o duplicaría flags).
 export PATH="$NDK_BIN:$PATH"
-# Keep Cargo's incremental state in the cacheable target directory. Cargo still
-# fingerprints every package, but an unchanged package reuses its existing
-# artifact; when a small patch changes one crate, incremental rustc state can
-# also reuse unchanged codegen work inside that crate.
-export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-1}"
+# sccache and Rust incremental compilation are mutually exclusive: sccache
+# rejects rustc invocations that carry incremental state. Cargo still
+# fingerprints every package and reuses unchanged artifacts from the cached
+# target directory, while sccache reuses compiler outputs across clean runners.
+export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
 # Retries/tiempos de red para cargo (patrón de codex_build.sh): los fallos de
 # descarga del registry suelen ser transitorios; 3 reintentos + timeout corto.
 export CARGO_NET_RETRY=3
