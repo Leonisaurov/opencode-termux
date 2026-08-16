@@ -241,7 +241,7 @@ index 0000000000..e67536e402
 +    if !authorized(&headers, &api) {
 +        return Err(StatusCode::UNAUTHORIZED);
 +    }
-+    Ok(Json(serde_json::json!({ "ok": true })))
++    Ok(Json(serde_json::Value::Null))
 +}
 +
 +async fn state(
@@ -339,7 +339,7 @@ index 0000000000..e67536e402
 +        },
 +    );
 +    state.history.truncate(80);
-+    Ok(Json(serde_json::json!({ "ok": true })))
++    Ok(Json(serde_json::Value::Null))
 +}
 +
 +async fn steer(
@@ -355,5 +355,5 @@ index 0000000000..e67536e402
 +    api.inner
 +        .sender
 +        .steer(thread_id, action.turn_id, action.text);
-+    Ok(Json(serde_json::json!({ "ok": true })))
++    Ok(Json(serde_json::Value::Null))
 +}
