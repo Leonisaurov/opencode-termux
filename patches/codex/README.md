@@ -13,7 +13,7 @@ Generado desde el checkout local (`git -C codex diff HEAD`) en la rama `main` de
 
 ## Parches y orden de aplicación
 
-Orden **numérico** estricto (01 → 29). Cada parche toca exactamente un archivo (requisito de `scripts/build-codex-ci.sh`); los parches que crean archivos quedan como untracked `??` tras `git apply` — `verify_patched_state` acepta ` M ` y `??`):
+Orden **numérico** estricto (01 → 32). Cada parche toca exactamente un archivo (requisito de `scripts/build-codex-ci.sh`); los parches que crean archivos quedan como untracked `??` tras `git apply` — `verify_patched_state` acepta ` M ` y `??`):
 
 | # | Archivo | Propósito |
 |---|---------|-----------|
@@ -46,6 +46,9 @@ Orden **numérico** estricto (01 → 29). Cada parche toca exactamente un archiv
 | 27 | `codex-rs/tui/src/chatwidget/tool_requests.rs` | Publica solicitudes de comandos/cambios al API opcional y autoacepta prefijos de sesión. |
 | 28 | `codex-rs/tui/src/approval_api.rs` | API autenticada `/v1/state`, `/v1/approvals/:id` y `/v1/steer`; reglas en memoria, sin tocar `default.rules`. |
 | 29 | `codex-rs/tui/src/app/app_server_requests.rs` | Elimina del estado remoto las aprobaciones resueltas localmente desde la TUI. |
+| 30 | `codex-rs/arg0/src/lib.rs` | Omite `try_lock` en Android para los directorios temporales de aliases; bionic no soporta advisory file locks, pero el descriptor permanece abierto para conservar el guard. |
+| 31 | `codex-rs/sandboxing/src/bwrap.rs` | Suprime en Android el aviso de bubblewrap: el port usa `codex-linux-sandbox`/proot y no requiere el prerrequisito Linux de desktop. |
+| 32 | `codex-rs/Cargo.toml` | Embebe la versión del port (`0.134.0-alpha.3`) en lugar de `0.0.0`, para que `codex --version` y `doctor` reporten correctamente la versión instalada. |
 
 ## Comando de aplicación
 
@@ -67,7 +70,7 @@ ntfy solo es un canal remoto adicional. Ver `scripts/codex-ntfy-plugin.md`.
 
 ## Validación
 
-- `git apply --check` individual: 29/29 OK sobre worktree limpio en `50ef7395`.
+- `git apply --check` individual: 32/32 OK sobre worktree limpio en `50ef7395`.
 - `git apply --check` conjunto (wildcard 01-20): OK.
 - `git apply` 01-20 en orden sobre worktree limpio: OK.
 - Aplicados todos sobre el worktree limpio: el diff resultante es **byte-idéntico**

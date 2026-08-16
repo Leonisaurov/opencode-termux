@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # codex-prepare-source.sh - Prepara el código fuente de openai/codex (mismo mecanismo en CI y local):
 #   - verifica/clona el checkout en el ref pinneado (CODEX_REF)
-#   - aplica los parches de patches/codex (orden 01..29) con verify_patched_state
+#   - aplica los parches de patches/codex (orden numérico) con verify_patched_state
 #
 # Comparte la lógica que antes vivía en build-codex-ci.sh ([1/5]+[2/5]) con el
 # build local (codex_build.sh): ambos deben compilar EXACTAMENTE el mismo fuente

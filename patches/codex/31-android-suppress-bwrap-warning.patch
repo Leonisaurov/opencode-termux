@@ -1,0 +1,24 @@
+diff --git a/codex-rs/sandboxing/src/bwrap.rs b/codex-rs/sandboxing/src/bwrap.rs
+--- a/codex-rs/sandboxing/src/bwrap.rs
++++ b/codex-rs/sandboxing/src/bwrap.rs
+@@ -38,9 +38,20 @@ const SYSTEM_BWRAP_PROBE_STDERR_LIMIT_BYTES: u64 = 64 * 1024;
+ 
+ pub fn system_bwrap_warning(permission_profile: &PermissionProfile) -> Option<String> {
++    #[cfg(target_os = "android")]
++    {
++        // Termux uses the port's codex-linux-sandbox/proot wrapper. The
++        // desktop bubblewrap prerequisite is not applicable here.
++        let _ = permission_profile;
++        return None;
++    }
++
++    #[cfg(not(target_os = "android"))]
++    {
+     if !should_warn_about_system_bwrap(permission_profile) {
+         return None;
+     }
+ 
+     let system_bwrap_path = find_system_bwrap_in_path();
+     system_bwrap_warning_for_path(system_bwrap_path.as_deref())
++    }
+ }
