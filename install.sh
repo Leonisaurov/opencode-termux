@@ -1,17 +1,39 @@
 #!/usr/bin/env bash
 # Instalador de opencode-termux
 #
-# Descarga los 3 componentes (bun, opencode, libopentui.so) desde las
+# Descarga los componentes (bun, opencode, libopentui.so y codex) desde las
 # GitHub Releases del repo $GITHUB_REPO (assets publicados por el workflow
-# build-opencode.yml, paso "Package release assets").
+# workflows de build (Codex tiene su propio workflow de release).
 #
-# Uso: ./install.sh [--just bun|opencode|opentui] [--release <tag>] [--help]
+# Uso: ./install.sh [--just bun|opencode|opentui|codex] [--release <tag>] [--help]
+
+# The installer is Bash-only. This guard keeps `sh install.sh` from failing
+# later with obscure array/[[ syntax errors; use `bash -s --` for curl pipes.
+if [ -z "${BASH_VERSION:-}" ]; then
+    echo "Este instalador requiere Bash; usa: curl .../install.sh | bash -s -- <flags>" >&2
+    exit 2
+fi
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VERSION="1.1.0"
+VERSION="1.2.0"
 GITHUB_REPO="Leonisaurov/opencode-termux"
+# Used only when the script was received through stdin and needs to fetch the
+# fork-specific sandbox wrapper. Pin it to the same branch/ref as install.sh.
+CODEX_INSTALL_RAW_REF="${CODEX_INSTALL_RAW_REF:-main}"
+RAW_BASE="https://raw.githubusercontent.com/${GITHUB_REPO}/${CODEX_INSTALL_RAW_REF}"
+
+# In curl|bash mode BASH_SOURCE points to stdin/a file descriptor, not a repo
+# directory. Keep a local directory only when it really contains the wrapper;
+# otherwise install_codex downloads the single required helper from RAW_BASE.
+SCRIPT_DIR=""
+if [ -n "${BASH_SOURCE[0]:-}" ]; then
+    candidate_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
+    if [ -f "$candidate_dir/scripts/codex-linux-sandbox" ]; then
+        SCRIPT_DIR="$candidate_dir"
+    fi
+fi
+
 BUN_VERSION="1.3.14"
 RELEASE_TAG="latest"          # "latest" o un tag concreto (ej: v1.18.11) vía --release
 INSTALL_PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
@@ -82,6 +104,7 @@ COMPONENTES (descargados de GitHub Releases de $GITHUB_REPO):
                        es solo para builds/desarrollo custom)
     codex             Codex CLI (aarch64)                  → \$PREFIX/bin/codex
                       + codex-code-mode-host               → \$PREFIX/bin/codex-code-mode-host
+                      + codex-linux-sandbox (proot)        → \$PREFIX/bin/codex-linux-sandbox
                       (libc++ estático embebido del crate v8 — NO requiere
                        libc++_shared.so; verifícalo con:
                        readelf -d \$PREFIX/bin/codex-code-mode-host | grep NEEDED)
@@ -94,6 +117,17 @@ EJEMPLOS:
     ./install.sh --just codex
     ./install.sh --release v1.18.11     # tag específico
     ./install.sh --just bun --prefix /custom/path
+
+INSTALACIÓN SIN CLONAR:
+    curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPO/codex-ntfy-api/install.sh \\
+      | CODEX_INSTALL_RAW_REF=codex-ntfy-api bash -s -- --just codex
+    # Las flags posteriores a bash -s -- se pasan directamente al instalador.
+    # Tras fusionar esta rama, cambia codex-ntfy-api por main en ambas posiciones.
+
+REQUISITOS DE CODEX:
+    Se necesita el proot de github.com/Leonisaurov/proot-termux en \$PREFIX/bin/proot.
+    El wrapper de sandbox incluido es específico de este fork y depende de
+    sus parches Android; no debe combinarse con un Codex upstream.
 EOF
     exit 0
 }
@@ -143,8 +177,38 @@ check_env() {
     local arch
     arch=$(uname -m)
     if [ "$arch" != "aarch64" ]; then
-        error "Solo aarch64 está soportado (deteectado: $arch)"
+        error "Solo aarch64 está soportado (detectado: $arch)"
         exit 1
+    fi
+
+    : "${TMPDIR:=/data/data/com.termux/files/usr/tmp}"
+    export TMPDIR
+    mkdir -p "$TMPDIR"
+    test -d "$TMPDIR" && test -w "$TMPDIR" || {
+        error "TMPDIR no existe o no es escribible: $TMPDIR"
+        exit 1
+    }
+
+    local required command_name
+    required="curl mktemp tar"
+    if $INSTALL_OPENCODE || $INSTALL_CODEX; then
+        required="$required unzip"
+    fi
+    for command_name in $required; do
+        command -v "$command_name" >/dev/null 2>&1 || {
+            error "Falta '$command_name'. Instálalo con: pkg install $command_name"
+            exit 1
+        }
+    done
+
+    if $INSTALL_CODEX; then
+        local required_proot
+        required_proot="${CODEX_SANDBOX_PROOT:-${PREFIX:-/data/data/com.termux/files/usr}/bin/proot}"
+        if [ ! -x "$required_proot" ]; then
+            error "Falta el proot de github.com/Leonisaurov/proot-termux en $required_proot"
+            error "El wrapper de Codex requiere ese proot específico."
+            exit 1
+        fi
     fi
 
     if [ ! -d "$INSTALL_PREFIX/bin" ]; then
@@ -220,7 +284,7 @@ install_bun() {
     fi
 
     local tmp_dir
-    tmp_dir="$(mktemp -d "${TMPDIR:-/data/data/com.termux/files/usr/tmp}/installer-bun.XXXXXX")"
+    tmp_dir="$(mktemp -d "$TMPDIR/installer-bun.XXXXXX")"
 
     local asset="$tmp_dir/bun-android.tar.gz"
     download_asset "Bun Android (aarch64)" "$url" "$asset" || { rm -rf "$tmp_dir"; return 1; }
@@ -445,7 +509,7 @@ install_opencode() {
     fi
 
     local tmp_dir
-    tmp_dir="$(mktemp -d "${TMPDIR:-/data/data/com.termux/files/usr/tmp}/installer-opencode.XXXXXX")"
+    tmp_dir="$(mktemp -d "$TMPDIR/installer-opencode.XXXXXX")"
 
     local asset="$tmp_dir/opencode.zip"
     download_asset "OpenCode standalone (aarch64)" "$url" "$asset" || { rm -rf "$tmp_dir"; return 1; }
@@ -496,7 +560,7 @@ install_opentui() {
     fi
 
     local tmp_dir
-    tmp_dir="$(mktemp -d "${TMPDIR:-/data/data/com.termux/files/usr/tmp}/installer-opentui.XXXXXX")"
+    tmp_dir="$(mktemp -d "$TMPDIR/installer-opentui.XXXXXX")"
 
     local asset="$tmp_dir/opentui.tar.gz"
     download_asset "libopentui.so (aarch64)" "$url" "$asset" || { rm -rf "$tmp_dir"; return 1; }
@@ -560,7 +624,7 @@ install_codex() {
     fi
 
     local tmp_dir
-    tmp_dir="$(mktemp -d "${TMPDIR:-/data/data/com.termux/files/usr/tmp}/installer-codex.XXXXXX")"
+    tmp_dir="$(mktemp -d "$TMPDIR/installer-codex.XXXXXX")"
 
     local asset="$tmp_dir/codex.zip"
     download_asset "Codex CLI (aarch64)" "$url" "$asset" || { rm -rf "$tmp_dir"; return 1; }
@@ -610,29 +674,37 @@ install_codex() {
     cp "$host_bin" "$INSTALL_PREFIX/bin/codex-code-mode-host"
     chmod +x "$INSTALL_PREFIX/bin/codex-code-mode-host"
 
-    # Sandbox de codex vía proot (aislamiento de filesystem sin root): con los parches
-    # 19/20 el runtime de codex resuelve codex_linux_sandbox_exe desde
-    # $CODEX_LINUX_SANDBOX_EXE o PATH y usa la ruta LinuxSeccomp → spawna este wrapper,
-    # que ejecuta las tools bajo proot (todo read-only salvo workspace y TMPDIR).
-    # El wrapper es OBLIGATORIO si se usa sandbox_mode restrictivo: con los parches
-    # 19/20, si el exe del sandbox no se resuelve, codex falla cerrado (por diseño).
-    if [ -f "$SCRIPT_DIR/scripts/codex-linux-sandbox" ]; then
-        cp "$SCRIPT_DIR/scripts/codex-linux-sandbox" "$INSTALL_PREFIX/bin/codex-linux-sandbox"
-        chmod +x "$INSTALL_PREFIX/bin/codex-linux-sandbox"
-        info "Sandbox de codex activado vía proot: $INSTALL_PREFIX/bin/codex-linux-sandbox"
-        warn "  El wrapper es OBLIGATORIO si usas sandbox_mode restrictivo (read-only o"
-        warn "  workspace-write): con los parches 19/20, sin él las tools fallan cerrado"
-        warn "  (por diseño). Aislamiento de FILESYSTEM (todo read-only salvo workspace y"
-        warn "  TMPDIR); la RED no queda aislada sin root (proot no tiene netns). Requisitos:"
-        warn "    - pkg install proot        (el wrapper usa \$PREFIX/bin/proot)"
-        warn "    - sandbox_mode = \"read-only\" o \"workspace-write\" en la config de codex"
-        warn "    - si proot está en otra ruta: export CODEX_SANDBOX_PROOT=<ruta>"
+    # Sandbox de Codex vía proot (aislamiento de filesystem sin root). Este
+    # wrapper es parte del fork: los parches 19/20 añaden al Codex Android la
+    # resolución de codex-linux-sandbox desde CODEX_LINUX_SANDBOX_EXE/PATH y
+    # seleccionan la ruta LinuxSeccomp que lo invoca. Un Codex upstream no
+    # contiene esas adiciones y no debe combinarse con este wrapper.
+    local sandbox_src="$tmp_dir/codex-linux-sandbox"
+    if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/scripts/codex-linux-sandbox" ]; then
+        sandbox_src="$SCRIPT_DIR/scripts/codex-linux-sandbox"
     else
-        warn "No se encontró scripts/codex-linux-sandbox en este repo; el sandbox de codex"
-        warn "  NO estará disponible: con sandbox_mode restrictivo las tools fallan cerrado"
-        warn "  (por diseño). Usa sandbox_mode = \"disabled\" o instala este repo completo"
-        warn "  (el wrapper vive en scripts/ y install.sh lo copia a \$PREFIX/bin)."
+        info "Descargando wrapper sandbox desde $RAW_BASE/scripts/codex-linux-sandbox..."
+        if ! curl -fsSL "$RAW_BASE/scripts/codex-linux-sandbox" -o "$sandbox_src"; then
+            rm -rf "$tmp_dir"
+            error "No se pudo descargar el wrapper sandbox desde $RAW_BASE"
+            error "Usa CODEX_INSTALL_RAW_REF para fijar la misma rama/ref del install.sh."
+            return 1
+        fi
     fi
+    if ! bash -n "$sandbox_src"; then
+        rm -rf "$tmp_dir"
+        error "El wrapper sandbox descargado no es un script Bash válido"
+        return 1
+    fi
+    cp "$sandbox_src" "$INSTALL_PREFIX/bin/codex-linux-sandbox"
+    chmod +x "$INSTALL_PREFIX/bin/codex-linux-sandbox"
+    info "Sandbox de Codex instalado vía proot: $INSTALL_PREFIX/bin/codex-linux-sandbox"
+    warn "  Este wrapper solo funciona con el Codex Android de este fork."
+    warn "  Requiere los parches Android del fork (en especial 19/20); no lo combines con Codex upstream."
+    warn "  Es obligatorio para sandbox_mode read-only/workspace-write; sin él las tools fallan cerrado."
+    warn "  Aísla FILESYSTEM (workspace y TMPDIR escribibles); la RED no queda aislada sin root."
+    warn "  PATH Termux: usa bash/sh por PATH o /data/data/com.termux/files/usr/bin/bash."
+    warn "  Debe usarse el proot de github.com/Leonisaurov/proot-termux; si está en otra ruta: export CODEX_SANDBOX_PROOT=<ruta>"
     rm -rf "$tmp_dir"
 
     info "Codex instalado en $INSTALL_PREFIX/bin/codex"

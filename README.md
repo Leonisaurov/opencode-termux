@@ -234,6 +234,18 @@ cd opencode-termux
 ./install.sh --just codex
 ```
 
+También puede ejecutarse sin clonar el repositorio. Las opciones se pasan a
+`bash -s --`; el instalador descarga desde Releases y, para Codex, obtiene el
+wrapper sandbox desde el mismo ref raw:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Leonisaurov/opencode-termux/codex-ntfy-api/install.sh \
+  | CODEX_INSTALL_RAW_REF=codex-ntfy-api bash -s -- --just codex
+```
+
+Tras fusionar la rama, sustituye `codex-ntfy-api` por `main` en ambas posiciones.
+El instalador requiere Bash y el proot de `github.com/Leonisaurov/proot-termux`.
+
 Usa `./install.sh --help` para instalar `bun`, `opencode`, `opentui` o todos los componentes, elegir `--release <tag>` o cambiar `--prefix`. El script valida arquitectura, herramientas y `"$TMPDIR"` antes de instalar. `--just codex` instala `codex`, `codex-code-mode-host` y el wrapper `codex-linux-sandbox`; este último requiere el proot de `github.com/Leonisaurov/proot-termux` y solo es compatible con el Codex Android de este fork, porque depende de sus parches Android.
 
 El API opcional de aprobaciones y el sidecar ntfy están documentados en [`scripts/codex-ntfy-plugin.md`](scripts/codex-ntfy-plugin.md); permanecen desactivados si no se exporta `CODEX_APPROVAL_API=1`.
