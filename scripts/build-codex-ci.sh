@@ -267,6 +267,10 @@ start_timer
 # Cargo.lock de upstream queda desincronizado; cargo lo regenera (hay red).
 cargo fetch --target aarch64-linux-android
 echo "   fetch completo ($(elapsed)s)"
+# cargo fetch can rewrite the lockfile; normalize once more after it so the
+# target fingerprint remains stable across fresh CI runners.
+CODEX_NORMALIZE_ONLY=1 bash "$REPO_ROOT/scripts/codex-prepare-source.sh" \
+    "$CODEX_REPO" "$CODEX_REF" "$PATCHES_DIR"
 
 # Artefacto librusty_v8 para codex-code-mode-host (fail-fast si no está publicado)
 echo ":: [4/5] setup_rusty_v8 (artefacto librusty_v8 para codex-code-mode-host)..."

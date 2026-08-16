@@ -80,6 +80,30 @@ PATCH_FILES=( "$PATCHES_DIR"/*.patch )
 shopt -u nullglob
 [ "${#PATCH_FILES[@]}" -gt 0 ] || die "no hay *.patch en $PATCHES_DIR"
 
+# Cargo fingerprints source files partly by mtime. A fresh checkout plus
+# git-apply gives every file the current runner time, so an otherwise identical
+# target cache looks dirty on the next runner. Derive one stable timestamp from
+# the ref and the complete patch set; a different patch set gets a different
+# timestamp, while repeated builds of the same source get identical mtimes.
+normalize_source_mtimes() {
+    local patch_digest source_digest bucket epoch
+    patch_digest="$(for patch in "${PATCH_FILES[@]}"; do sha256sum "$patch" | awk '{print $1}'; done | sha256sum | awk '{print $1}')"
+    source_digest="$(printf '%s\n%s' "$CODEX_REF" "$patch_digest" | sha256sum | awk '{print $1}')"
+    bucket=$((16#${source_digest:0:8} % 100000000))
+    epoch=$((946684800 + bucket)) # stable date in 2000–2003, before build outputs
+    find "$CODEX_REPO/codex-rs" -type d -name target -prune -o -type f \
+        -exec touch -d "@$epoch" {} +
+    msg "   mtimes de fuente normalizados (schema=2, epoch=$epoch)"
+}
+
+# cargo fetch may rewrite Cargo.lock after the normal patch verification. This
+# mode is intentionally limited to mtime normalization and is called once
+# after fetch by the CI/local build scripts.
+if [ "${CODEX_NORMALIZE_ONLY:-0}" = "1" ]; then
+    normalize_source_mtimes
+    exit 0
+fi
+
 # Archivos que DEBEN quedar modificados tras aplicar los parches (extraídos del diff)
 mapfile -t EXPECTED_FILES < <(grep -h '^diff --git a/' "${PATCH_FILES[@]}" | sed -E 's/^diff --git a\///; s/ b\/.*$//')
 [ "${#EXPECTED_FILES[@]}" -eq "${#PATCH_FILES[@]}" ] || die "los parches no tocan exactamente un archivo cada uno (revisa $PATCHES_DIR)"
@@ -131,4 +155,5 @@ else
 fi
 verify_patched_state || die "reproducibilidad fallida: el worktree tras aplicar no coincide byte-por-byte con los parches"
 msg "   reproducibilidad OK: exactamente los ${#EXPECTED_FILES[@]} archivos esperados"
+normalize_source_mtimes
 msg ":: fuente lista: $CODEX_REPO @ $CODEX_REF"
