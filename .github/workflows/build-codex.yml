@@ -221,15 +221,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/codex-ci/target
-          # content-mtime-v1 corresponds to the per-file deterministic mtime
-          # scheme in codex-prepare-source.sh. It is intentionally separate
-          # from pre-normalization targets, but allows reuse across patch sets
-          # when a file's content is unchanged.
-          key: codex-target-content-mtime-v1-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-rust1.95.0-ndk28b-${{ hashFiles('patches/codex/*.patch') }}
+          # content-mtime-v2 corresponds to the file + directory deterministic
+          # mtime scheme in codex-prepare-source.sh. It is intentionally
+          # separate from the v1 per-file-only targets.
+          key: codex-target-content-mtime-v2-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-rust1.95.0-ndk28b-${{ hashFiles('patches/codex/*.patch') }}
           # Migración de una sola vez: si todavía no existe la clave
-          # content-mtime, conserva el target de los esquemas anteriores.
-          # La clave content-mtime-v1 sigue siendo siempre la preferida.
+          # content-mtime-v2 es la única clave primaria válida para el esquema
+          # actual; las anteriores solo sirven para migrar una vez.
           restore-keys: |
+            codex-target-content-mtime-v2-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-rust1.95.0-ndk28b-
             codex-target-content-mtime-v1-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-rust1.95.0-ndk28b-
             codex-target-mtime-v2-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-rust1.95.0-ndk28b-
             codex-target-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-rust1.95.0-ndk28b-
