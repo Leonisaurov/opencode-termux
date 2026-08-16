@@ -113,6 +113,8 @@ jobs:
           key: codex-cargo-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-${{ hashFiles('patches/codex/*.patch') }}
           restore-keys: |
             codex-cargo-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-
+          # Conserva registry parcialmente poblado aunque la compilación falle.
+          save-always: true
 
       # ── Cache: NDK r28b recortado a aarch64 ──
       # actions/cache restaura/escribe como el usuario runner: /opt no es
@@ -206,6 +208,8 @@ jobs:
           key: codex-sccache-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-${{ hashFiles('patches/codex/*.patch') }}
           restore-keys: |
             codex-sccache-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-
+          # Permite que un fallo posterior conserve objetos ya compilados.
+          save-always: true
 
       # ── Cache: target Cargo (fingerprints y artefactos reutilizables) ──
       # El script usa CARGO_TARGET_DIR=build/codex-ci/target. Se restaura
@@ -220,6 +224,8 @@ jobs:
           key: codex-target-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-rust1.95.0-ndk28b-${{ hashFiles('patches/codex/*.patch') }}
           restore-keys: |
             codex-target-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-rust1.95.0-ndk28b-
+          # Guarda fingerprints y artefactos parciales para el siguiente intento.
+          save-always: true
 
       # El par rusty_v8 se verifica con su manifest antes de usarse. Cachearlo
       # evita repetir la descarga cuando solo cambian scripts/parches de Codex.

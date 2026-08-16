@@ -7,11 +7,10 @@ index 918bb091f0..1b50c0be1a 100644
                  Ok(true)
              }
 +            AppCommand::Steer { items, turn_id } => app_server
-+                .turn_steer(thread_id, turn_id, items.to_vec())
++                .turn_steer(thread_id, turn_id.clone(), items.to_vec())
 +                .await
 +                .map(|_| true)
-+                .map_err(|error| std::io::Error::other(error.to_string())),
++                .map_err(|error| color_eyre::eyre::eyre!(error)),
              AppCommand::UserTurn {
                  items,
                  cwd,
-
