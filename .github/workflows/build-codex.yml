@@ -227,7 +227,12 @@ jobs:
           # when a file's content is unchanged.
           key: codex-target-content-mtime-v1-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-rust1.95.0-ndk28b-${{ hashFiles('patches/codex/*.patch') }}
           restore-keys: |
+            # Migración de una sola vez: si todavía no existe la clave
+            # content-mtime, conserva el target de los esquemas anteriores.
+            # La clave content-mtime-v1 sigue siendo siempre la preferida.
             codex-target-content-mtime-v1-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-rust1.95.0-ndk28b-
+            codex-target-mtime-v2-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-rust1.95.0-ndk28b-
+            codex-target-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-rust1.95.0-ndk28b-
           # Guarda fingerprints y artefactos parciales para el siguiente intento.
           save-always: true
 
