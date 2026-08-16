@@ -41,4 +41,3 @@ index b9ba8108f3..81441df743 100644
          let changed_paths = ev.changes.keys().cloned().collect();
          let request = ApprovalRequest::ApplyPatch(ApplyPatchApprovalRequest {
              thread_id: self.thread_id.unwrap_or_default(),
-
