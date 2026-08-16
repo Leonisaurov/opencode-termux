@@ -112,7 +112,10 @@ PORT_ANDROID_API="${PORT_DEFAULTS[3]:-}"
 CODEX_REF="${CODEX_REF:-$PORT_CODEX_REF}"
 CODEX_VERSION="${CODEX_VERSION:-$PORT_CODEX_VERSION}"
 JOBS="${JOBS:-2}"
-CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$WORK_DIR/target}"
+# Export it: Cargo only honors CARGO_TARGET_DIR from its process environment.
+# Without export, Cargo silently writes to CODEX_SRC/target while the cache and
+# packaging stages inspect WORK_DIR/target, defeating reuse and hiding outputs.
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$WORK_DIR/target}"
 # CODEX_BINS: binarios a compilar/empaquetar (el workflow lo pasa como input
 # `bins` vía env CODEX_BINS). Nombres de binario separados por espacios →
 # crates del workspace: codex→codex-cli y codex-code-mode-host. El TUI se
@@ -316,6 +319,11 @@ start_timer
 cargo build --release --target aarch64-linux-android -j "$JOBS" "${PACKAGES_ARGS[@]}"
 echo "   build completo ($(elapsed)s)"
 
+# Fail early with the actual Cargo output directory if the environment or a
+# future toolchain change ignores CARGO_TARGET_DIR.
+RELEASE_DIR="$CARGO_TARGET_DIR/aarch64-linux-android/release"
+[ -d "$RELEASE_DIR" ] || die "Cargo no creó el directorio esperado: $RELEASE_DIR (CARGO_TARGET_DIR no fue respetado)"
+
 # ── [5/5] Empaquetar ──
 # Solo se copian/verifican/empaquetan los binarios de CODEX_BINS. Un binario
 # listado pero no compilado se omite (p.ej. build SOLO del host no produce
@@ -324,7 +332,7 @@ start_timer
 echo ":: [5/5] Empaquetando..."
 ZIP_FILES=()
 for bin in $CODEX_BINS; do
-    bin_src="$CARGO_TARGET_DIR/aarch64-linux-android/release/$bin"
+    bin_src="$RELEASE_DIR/$bin"
     if [ -f "$bin_src" ] && [ -x "$bin_src" ]; then
         dst="$WORK_DIR/$bin"
         [ "$bin" = "codex" ] && dst="$WORK_DIR/codex-android"   # renombre histórico en el zip
