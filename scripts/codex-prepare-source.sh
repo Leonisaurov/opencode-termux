@@ -82,18 +82,58 @@ shopt -u nullglob
 
 # Cargo fingerprints source files partly by mtime. A fresh checkout plus
 # git-apply gives every file the current runner time, so an otherwise identical
-# target cache looks dirty on the next runner. Derive one stable timestamp from
-# the ref and the complete patch set; a different patch set gets a different
-# timestamp, while repeated builds of the same source get identical mtimes.
+# target cache looks dirty on the next runner. Give each file a stable timestamp
+# derived from its own content: unchanged files keep the same fingerprint even
+# when another patch changes, so Cargo can rebuild only the affected crates.
 normalize_source_mtimes() {
-    local patch_digest source_digest bucket epoch
+    local stage="${CODEX_SOURCE_MTIME_STAGE:-pre}"
+    local patch_digest base_key lock_digest key marker files count
+    case "$stage" in
+        pre|post) ;;
+        *) die "CODEX_SOURCE_MTIME_STAGE inválido: $stage (usa pre o post)" ;;
+    esac
     patch_digest="$(for patch in "${PATCH_FILES[@]}"; do sha256sum "$patch" | awk '{print $1}'; done | sha256sum | awk '{print $1}')"
-    source_digest="$(printf '%s\n%s' "$CODEX_REF" "$patch_digest" | sha256sum | awk '{print $1}')"
-    bucket=$((16#${source_digest:0:8} % 100000000))
-    epoch=$((946684800 + bucket)) # stable date in 2000–2003, before build outputs
-    find "$CODEX_REPO/codex-rs" -type d -name target -prune -o -type f \
-        -exec touch -d "@$epoch" {} +
-    msg "   mtimes de fuente normalizados (schema=2, epoch=$epoch)"
+    base_key="schema=3|ref=$CODEX_REF|patches=$patch_digest"
+    marker="${CODEX_SOURCE_MTIME_MARKER:-$CODEX_REPO/.git/codex-source-mtime-v3}"
+    mkdir -p "$(dirname "$marker")"
+
+    if [ "$stage" = "pre" ]; then
+        key="$base_key|stage=pre"
+        if [ -f "$marker.pre" ] && [ "$(cat "$marker.pre")" = "$key" ]; then
+            msg "   mtimes de fuente ya normalizados (schema=3, skip)"
+            return 0
+        fi
+        files=( "$CODEX_REPO/codex-rs" )
+    else
+        lock_digest="$(sha256sum "$CODEX_REPO/codex-rs/Cargo.lock" 2>/dev/null | awk '{print $1}' || true)"
+        key="$base_key|stage=post|lock=$lock_digest"
+        if [ -f "$marker.post" ] && [ "$(cat "$marker.post")" = "$key" ]; then
+            msg "   mtime de Cargo.lock ya normalizado (schema=3, skip)"
+            return 0
+        fi
+        files=( "$CODEX_REPO/codex-rs/Cargo.lock" )
+    fi
+
+    # One Perl process handles all hashes and utime calls. A shell loop that
+    # starts sha256sum/awk/touch for each of ~5k files costs over a minute on
+    # Termux; this keeps the normalization below a second or two on CI/local.
+    count="$(find "${files[@]}" -type d -name target -prune -o -type f -print0 \
+        | perl -0ne '
+            use strict; use warnings; use Digest::SHA;
+            my $count = 0;
+            for my $file (split /\0/) {
+                next unless length $file;
+                my $sha = Digest::SHA->new(256);
+                $sha->addfile($file);
+                my $bucket = hex(substr($sha->hexdigest, 0, 8)) % 100000000;
+                my $epoch = 946684800 + $bucket;
+                utime($epoch, $epoch, $file) or die "utime $file: $!\n";
+                $count++;
+            }
+            print "$count\n";
+        ' )"
+    printf '%s\n' "$key" > "$marker.$stage"
+    msg "   mtimes de fuente normalizados por contenido (schema=3, archivos=$count, etapa=$stage)"
 }
 
 # cargo fetch may rewrite Cargo.lock after the normal patch verification. This
