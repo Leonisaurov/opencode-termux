@@ -1,0 +1,14 @@
+diff --git a/codex-rs/tui/src/app/app_server_requests.rs b/codex-rs/tui/src/app/app_server_requests.rs
+--- a/codex-rs/tui/src/app/app_server_requests.rs
++++ b/codex-rs/tui/src/app/app_server_requests.rs
+@@ -186,2 +186,10 @@
+         let op: AppCommand = op.into();
++        match &op {
++            AppCommand::ExecApproval { id, .. } | AppCommand::PatchApproval { id, .. } => {
++                if let Some(api) = crate::approval_api::ApprovalApi::global() {
++                    api.clear(id);
++                }
++            }
++            _ => {}
++        }
+         let resolution = match &op {

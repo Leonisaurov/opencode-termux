@@ -19,14 +19,14 @@
 #   JOBS       (default 2)
 #   WORK_DIR   (default: $REPO_ROOT/build/codex-ci)
 #   CODEX_REPO (default: $WORK_DIR/codex) — raíz del checkout de openai/codex
-#   CODEX_SRC  (default: $CODEX_REPO/codex-rs) — workspace Rust (Cargo/rust-toolchain/target)
+#   CODEX_SRC  (default: $CODEX_REPO/codex-rs) — workspace Rust (Cargo/rust-toolchain)
+#   CARGO_TARGET_DIR (default: $WORK_DIR/target) — target incremental/cache directory
 #   ANDROID_NDK_HOME (obligatoria)
 #   REPO_ROOT  (default: raíz de este repo)
 #   PATCHES_DIR (default: $REPO_ROOT/patches/codex)
 set -euo pipefail
 
 # ── Helpers ──
-msg() { echo "$*"; }
 start_timer() { START_TS=$(date +%s); }
 elapsed() { local end=$(date +%s); echo $((end - START_TS)); }
 BUILD_START_TS=$(date +%s)
@@ -70,9 +70,15 @@ setup_rusty_v8() {
 
     # Validación del manifest: exactamente 2 líneas ("sha256  nombre" por archivo)
     # y checksums correctos contra los archivos descargados.
-    local lines=""
+    local lines="" expected_manifest="" actual_manifest=""
     lines="$(wc -l < "$RUSTY_V8_DIR/$RUSTY_V8_MANIFEST_NAME" | tr -d ' ')"
     [ "$lines" = "2" ] || die "manifest rusty_v8 inválido: $lines líneas (esperado 2): $RUSTY_V8_DIR/$RUSTY_V8_MANIFEST_NAME"
+    expected_manifest="$(printf '%s\n%s' \
+        "$(sha256sum "$RUSTY_V8_DIR/$RUSTY_V8_ARCHIVE_NAME" | awk '{print $1}')  $RUSTY_V8_ARCHIVE_NAME" \
+        "$(sha256sum "$RUSTY_V8_DIR/$RUSTY_V8_BINDING_NAME" | awk '{print $1}')  $RUSTY_V8_BINDING_NAME")"
+    actual_manifest="$(cat "$RUSTY_V8_DIR/$RUSTY_V8_MANIFEST_NAME")"
+    [ "$actual_manifest" = "$expected_manifest" ] \
+        || die "manifest rusty_v8 no coincide con los nombres/checksums esperados"
     ( cd "$RUSTY_V8_DIR" && sha256sum -c "$RUSTY_V8_MANIFEST_NAME" ) \
         || die "checksum rusty_v8 falló (artefacto corrupto); borra $RUSTY_V8_DIR y reintenta"
 
@@ -86,23 +92,37 @@ REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 PATCHES_DIR="${PATCHES_DIR:-$REPO_ROOT/patches/codex}"
 WORK_DIR="${WORK_DIR:-$REPO_ROOT/build/codex-ci}"
 # CODEX_REPO = raíz del checkout de openai/codex (operaciones git: fetch/checkout/apply/status/describe).
-# CODEX_SRC   = workspace Rust del repo (codex-rs/): rust-toolchain.toml, Cargo.toml y target/.
+# CODEX_SRC   = workspace Rust del repo (codex-rs/): rust-toolchain.toml y Cargo.toml.
 CODEX_REPO="${CODEX_REPO:-$WORK_DIR/codex}"
 CODEX_SRC="${CODEX_SRC:-$CODEX_REPO/codex-rs}"
-CODEX_REF="${CODEX_REF:-50ef7395faee1d0e2d01730f9636aa06091c7be3}"
-CODEX_VERSION="${CODEX_VERSION:-}"
+# Read the canonical pins without sourcing scripts/env.sh into this process:
+# env.sh also defines the shared OpenCode build directory, while this script
+# deliberately owns build/codex-ci. Explicit environment overrides still win.
+PORT_ENV_FILE="$REPO_ROOT/scripts/env.sh"
+[ -f "$PORT_ENV_FILE" ] || die "no existe la fuente de pins: $PORT_ENV_FILE"
+mapfile -t PORT_DEFAULTS < <(
+    source "$PORT_ENV_FILE" >/dev/null
+    printf '%s\n' "$CODEX_REF" "$CODEX_VERSION" "$CODEX_V8_VERSION" "$ANDROID_API"
+)
+PORT_CODEX_REF="${PORT_DEFAULTS[0]:-}"
+PORT_CODEX_VERSION="${PORT_DEFAULTS[1]:-}"
+PORT_V8_VERSION="${PORT_DEFAULTS[2]:-}"
+PORT_ANDROID_API="${PORT_DEFAULTS[3]:-}"
+CODEX_REF="${CODEX_REF:-$PORT_CODEX_REF}"
+CODEX_VERSION="${CODEX_VERSION:-$PORT_CODEX_VERSION}"
 JOBS="${JOBS:-2}"
+CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$WORK_DIR/target}"
 # CODEX_BINS: binarios a compilar/empaquetar (el workflow lo pasa como input
 # `bins` vía env CODEX_BINS). Nombres de binario separados por espacios →
-# crates del workspace: codex→codex-cli, codex-tui, codex-linux-sandbox,
-# codex-code-mode-host. Permite builds parciales (p.ej. SOLO el host
-# codex-code-mode-host) reutilizando el cache de sccache del CI.
-CODEX_BINS="${CODEX_BINS:-codex codex-tui codex-linux-sandbox codex-code-mode-host}"
+# crates del workspace: codex→codex-cli y codex-code-mode-host. El TUI se
+# enlaza dentro del CLI; el sandbox Android es el wrapper proot instalado
+# aparte, así que ninguno de los dos ELF auxiliares se publica.
+CODEX_BINS="${CODEX_BINS:-codex codex-code-mode-host}"
 # API level de bionic objetivo. Política del repo: 24 (mínimo para Termux 64-bit,
 # igual que el port kilo, target aarch64-linux-android.24). OJO: NO bajar de 23 —
 # `openpty` (portable_pty/codex_utils_pty) solo existe en bionic desde API 23; un
 # linker de API 21 produce "undefined symbol: openpty" en el linkeo.
-ANDROID_API="${ANDROID_API:-24}"
+ANDROID_API="${ANDROID_API:-$PORT_ANDROID_API}"
 
 # ── Artefacto rusty_v8 (crate v8 = 150.4.0) para codex-code-mode-host ──
 # El binario `codex-code-mode-host` (runtime companion con V8 embebido) depende
@@ -115,28 +135,14 @@ ANDROID_API="${ANDROID_API:-24}"
 # (tonic/axum/tokio/prost) ya compila para Android con el parche 08 y deps en
 # Cargo.lock. Fuente de verdad de la versión: scripts/env.sh (CODEX_V8_VERSION);
 # override con V8_VERSION.
-V8_VERSION="${V8_VERSION:-${CODEX_V8_VERSION:-}}"
-if [ -z "$V8_VERSION" ] && [ -f "$REPO_ROOT/scripts/env.sh" ]; then
-    # Parse tolerante de CODEX_V8_VERSION sin source de env.sh (evita efectos
-    # laterales: banner + defaults de JOBS/ANDROID_NDK_HOME/REPO_ROOT). Maneja
-    # los dos formatos posibles:
-    #   export CODEX_V8_VERSION="${CODEX_V8_VERSION:-150.4.0}"  → param default
-    #   export CODEX_V8_VERSION="150.4.0"                        → literal
-    v8_env_line="$(grep -E '^[[:space:]]*export[[:space:]]+CODEX_V8_VERSION=' "$REPO_ROOT/scripts/env.sh" | head -1 || true)"
-    if [ -n "$v8_env_line" ]; then
-        v8_env_line="${v8_env_line#*=}"
-        v8_env_line="${v8_env_line%\"}"; v8_env_line="${v8_env_line#\"}"
-        if [[ "$v8_env_line" =~ ^\$\{.*:-(.*)\}$ ]]; then
-            V8_VERSION="${BASH_REMATCH[1]}"
-        else
-            V8_VERSION="$v8_env_line"
-        fi
-    fi
-fi
-V8_VERSION="${V8_VERSION:-150.4.0}"
+V8_VERSION="${V8_VERSION:-${CODEX_V8_VERSION:-$PORT_V8_VERSION}}"
+[ -n "$V8_VERSION" ] || die "CODEX_V8_VERSION no puede estar vacío"
 # Repo que publica la Release del artefacto (en CI = este repo; override local).
 RUSTY_V8_REPO="${RUSTY_V8_REPO:-${GITHUB_REPOSITORY:-Leonisaurov/opencode-termux}}"
-RUSTY_V8_DIR="${RUSTY_V8_DIR:-${RUNNER_TEMP:-$WORK_DIR}/rusty-v8}"
+# Keep the verified release pair in the build directory so CI can cache it and
+# local/CI layouts remain predictable. Override when a caller supplies its own
+# artifact directory.
+RUSTY_V8_DIR="${RUSTY_V8_DIR:-$WORK_DIR/rusty-v8}"
 RUSTY_V8_ARCHIVE_NAME="librusty_v8_ptrcomp_sandbox_release_aarch64-linux-android.a.gz"
 RUSTY_V8_BINDING_NAME="src_binding_ptrcomp_sandbox_release_aarch64-linux-android.rs"
 RUSTY_V8_MANIFEST_NAME="rusty_v8_ptrcomp_sandbox_release_aarch64-linux-android.sha256"
@@ -147,7 +153,8 @@ RUSTY_V8_MANIFEST_NAME="rusty_v8_ptrcomp_sandbox_release_aarch64-linux-android.s
 [[ -n "$CODEX_REF" ]] || die "CODEX_REF no puede estar vacío"
 [[ "$CODEX_REF" =~ ^[0-9A-Za-z._/-]+$ ]] \
     || die "CODEX_REF debe ser un commit sha de 40 hex o un tag (recibido: '$CODEX_REF')"
-[[ "$JOBS" =~ ^[0-9]+$ ]] || die "JOBS debe ser un entero positivo (recibido: '$JOBS')"
+[[ "$JOBS" =~ ^[1-9][0-9]*$ ]] || die "JOBS debe ser un entero positivo (recibido: '$JOBS')"
+[[ "$ANDROID_API" =~ ^[0-9]+$ ]] || die "ANDROID_API debe ser numérico (recibido: '$ANDROID_API')"
 
 # ── Validación: ANDROID_NDK_HOME obligatoria ──
 # El config.toml parcheado (01-cargo-config.patch) referencia el linker y ar POR NOMBRE
@@ -165,6 +172,8 @@ for dir in "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/*/bin; do
     fi
 done
 [ -n "$NDK_BIN" ] || die "no se encontró toolchains/llvm/prebuilt/*/bin con aarch64-linux-android*-clang en $ANDROID_NDK_HOME"
+LLVM_STRIP="$NDK_BIN/llvm-strip"
+[ -x "$LLVM_STRIP" ] || die "no se encontró llvm-strip en $NDK_BIN"
 
 # El config.toml parcheado usa el nombre SIN sufijo API ("aarch64-linux-android-clang").
 # El NDK solo trae los sufijados (aarch64-linux-androidNN-clang) → creamos/forzamos el
@@ -193,12 +202,14 @@ case "$link_target" in
 esac
 
 mkdir -p "$WORK_DIR"
+mkdir -p "$CARGO_TARGET_DIR"
 echo "== Codex Android Build (CI) =="
 echo "   Ref:        $CODEX_REF"
 echo "   Work dir:   $WORK_DIR"
 echo "   NDK bin:    $NDK_BIN"
 echo "   API:        $ANDROID_API"
 echo "   JOBS:       $JOBS"
+echo "   Cargo target: $CARGO_TARGET_DIR"
 
 # ── [1/5]-[2/5] Preparación del código fuente (compartida con el build local) ──
 # Clona/verifica el checkout en CODEX_REF y aplica los parches de PATCHES_DIR con
@@ -235,7 +246,11 @@ echo "   toolchain lista ($(elapsed)s)"
 # eliminó: NO soportado en targets *-linux-android con rustc 1.95.0 → error al linkear bins)
 # → NO exportar RUSTFLAGS (evitaría el config.toml o duplicaría flags).
 export PATH="$NDK_BIN:$PATH"
-export CARGO_INCREMENTAL=0
+# Keep Cargo's incremental state in the cacheable target directory. Cargo still
+# fingerprints every package, but an unchanged package reuses its existing
+# artifact; when a small patch changes one crate, incremental rustc state can
+# also reuse unchanged codegen work inside that crate.
+export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-1}"
 # Retries/tiempos de red para cargo (patrón de codex_build.sh): los fallos de
 # descarga del registry suelen ser transitorios; 3 reintentos + timeout corto.
 export CARGO_NET_RETRY=3
@@ -257,16 +272,16 @@ setup_rusty_v8
 # codex-code-mode-host (crate v8, use_custom_libcxx) referencia símbolos que
 # bionic API 24 no exporta: __clear_cache (compiler-rt del NDK), aligned_alloc,
 # strtof_l y strtod_l. Se compila scripts/bionic-stubs.c contra el clang del NDK
-# ($api_clang, API $ANDROID_API) a $CODEX_SRC/target/bionic-stubs.o (target/ está
-# gitignored → no rompe verify_patched_state) y se localiza
+# ($api_clang, API $ANDROID_API) a $CARGO_TARGET_DIR/bionic-stubs.o (target/ está
+# fuera del checkout → no rompe verify_patched_state) y se localiza
 # libclang_rt.builtins-aarch64-android.a del NDK. Las rutas llegan al link vía el
 # build.rs del crate host (parche 16) leyendo las env vars — NO vía RUSTFLAGS
 # (reemplazaría los rustflags del .cargo/config.toml parcheado).
 echo ":: [4/5] Stubs bionic + compiler-rt del NDK (link del host)..."
-mkdir -p "$CODEX_SRC/target"
-"$api_clang" -c -O2 -Wall -Wextra "$REPO_ROOT/scripts/bionic-stubs.c" -o "$CODEX_SRC/target/bionic-stubs.o" \
+mkdir -p "$CARGO_TARGET_DIR"
+"$api_clang" -c -O2 -Wall -Wextra "$REPO_ROOT/scripts/bionic-stubs.c" -o "$CARGO_TARGET_DIR/bionic-stubs.o" \
     || die "falló la compilación de scripts/bionic-stubs.c con $api_clang (API $ANDROID_API)"
-export CODEX_BIONIC_STUBS_O="$CODEX_SRC/target/bionic-stubs.o"
+export CODEX_BIONIC_STUBS_O="$CARGO_TARGET_DIR/bionic-stubs.o"
 CODEX_CLANG_RT_BUILTINS="$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" \
     -name 'libclang_rt.builtins-aarch64-android.a' 2>/dev/null | head -1 || true)"
 [ -n "$CODEX_CLANG_RT_BUILTINS" ] || die "no se encontró libclang_rt.builtins-aarch64-android.a en $ANDROID_NDK_HOME/toolchains/llvm/prebuilt"
@@ -278,18 +293,20 @@ echo "   compiler-rt:  $CODEX_CLANG_RT_BUILTINS"
 bin_to_crate() {
     case "$1" in
         codex)                echo "codex-cli" ;;
-        codex-tui)            echo "codex-tui" ;;
-        codex-linux-sandbox)  echo "codex-linux-sandbox" ;;
         codex-code-mode-host) echo "codex-code-mode-host" ;;
         *) echo "" ;;
     esac
 }
 PACKAGES_ARGS=()
+declare -A SEEN_BINS=()
 for bin in $CODEX_BINS; do
     crate="$(bin_to_crate "$bin")"
-    [ -n "$crate" ] || die "CODEX_BINS contiene un binario desconocido: '$bin' (válidos: codex, codex-tui, codex-linux-sandbox, codex-code-mode-host)"
+    [ -n "$crate" ] || die "CODEX_BINS contiene un binario no publicable: '$bin' (válidos: codex, codex-code-mode-host)"
+    [ -z "${SEEN_BINS[$bin]+x}" ] || die "CODEX_BINS contiene el binario repetido: '$bin'"
+    SEEN_BINS[$bin]=1
     PACKAGES_ARGS+=("-p" "$crate")
 done
+[ "${#PACKAGES_ARGS[@]}" -gt 0 ] || die "CODEX_BINS no contiene ningún binario"
 echo ":: [4/5] bins a compilar: $CODEX_BINS"
 echo ":: [4/5] cargo build --release --target aarch64-linux-android (JOBS=$JOBS)..."
 start_timer
@@ -306,12 +323,16 @@ start_timer
 echo ":: [5/5] Empaquetando..."
 ZIP_FILES=()
 for bin in $CODEX_BINS; do
-    bin_src="$CODEX_SRC/target/aarch64-linux-android/release/$bin"
+    bin_src="$CARGO_TARGET_DIR/aarch64-linux-android/release/$bin"
     if [ -f "$bin_src" ] && [ -x "$bin_src" ]; then
         dst="$WORK_DIR/$bin"
         [ "$bin" = "codex" ] && dst="$WORK_DIR/codex-android"   # renombre histórico en el zip
         cp "$bin_src" "$dst"
         chmod +x "$dst"
+        # Keep Cargo's unstripped target for incremental reuse, but publish a
+        # compact runtime artifact without DWARF debug sections.
+        "$LLVM_STRIP" --strip-debug "$dst" \
+            || die "llvm-strip falló para el binario empaquetado: $dst"
         ZIP_FILES+=("$(basename "$dst")")
         echo "   binario: $dst ($(du -h "$dst" | cut -f1))"
         echo "   file: $(file "$dst")"
@@ -319,7 +340,7 @@ for bin in $CODEX_BINS; do
         echo "   binario no presente (omitido): $bin"
     fi
 done
-[ "${#ZIP_FILES[@]}" -gt 0 ] || die "ningún binario de CODEX_BINS ($CODEX_BINS) se compiló en $CODEX_SRC/target/aarch64-linux-android/release"
+[ "${#ZIP_FILES[@]}" -gt 0 ] || die "ningún binario de CODEX_BINS ($CODEX_BINS) se compiló en $CARGO_TARGET_DIR/aarch64-linux-android/release"
 
 # Verificación de arquitectura de los binarios empaquetados (readelf si está
 # disponible; fallback file).
@@ -385,11 +406,16 @@ esac
 
 ZIP_NAME="codex-v${CODEX_VERSION}-android-aarch64.zip"
 command -v zip >/dev/null 2>&1 || die "zip no está instalado (apt install zip)"
-( cd "$WORK_DIR" && zip -q -j "$ZIP_NAME" "${ZIP_FILES[@]}" )
+# No actualices un zip anterior: zip conserva entradas que ya no están en
+# ZIP_FILES (p.ej. codex-tui/codex-linux-sandbox de releases viejos).
+rm -f "$WORK_DIR/$ZIP_NAME"
+( cd "$WORK_DIR" && zip -9 -q -j "$ZIP_NAME" "${ZIP_FILES[@]}" )
 
 # Emitir la versión para los pasos siguientes del workflow (GITHUB_OUTPUT / GITHUB_ENV)
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
     echo "version=$CODEX_VERSION" >> "$GITHUB_OUTPUT"
+    echo "zip_name=$ZIP_NAME" >> "$GITHUB_OUTPUT"
+    echo "bins=$CODEX_BINS" >> "$GITHUB_OUTPUT"
 fi
 if [ -n "${GITHUB_ENV:-}" ]; then
     echo "CODEX_VERSION=$CODEX_VERSION" >> "$GITHUB_ENV"

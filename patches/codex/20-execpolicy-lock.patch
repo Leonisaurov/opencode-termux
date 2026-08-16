@@ -1,0 +1,17 @@
+diff --git a/codex-rs/execpolicy/src/amend.rs b/codex-rs/execpolicy/src/amend.rs
+index 8f2f7f1a2a..0000000000 100644
+--- a/codex-rs/execpolicy/src/amend.rs
++++ b/codex-rs/execpolicy/src/amend.rs
+@@ -153,8 +153,12 @@ fn append_locked_line(policy_path: &Path, line: &str) -> Result<(), AmendError> {
+         .map_err(|source| AmendError::OpenPolicyFile {
+             path: policy_path.to_path_buf(),
+             source,
+         })?;
++    // CODEX-TERMUX-ANDROID-PATCH: std::fs::File::lock is unsupported on
++    // Android/bionic (ErrorKind::Unsupported). The Termux port is a single-user
++    // environment, so skip the advisory flock while preserving it elsewhere.
++    #[cfg(not(target_os = "android"))]
+     file.lock().map_err(|source| AmendError::LockPolicyFile {
+         path: policy_path.to_path_buf(),
+         source,
+     })?;

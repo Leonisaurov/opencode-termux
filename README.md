@@ -1,29 +1,76 @@
-# opencode-termux
+# opencode-termux — Ports nativos de CLIs de IA para Termux
 
-Soporte de [Bun](https://bun.sh) para Android/Termux (aarch64).
-Originalmente para cross-compilar [OpenCode](https://github.com/anomalyco/opencode), ahora también como base para ejecutar Bun y sus paquetes en Termux.
+Infraestructura de **ports nativos para Android/Termux** (aarch64) basada en [Bun](https://bun.sh) cross-compilado. Compila dos CLIs de IA de primera clase sobre el mismo pipeline (**Android Bun + libopentui.so**):
+
+- **[OpenCode](https://github.com/anomalyco/opencode)** — build en CI (GitHub Actions, runner ARM64 nativo)
+- **[Kilo Code CLI](https://github.com/Kilo-Org/kilocode)** v7.4.20 — port local en Termux (fork de opencode)
 
 ## Objetivos
 
-- **Cross-compilar Bun 1.3.14** para Android ARM64 con parches necesarios
-- **Compilar OpenCode** para Android ARM64 como standalone binary
+- **Cross-compilar Bun 1.3.14** para Android ARM64 con parches necesarios (base de ambos ports)
+- **Compilar OpenCode** para Android ARM64 como standalone binary (CI)
+- **Compilar Kilo Code CLI v7.4.20** para Android ARM64 como standalone binary (local en Termux)
 - **Soporte global** de paquetes npm en Termux via `bun add -g`
+
+## Puertos
+
+Dos casos de uso de primera clase sobre el mismo pipeline (Android Bun + libopentui.so):
+
+| | OpenCode | Kilo Code CLI |
+|---|----------|---------------|
+| **Fuente** | [anomalyco/opencode](https://github.com/anomalyco/opencode) (default `v1.18.11`) | [Kilo-Org/kilocode](https://github.com/Kilo-Org/kilocode) `v7.4.20` (fork de opencode) |
+| **Dónde se compila** | GitHub Actions — `build-opencode.yml` (runner ARM64 nativo) | Local en Termux — `./kilocode_build.sh` (integración CI pendiente) |
+| **Binary resultante** | `opencode-android` + Release con 3 assets (opencode zip + bun tar.gz + libopentui.so tar.gz) | `./kilo-android` (standalone ~149 MB) |
+| **Piezas OpenTUI** | `@opentui/*` **0.4.5** | `@opentui/*` **0.3.4** |
+| **Verificación** | CI + `./install.sh` | TUI funcional en pty real; modelo de IA responde |
+
+### OpenCode
+
+```bash
+# Build en CI (runner ARM64 nativo — host y target ARM64 coinciden)
+gh workflow run build-opencode.yml --ref update-v1.18.6
+
+# Build local (requiere host x86_64; NO en Termux — OOM killer)
+source scripts/env.sh
+./scripts/apply-patches.sh
+./scripts/build-bun.sh        # ~45 min
+./scripts/build-opencode.sh
+
+# Instalar en Termux (descarga GitHub Releases, NO compila)
+./install.sh --just opencode --release v1.18.11
+```
+
+### Kilo Code CLI (port local)
+
+```bash
+# Build local en Termux (fingerprint incremental; skip total si nada cambió)
+./kilocode_build.sh          # produce ./kilo-android
+./kilo-android --version     # → 7.4.20
+./kilo-android --help
+./kilo-android models        # 283 modelos del snapshot models.dev baked
+```
+
+> Detalles del port de Kilo (src, hallazgos del toolchain, fix de la TUI) en [AGENTS.md](AGENTS.md).
 
 ## Pipeline actual
 
 ```
-build-bun.yml → Android Bun ARM64 (con parches de compatibilidad)
+build-bun.yml ──→ Android Bun ARM64 (con parches de compatibilidad)
      ↓
-build-opencode.yml → module graph transplant + raw append → OpenCode ARM64
+build-opentui.yml ──→ libopentui.so (zig 0.15.2 estándar, aarch64-linux-musl)
+     ↓
+build-opencode.yml ──→ runner ARM64 nativo (ubuntu-24.04-arm)
+                  ──→ --compile-executable-path=<android-bun>
+                  ──→ OpenCode ARM64 standalone + Release (3 assets)
 ```
 
-## Pipeline futuro (termux-docker)
-
-```
-build-bun.yml → Android Bun ARM64
-     ↓
-build-opencode-docker.yml → termux-docker + QEMU → bun build --compile nativo
-```
+> **Nota**: `build-opencode-docker.yml` fue ELIMINADO (jul 2026) — el runner
+> ARM64 nativo de GitHub reemplaza el approach termux-docker/QEMU.
+> El port de Kilo reutiliza este mismo pipeline en **local en Termux**
+> (`./kilocode_build.sh`): Android Bun + libopentui.so, con las piezas que
+> cataloga Kilo v7.4.20 (`@opentui/*` 0.3.4 en vez de 0.4.5).
+> El pipeline detallado y las versiones viven en [AGENTS.md](AGENTS.md) y
+> `scripts/env.sh`.
 
 ## Stack
 
@@ -172,31 +219,54 @@ section injection.
 | `webkit-android-<commit>-<patch_hash>` | WebKit build |
 | `bun-android-1.3.14-<8_hashes>` | Binario Bun ARM64 ~88 MB |
 | `bun-host-1.3.14` | Host bun x86_64 ~737 MB |
-| `opentui-android` | libopentui.so ARM64 |
+| `opentui-android-<commit>` | libopentui.so ARM64 (key por commit) |
 
 ## Comandos
 
+### Instalación pública en Termux
+
+El instalador está incluido en el repositorio y descarga únicamente assets publicados en GitHub Releases; no compila en el teléfono. En una instalación nueva:
+
 ```bash
-# Disparar builds
+pkg install git curl unzip file
+git clone https://github.com/Leonisaurov/opencode-termux.git
+cd opencode-termux
+./install.sh --just codex
+```
+
+Usa `./install.sh --help` para instalar `bun`, `opencode`, `opentui` o todos los componentes, elegir `--release <tag>` o cambiar `--prefix`. El script valida arquitectura, herramientas y `"$TMPDIR"` antes de instalar. `--just codex` instala `codex`, `codex-code-mode-host` y el wrapper `codex-linux-sandbox`; este último requiere el proot de `github.com/Leonisaurov/proot-termux` y solo es compatible con el Codex Android de este fork, porque depende de sus parches Android.
+
+El API opcional de aprobaciones y el sidecar ntfy están documentados en [`scripts/codex-ntfy-plugin.md`](scripts/codex-ntfy-plugin.md); permanecen desactivados si no se exporta `CODEX_APPROVAL_API=1`.
+
+```bash
+# Disparar builds CI
 gh workflow run build-bun.yml --ref update-v1.18.6
+gh workflow run build-opentui.yml --ref update-v1.18.6
 gh workflow run build-opencode.yml --ref update-v1.18.6
 
 # Monitorear
 gita notify build-bun.yml
+gita notify build-opentui.yml
 gita notify build-opencode.yml
 
-# Instalar Bun en Termux
-./install.sh --just bun
+# Instalar en Termux (descarga GitHub Releases, NO compila)
+./install.sh --just bun                 # solo bun
+./install.sh --just opencode --release v1.18.11   # opencode de un tag concreto
 
-# Build local (NO en Termux — OOM killer)
-source scripts/env.sh
-./scripts/apply-patches.sh
-./scripts/build-bun.sh        # ~45 min, requiere x86_64
+# Build de cada port → ver "## Puertos"
+#   - OpenCode: CI (gh workflow run) o local en host x86_64
+#   - Kilo Code: local en Termux (./kilocode_build.sh → ./kilo-android)
 ```
 
 ## ⚠️ Constraints
 
 - **NO compilar Bun en Termux** — OOM killer. Usar GitHub Actions.
-- **NO usar `--compile-executable-path`** — Corrumpe ELF Android ARM64.
+- **NO usar `--compile-executable-path` desde host x86_64** — Corrumpe el ELF Android ARM64 (cross-arch). En el runner ARM64 nativo SÍ funciona.
 - **NO usar `bun build --compile --target=bun-linux-arm64-android`** con bun host stock.
 - **Dockerfile** está en `scripts/Dockerfile`, no en raíz.
+
+## Fuente de verdad
+
+> ⚠️ **Nota**: este README puede quedar desactualizado. La fuente de verdad del
+> repo (pipeline CI, versiones, parches, cachés y los ports completos de
+> OpenCode y Kilo Code) es [AGENTS.md](AGENTS.md) y `scripts/env.sh`.

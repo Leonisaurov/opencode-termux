@@ -2,8 +2,8 @@
 
 Guía de agente del port **Codex v0.134.0-alpha.3** (Rust puro, sin Bun/Zig/libopentui)
 de [openai/codex](https://github.com/openai/codex) → Termux / aarch64 / bionic API 24.
-Compila 4 binarios: `codex-cli` (→ `codex-android`), `codex-tui`, `codex-linux-sandbox`
-(stub que degrada en Android) y **`codex-code-mode-host`** — runtime companion del
+El release compila 2 binarios útiles: `codex-cli` (→ `codex-android`, con el TUI
+integrado) y **`codex-code-mode-host`** — runtime companion del
 **modo code** con **V8 embebido** (crate `v8`/rusty_v8 150.4.0, `v8_enable_sandbox`).
 El modo code **funciona en Termux**: es el único port del ecosistema que incluye el
 host (termux-user-repository lo omite → fail-closed, "Code Mode is unavailable").
@@ -13,10 +13,10 @@ host (termux-user-repository lo omite → fail-closed, "Code Mode is unavailable
 - `scripts/env.sh` pinnea: `CODEX_REF` (commit `50ef7395…`), `CODEX_VERSION`
   (0.134.0-alpha.3) y `CODEX_V8_VERSION` (150.4.0). Subir de versión = tocar esto.
 - LOCAL y CI comparten el **mismo** fuente vía `scripts/codex-prepare-source.sh`:
-  verifica/clona `CODEX_REF` + aplica `patches/codex/*.patch` (orden 01..18) con
+  verifica/clona `CODEX_REF` + aplica `patches/codex/*.patch` (orden 01..29) con
   `verify_patched_state` (byte-idéntico, fail-fast). **NO edites `codex/` a mano**:
   es el checkout local gitignored; un cambio manual rompe el verify y no llega a CI.
-- Catálogo completo de los 18 parches con el pin del commit base: `patches/codex/README.md`.
+- Catálogo completo de los 29 parches con el pin del commit base: `patches/codex/README.md`.
 
 ## Comandos
 
@@ -25,7 +25,7 @@ host (termux-user-repository lo omite → fail-closed, "Code Mode is unavailable
 gh workflow run build-rusty-v8-android.yml --ref update-v1.18.6
 gita notify build-rusty-v8-android.yml   # ~60-90 min
 
-# Build + Release de codex (bins default: codex tui linux-sandbox codex-code-mode-host)
+# Build + Release de codex (bins default: codex codex-code-mode-host)
 gh workflow run build-codex.yml --ref update-v1.18.6 -f release=true
 # Solo un binario (rápido, p.ej. solo el host):
 gh workflow run build-codex.yml --ref update-v1.18.6 -f bins=codex-code-mode-host
@@ -50,11 +50,14 @@ readelf -d codex-code-mode-host | grep NEEDED      # libdl/liblog/libm/libc (sin
 - **`--locked` NO** en cargo de codex: los parches desincronizan el Cargo.lock de upstream (se regenera; `codex_build.sh` restaura `git checkout -- Cargo.lock` al final para que `verify_patched_state` siga pasando). En el build de V8 **SÍ** se usa `--locked` (build-rusty-v8-android.yml, `cargo +1.91.0 build --locked`).
 - **NO `BINDGEN_EXTRA_CLANG_ARGS_*`** genéricas para el bindgen de v8: se filtran TAMBIÉN a las host tools x86_64 del ninja y rompen con `-msse3`. El parche `bindgen-android-sysroot.patch` añade la rama android en `build_binding()` (`--target=aarch64-linux-android24` + `--sysroot` del NDK r26c), solo para el bindgen del crate.
 - **V8 solo en runner x86_64**: el NDK r26c que descarga el build.rs del crate v8 solo trae host `linux-x86_64` (no usar runner ARM64).
+- **Outputs estrictos**: CI/local solo producen `codex-android` y `codex-code-mode-host`; `codex-tui` es una entrada redundante al mismo TUI integrado y el ELF `codex-linux-sandbox` es un stub no utilizable en Android. El sandbox real es `scripts/codex-linux-sandbox` (proot), instalado por `install.sh --just codex` desde este fork.
 - **`codex-code-mode-host` = binario hermano**: el CLI lo busca como `current_exe.parent()/codex-code-mode-host`; sin él el modo code falla cerrado. `install.sh` lo instala junto a `codex` en `$PREFIX/bin`; el zip de release DEBE incluirlo.
+- Los binarios finales se publican sin secciones DWARF (`llvm-strip --strip-debug`); el target Cargo cacheado conserva los artifacts completos para reutilizar el build.
 - **Trigger push de codex = `codex-v*`** (NO `v*`: colisiona con los tags de opencode). Con tag `codex-v*` o `-f release=true` la Release sale con tag `v<version>` (softprops normaliza el prefijo `codex-v`).
 - **Orden de publicación**: la Release `rusty-v8-v<CODEX_V8_VERSION>` DEBE existir ANTES de correr `build-codex.yml` — `setup_rusty_v8` descarga sus 3 assets y verifica el manifest con `sha256sum -c` (fail-fast si no está publicada).
+- CI cachea el par descargado en `build/codex-ci/rusty-v8`; el manifest se verifica incluso cuando la cache lo restaura.
 - **`install.sh --just codex`** usa releases/latest con fallback `releases?per_page=100` (patrón `codex-v[0-9][0-9A-Za-z._+-]*-android-aarch64\.zip`); si se publica otra release después, latest puede cambiar — el fallback lo cubre.
-- **Sandbox proot obligatorio**: el wrapper `codex-linux-sandbox` (instalado por `install.sh` en `$PREFIX/bin`) es **obligatorio** si `sandbox_mode` es `read-only`/`workspace-write` — con los parches 19/20, sin él las tools fallan cerrado (por diseño). Aislamiento de **conveniencia, no frontera de seguridad**: el guest hereda el env del host y la red real; los dirs sensibles (`~/.ssh`, `~/.codex`, `~/.aws`, `~/.netrc`, `~/.config/gh`) están ocultos con binds vacíos en el guest, pero NO confíes secretos de producción dentro del sandbox.
+- **Sandbox proot obligatorio**: el wrapper `codex-linux-sandbox` (instalado por `install.sh --just codex` en `$PREFIX/bin`) es **específico de este fork** y depende de los parches 19/20; no es compatible con Codex upstream. Requiere el proot de `github.com/Leonisaurov/proot-termux` en `$PREFIX/bin/proot`. Es obligatorio si `sandbox_mode` es `read-only`/`workspace-write` — sin él las tools fallan cerrado (por diseño). Aislamiento de **conveniencia, no frontera de seguridad**: el guest hereda el env del host y la red real; los dirs sensibles (`~/.ssh`, `~/.codex`, `~/.aws`, `~/.netrc`, `~/.config/gh`) están ocultos con binds vacíos en el guest, pero NO confíes secretos de producción dentro del sandbox.
 
 ## Verificación de artefactos
 
@@ -71,6 +74,6 @@ en `librusty_v8.a` (si apareciera, `pkg install libc++`, pero eso indicaría un 
 
 - `AGENTS.md` → sección "Codex (port Rust, V8 embebido)", Pipeline, Cachés y Pendientes.
 - `Codex-port.md` → diseño completo del port; §8 "Modo code" con requisitos runtime.
-- `patches/codex/README.md` → catálogo 01..18 + parches de rusty_v8.
+- `patches/codex/README.md` → catálogo 01..29 + parches de rusty_v8.
 - Fuentes ejecutables: `codex_build.sh`, `scripts/codex-prepare-source.sh`, `scripts/build-codex-ci.sh`,
   workflows `.github/workflows/build-codex.yml` y `build-rusty-v8-android.yml`.

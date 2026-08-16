@@ -1,0 +1,27 @@
+diff --git a/codex-rs/tui/src/app_command.rs b/codex-rs/tui/src/app_command.rs
+index fef3fbb5d3..81c34ff6aa 100644
+--- a/codex-rs/tui/src/app_command.rs
++++ b/codex-rs/tui/src/app_command.rs
+@@ -43,6 +43,10 @@ pub(crate) enum AppCommand {
+         collaboration_mode: Option<CollaborationMode>,
+         personality: Option<Personality>,
+     },
++    Steer {
++        items: Vec<UserInput>,
++        turn_id: String,
++    },
+     OverrideTurnContext {
+         cwd: Option<PathBuf>,
+         approval_policy: Option<AskForApproval>,
+@@ -172,6 +176,10 @@ impl AppCommand {
+         }
+     }
+ 
++    pub(crate) fn steer(items: Vec<UserInput>, turn_id: String) -> Self {
++        Self::Steer { items, turn_id }
++    }
++
+     pub(crate) fn exec_approval(
+         id: String,
+         turn_id: Option<String>,
+

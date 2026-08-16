@@ -1,0 +1,44 @@
+diff --git a/codex-rs/tui/src/chatwidget/tool_requests.rs b/codex-rs/tui/src/chatwidget/tool_requests.rs
+index b9ba8108f3..81441df743 100644
+--- a/codex-rs/tui/src/chatwidget/tool_requests.rs
++++ b/codex-rs/tui/src/chatwidget/tool_requests.rs
+@@ -283,6 +283,19 @@ impl ChatWidget {
+         self.flush_answer_stream_with_separator();
+         let command = shlex::try_join(ev.command.iter().map(String::as_str))
+             .unwrap_or_else(|_| ev.command.join(" "));
++        if let (Some(api), Some(thread_id)) =
++            (crate::approval_api::ApprovalApi::global(), self.thread_id)
++            && api.publish_command(
++                thread_id,
++                ev.effective_approval_id(),
++                ev.turn_id.clone(),
++                command.clone(),
++                self.config.cwd.to_string_lossy().into_owned(),
++                ev.reason.clone(),
++            )
++        {
++            return;
++        }
+         self.notify(Notification::ExecApprovalRequested { command });
+ 
+         let available_decisions = ev.effective_available_decisions();
+@@ -309,6 +322,18 @@ impl ChatWidget {
+     pub(crate) fn handle_apply_patch_approval_now(&mut self, ev: ApplyPatchApprovalRequestEvent) {
+         self.flush_answer_stream_with_separator();
+ 
++        if let (Some(api), Some(thread_id)) =
++            (crate::approval_api::ApprovalApi::global(), self.thread_id)
++        {
++            api.publish_file_change(
++                thread_id,
++                ev.call_id.clone(),
++                ev.turn_id.clone(),
++                self.config.cwd.to_string_lossy().into_owned(),
++                ev.reason.clone(),
++            );
++        }
++
+         let changed_paths = ev.changes.keys().cloned().collect();
+         let request = ApprovalRequest::ApplyPatch(ApplyPatchApprovalRequest {
+             thread_id: self.thread_id.unwrap_or_default(),
+

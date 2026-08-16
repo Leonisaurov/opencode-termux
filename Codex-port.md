@@ -22,7 +22,7 @@ Compilar y ejecutar **OpenAI Codex CLI** (`codex-rs`) en **Termux** (Android), t
 |---|---|
 | `.cargo/config.toml` | Se agregó `[target.aarch64-linux-android]` con linker `aarch64-linux-android-clang`, `ar = "llvm-ar"` y `rustflags` para bionic/NDK. |
 | `sandboxing/src/lib.rs` | `cfg(target_os = "linux")` ampliado a `cfg(any(target_os = "linux", target_os = "android"))` para `mod bwrap` y sus `pub use`. Stub `system_bwrap_warning` ahora cubre `not(any(linux, android))`. |
-| `sandboxing/src/manager.rs` | `get_platform_sandbox()` devuelve `None` en Android. |
+| `sandboxing/src/manager.rs` | Android sigue la ruta `LinuxSeccomp`, que permite al runtime resolver el wrapper proot del port. |
 | `cli/src/main.rs` | `HostSandboxArgs` usa `LandlockCommand` en Android. Rama `Subcommand::Sandbox` compila para Android y queda deshabilitada por `debug_sandbox.rs`. |
 | `cli/src/debug_sandbox.rs` | `run_command_under_landlock` compila en Android; hace `bail!` temprano con mensaje “no soportado en Android/Termux”. |
 | `linux-sandbox/Cargo.toml` | Dependencies y dev-dependencies condicionales extendidas a `android`. |
@@ -36,12 +36,13 @@ Compilar y ejecutar **OpenAI Codex CLI** (`codex-rs`) en **Termux** (Android), t
   - Detecta `tcr` en `~/.local/bin` y lo agrega al `PATH` si existe.
   - Detecta NDK automáticamente en `ANDROID_NDK_HOME`, `$HOME/Android/Sdk/ndk/*`, `$PREFIX/opt/android-ndk`, `/opt/android-ndk`, `$HOME/android-ndk`.
   - Fingerprint incremental v3 en `build/.markers/build-fingerprint-codex` (skip total si nada cambió).
-  - Obtiene la fuente con el MISMO mecanismo que el CI: helper compartido `scripts/codex-prepare-source.sh` (verifica/clona el ref pinneado `CODEX_REF` desde `scripts/env.sh` y aplica `patches/codex/*.patch` 01..18 con `verify_patched_state`).
-  - Compila `codex-cli` (→ `./codex-android`), `codex-tui`, `codex-linux-sandbox` y **`codex-code-mode-host`** para `aarch64-linux-android` (tcr `-o 1000 -r 1024 -j 1` + reintentos anti-OOM; el host se copia a `./codex-code-mode-host`, junto a `./codex-android`).
+  - Obtiene la fuente con el MISMO mecanismo que el CI: helper compartido `scripts/codex-prepare-source.sh` (verifica/clona el ref pinneado `CODEX_REF` desde `scripts/env.sh` y aplica `patches/codex/*.patch` 01..29 con `verify_patched_state`).
+  - Compila `codex-cli` (→ `./codex-android`, con el TUI integrado) y **`codex-code-mode-host`** para `aarch64-linux-android` (tcr `-o 1000 -r 1024 -j 1` + reintentos anti-OOM; el host se copia a `./codex-code-mode-host`, junto a `./codex-android`).
+  - Copias finales pasan por `llvm-strip --strip-debug`; el target de Cargo conserva los artifacts completos para builds incrementales.
 
 ## 4. Decisiones técnicas
 
-1. **Sandboxing en Android**: No hay `bubblewrap`/`landlock`/`seccomp` útil en Termux. Se mantiene la compilación, pero el flujo de `codex sandbox` falla temprano con mensaje claro.
+1. **Sandboxing en Android**: No hay `bubblewrap`/`landlock`/`seccomp` útil en Termux. El subcomando de diagnóstico `codex sandbox` informa que no está soportado; el sandbox de las tools usa el wrapper proot del port y funciona como aislamiento de conveniencia.
 2. **IDE IPC**: ya usa `SO_PEERCRED` en Android (`tui/src/ide_context/ipc.rs`); se preserva sin cambios.
 3. **Clipboard**: `arboard` ya está excluido en Android (`tui/Cargo.toml`). Se mantiene el fallback OSC 52 / tmux.
 4. **Certificados**: `network-proxy/src/native_certs.rs` ya incluye la ruta Termux `/data/data/com.termux/files/usr/etc/tls/cert.pem`.
@@ -52,10 +53,10 @@ Compilar y ejecutar **OpenAI Codex CLI** (`codex-rs`) en **Termux** (Android), t
 ## 5. Pendientes reales
 
 El port está **completo y publicado**: Release `v0.134.0-alpha.3` con el asset
-`codex-v0.134.0-alpha.3-android-aarch64.zip` (los 4 binarios), modo code
+`codex-v0.134.0-alpha.3-android-aarch64.zip` (CLI + code-mode-host), modo code
 funcional en Termux, build local (`./codex_build.sh`) y CI (`build-codex.yml`)
 compartiendo el mismo fuente. Todos los pasos históricos de esta sección
-(OpenSSL vía `vendored`, artefacto rusty_v8 para V8, sandbox stub, TUI en pty)
+(OpenSSL vía `vendored`, artefacto rusty_v8 para V8, wrapper sandbox proot, TUI en pty)
 quedaron resueltos y documentados en §8.
 
 Pendientes no bloqueantes:
@@ -123,7 +124,7 @@ default `150.4.0`). Los 3 artefactos publicados:
 
 - **Local (Termux)**: `codex_build.sh` usa el MISMO fuente que el CI (helper
   compartido `scripts/codex-prepare-source.sh`: clona `CODEX_REF` de
-  `scripts/env.sh` + aplica `patches/codex/*.patch` 01..18 con
+  `scripts/env.sh` + aplica `patches/codex/*.patch` 01..29 con
   `verify_patched_state`), descarga el artefacto a `build/rusty-v8/`
   (idempotente, verifica el manifest con `sha256sum -c`), exporta
   `RUSTY_V8_ARCHIVE` + `RUSTY_V8_SRC_BINDING_PATH` y compila
@@ -153,7 +154,10 @@ default `150.4.0`). Los 3 artefactos publicados:
   patrón `codex-v[0-9][0-9A-Za-z._+-]*-android-aarch64\.zip` desde
   `releases/latest` y, si esa release no trae el asset (p.ej. la de opencode),
   cae al fallback `releases?per_page=100` tomando el primer asset que matchee.
-  Instala `codex` (de `codex-android`) y `codex-code-mode-host` en `$PREFIX/bin`.
+  Instala `codex` (de `codex-android`), `codex-code-mode-host` y
+  `codex-linux-sandbox` en `$PREFIX/bin`. El wrapper requiere el proot de
+  `github.com/Leonisaurov/proot-termux` y es propio de este fork: depende de sus parches Android
+  19/20 y no funciona con Codex upstream.
 
 ### Requisito runtime (verificado)
 
@@ -242,4 +246,3 @@ no una frontera de seguridad**: el guest hereda el env del host y la red real
 (sin netns no hay red aislada); los dirs sensibles (`~/.ssh`, `~/.codex`,
 `~/.aws`, `~/.netrc`, `~/.config/gh`) están ocultos con binds vacíos, pero NO
 confíes secretos de producción dentro del sandbox.
-

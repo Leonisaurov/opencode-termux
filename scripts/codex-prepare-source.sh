@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # codex-prepare-source.sh - Prepara el código fuente de openai/codex (mismo mecanismo en CI y local):
 #   - verifica/clona el checkout en el ref pinneado (CODEX_REF)
-#   - aplica los parches de patches/codex (orden 01..19) con verify_patched_state
+#   - aplica los parches de patches/codex (orden 01..29) con verify_patched_state
 #
 # Comparte la lógica que antes vivía en build-codex-ci.sh ([1/5]+[2/5]) con el
 # build local (codex_build.sh): ambos deben compilar EXACTAMENTE el mismo fuente
@@ -64,6 +64,9 @@ else
     git init -q "$CODEX_REPO"
     git -C "$CODEX_REPO" remote add origin https://github.com/openai/codex
     if ! git -C "$CODEX_REPO" fetch -q --depth 1 origin "$CODEX_REF"; then
+        # Do not leave a repo with an empty HEAD: a transient network failure
+        # must be retryable without manual cleanup on the next build.
+        rm -rf -- "$CODEX_REPO"
         die "fetch de openai/codex@'$CODEX_REF' falló: ¿existe ese commit o tag en openai/codex? (o error de red)"
     fi
     git -C "$CODEX_REPO" checkout -q FETCH_HEAD

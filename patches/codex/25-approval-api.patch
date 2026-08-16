@@ -1,0 +1,25 @@
+diff --git a/codex-rs/tui/src/app_event_sender.rs b/codex-rs/tui/src/app_event_sender.rs
+index 6c1606761d..b3f430c90d 100644
+--- a/codex-rs/tui/src/app_event_sender.rs
++++ b/codex-rs/tui/src/app_event_sender.rs
+@@ -107,6 +107,19 @@ impl AppEventSender {
+         });
+     }
+ 
++    pub(crate) fn steer(&self, thread_id: ThreadId, turn_id: String, text: String) {
++        self.send(AppEvent::SubmitThreadOp {
++            thread_id,
++            op: AppCommand::steer(
++                vec![codex_app_server_protocol::UserInput::Text {
++                    text,
++                    text_elements: Vec::new(),
++                }],
++                turn_id,
++            ),
++        });
++    }
++
+     pub(crate) fn resolve_elicitation(
+         &self,
+         thread_id: ThreadId,
+

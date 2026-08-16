@@ -1,0 +1,17 @@
+diff --git a/codex-rs/tui/src/app/thread_routing.rs b/codex-rs/tui/src/app/thread_routing.rs
+index 918bb091f0..1b50c0be1a 100644
+--- a/codex-rs/tui/src/app/thread_routing.rs
++++ b/codex-rs/tui/src/app/thread_routing.rs
+@@ -646,6 +646,11 @@ impl App {
+                 });
+                 Ok(true)
+             }
++            AppCommand::Steer { items, turn_id } => app_server
++                .turn_steer(thread_id, turn_id, items.to_vec())
++                .await
++                .map(|_| true)
++                .map_err(|error| std::io::Error::other(error.to_string())),
+             AppCommand::UserTurn {
+                 items,
+                 cwd,
+

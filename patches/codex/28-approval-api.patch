@@ -1,0 +1,359 @@
+diff --git a/codex-rs/tui/src/approval_api.rs b/codex-rs/tui/src/approval_api.rs
+new file mode 100644
+index 0000000000..e67536e402
+--- /dev/null
++++ b/codex-rs/tui/src/approval_api.rs
+@@ -0,0 +1,345 @@
++//! Optional local approval API for external clients such as an ntfy plugin.
++//!
++//! The API is disabled unless `CODEX_APPROVAL_API=1` is set.  It is a second
++//! client of the TUI's approval queue: the TUI remains the source of truth and
++//! every remote decision is submitted through the normal AppEvent channel.
++
++use std::collections::BTreeMap;
++use std::sync::Arc;
++use std::sync::Mutex;
++use std::sync::OnceLock;
++
++use axum::Json;
++use axum::Router;
++use axum::extract::Path;
++use axum::extract::State;
++use axum::http::HeaderMap;
++use axum::http::StatusCode;
++use axum::routing::get;
++use axum::routing::post;
++use codex_app_server_protocol::CommandExecutionApprovalDecision;
++use codex_app_server_protocol::FileChangeApprovalDecision;
++use codex_protocol::ThreadId;
++use serde::Deserialize;
++use serde::Serialize;
++use tokio::net::TcpListener;
++use tracing::info;
++use tracing::warn;
++
++use crate::app_event_sender::AppEventSender;
++
++static API: OnceLock<ApprovalApi> = OnceLock::new();
++
++#[derive(Clone)]
++pub(crate) struct ApprovalApi {
++    inner: Arc<Inner>,
++}
++
++struct Inner {
++    token: String,
++    sender: AppEventSender,
++    state: Mutex<StateData>,
++}
++
++#[derive(Default)]
++struct StateData {
++    pending: BTreeMap<String, PendingApproval>,
++    rules: Vec<String>,
++    history: Vec<HistoryEntry>,
++}
++
++#[derive(Clone, Serialize)]
++#[serde(rename_all = "camelCase")]
++struct PendingApproval {
++    id: String,
++    kind: ApprovalKind,
++    thread_id: String,
++    turn_id: String,
++    command: Option<String>,
++    cwd: Option<String>,
++    reason: Option<String>,
++}
++
++#[derive(Clone, Serialize)]
++#[serde(rename_all = "camelCase")]
++enum ApprovalKind {
++    Command,
++    FileChange,
++}
++
++#[derive(Clone, Serialize)]
++#[serde(rename_all = "camelCase")]
++struct HistoryEntry {
++    id: String,
++    action: String,
++    at_ms: u128,
++    detail: Option<String>,
++}
++
++#[derive(Serialize)]
++#[serde(rename_all = "camelCase")]
++struct StateResponse {
++    pending: Vec<PendingApproval>,
++    rules: Vec<String>,
++    history: Vec<HistoryEntry>,
++}
++
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase")]
++struct ApprovalAction {
++    action: String,
++    #[serde(default)]
++    prefix: Option<String>,
++    #[serde(default)]
++    detail: Option<String>,
++}
++
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase")]
++struct SteerAction {
++    thread_id: String,
++    turn_id: String,
++    text: String,
++}
++
++impl ApprovalApi {
++    pub(crate) fn start(sender: AppEventSender) {
++        if std::env::var("CODEX_APPROVAL_API").as_deref() != Ok("1") {
++            return;
++        }
++        let token = match std::env::var("CODEX_APPROVAL_API_TOKEN") {
++            Ok(token) if !token.is_empty() => token,
++            _ => {
++                warn!("CODEX_APPROVAL_API=1 pero falta CODEX_APPROVAL_API_TOKEN; API desactivada");
++                return;
++            }
++        };
++        let listen = std::env::var("CODEX_APPROVAL_API_LISTEN")
++            .unwrap_or_else(|_| "0.0.0.0:10010".to_string());
++        let api = Self {
++            inner: Arc::new(Inner {
++                token,
++                sender,
++                state: Mutex::new(StateData::default()),
++            }),
++        };
++        let _ = API.set(api.clone());
++        tokio::spawn(async move {
++            let listener = match TcpListener::bind(&listen).await {
++                Ok(listener) => listener,
++                Err(error) => {
++                    warn!(%error, %listen, "no se pudo abrir CODEX_APPROVAL_API");
++                    return;
++                }
++            };
++            info!(%listen, "API opcional de aprobaciones activa");
++            let app = Router::new()
++                .route("/v1/health", get(health))
++                .route("/v1/state", get(state))
++                .route("/v1/approvals/{id}", post(approval))
++                .route("/v1/steer", post(steer))
++                .with_state(api);
++            if let Err(error) = axum::serve(listener, app).await {
++                warn!(%error, "API de aprobaciones detenida");
++            }
++        });
++    }
++
++    pub(crate) fn global() -> Option<&'static Self> {
++        API.get()
++    }
++
++    pub(crate) fn publish_command(
++        &self,
++        thread_id: ThreadId,
++        id: String,
++        turn_id: String,
++        command: String,
++        cwd: String,
++        reason: Option<String>,
++    ) -> bool {
++        let mut state = self
++            .inner
++            .state
++            .lock()
++            .expect("approval API state poisoned");
++        if state.rules.iter().any(|prefix| command.starts_with(prefix)) {
++            drop(state);
++            self.inner.sender.exec_approval(
++                thread_id,
++                id,
++                CommandExecutionApprovalDecision::Accept,
++            );
++            return true;
++        }
++        state.pending.insert(
++            id.clone(),
++            PendingApproval {
++                id: id.clone(),
++                kind: ApprovalKind::Command,
++                thread_id: thread_id.to_string(),
++                turn_id,
++                command: Some(command),
++                cwd: Some(cwd),
++                reason,
++            },
++        );
++        false
++    }
++
++    pub(crate) fn publish_file_change(
++        &self,
++        thread_id: ThreadId,
++        id: String,
++        turn_id: String,
++        cwd: String,
++        reason: Option<String>,
++    ) {
++        let mut state = self
++            .inner
++            .state
++            .lock()
++            .expect("approval API state poisoned");
++        state.pending.insert(
++            id.clone(),
++            PendingApproval {
++                id,
++                kind: ApprovalKind::FileChange,
++                thread_id: thread_id.to_string(),
++                turn_id,
++                command: None,
++                cwd: Some(cwd),
++                reason,
++            },
++        );
++    }
++
++    pub(crate) fn clear(&self, id: &str) {
++        if let Ok(mut state) = self.inner.state.lock() {
++            state.pending.remove(id);
++        }
++    }
++}
++
++fn authorized(headers: &HeaderMap, api: &ApprovalApi) -> bool {
++    headers
++        .get("authorization")
++        .and_then(|value| value.to_str().ok())
++        == Some(&format!("Bearer {}", api.inner.token))
++}
++
++async fn health(
++    State(api): State<ApprovalApi>,
++    headers: HeaderMap,
++) -> Result<Json<serde_json::Value>, StatusCode> {
++    if !authorized(&headers, &api) {
++        return Err(StatusCode::UNAUTHORIZED);
++    }
++    Ok(Json(serde_json::json!({ "ok": true })))
++}
++
++async fn state(
++    State(api): State<ApprovalApi>,
++    headers: HeaderMap,
++) -> Result<Json<StateResponse>, StatusCode> {
++    if !authorized(&headers, &api) {
++        return Err(StatusCode::UNAUTHORIZED);
++    }
++    let state = api
++        .inner
++        .state
++        .lock()
++        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
++    Ok(Json(StateResponse {
++        pending: state.pending.values().cloned().collect(),
++        rules: state.rules.clone(),
++        history: state.history.clone(),
++    }))
++}
++
++async fn approval(
++    State(api): State<ApprovalApi>,
++    Path(id): Path<String>,
++    headers: HeaderMap,
++    Json(action): Json<ApprovalAction>,
++) -> Result<Json<serde_json::Value>, StatusCode> {
++    if !authorized(&headers, &api) {
++        return Err(StatusCode::UNAUTHORIZED);
++    }
++    let mut state = api
++        .inner
++        .state
++        .lock()
++        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
++    let request = state.pending.get(&id).cloned().ok_or(StatusCode::NOT_FOUND)?;
++    let thread_id =
++        ThreadId::from_string(&request.thread_id).map_err(|_| StatusCode::BAD_REQUEST)?;
++    let detail = action.detail.clone();
++    match request.kind {
++        ApprovalKind::Command => {
++            let decision = match action.action.as_str() {
++                "allow" => CommandExecutionApprovalDecision::Accept,
++                "session" => CommandExecutionApprovalDecision::AcceptForSession,
++                "deny" => CommandExecutionApprovalDecision::Decline,
++                "cancel" => CommandExecutionApprovalDecision::Cancel,
++                "pattern" => {
++                    let prefix = action
++                        .prefix
++                        .filter(|prefix| !prefix.is_empty())
++                        .ok_or(StatusCode::BAD_REQUEST)?;
++                    if !request
++                        .command
++                        .as_deref()
++                        .is_some_and(|command| command.starts_with(&prefix))
++                    {
++                        return Err(StatusCode::BAD_REQUEST);
++                    }
++                    if !state.rules.contains(&prefix) {
++                        state.rules.push(prefix);
++                    }
++                    CommandExecutionApprovalDecision::Accept
++                }
++                _ => return Err(StatusCode::BAD_REQUEST),
++            };
++            state.pending.remove(&id);
++            api.inner
++                .sender
++                .exec_approval(thread_id, id.clone(), decision);
++        }
++        ApprovalKind::FileChange => {
++            let decision = match action.action.as_str() {
++                "allow" => FileChangeApprovalDecision::Accept,
++                "session" => FileChangeApprovalDecision::AcceptForSession,
++                "deny" => FileChangeApprovalDecision::Decline,
++                "cancel" => FileChangeApprovalDecision::Cancel,
++                _ => return Err(StatusCode::BAD_REQUEST),
++            };
++            state.pending.remove(&id);
++            api.inner
++                .sender
++                .patch_approval(thread_id, id.clone(), decision);
++        }
++    }
++    state.history.insert(
++        0,
++        HistoryEntry {
++            id,
++            action: action.action,
++            at_ms: std::time::SystemTime::now()
++                .duration_since(std::time::UNIX_EPOCH)
++                .unwrap_or_default()
++                .as_millis(),
++            detail,
++        },
++    );
++    state.history.truncate(80);
++    Ok(Json(serde_json::json!({ "ok": true })))
++}
++
++async fn steer(
++    State(api): State<ApprovalApi>,
++    headers: HeaderMap,
++    Json(action): Json<SteerAction>,
++) -> Result<Json<serde_json::Value>, StatusCode> {
++    if !authorized(&headers, &api) {
++        return Err(StatusCode::UNAUTHORIZED);
++    }
++    let thread_id =
++        ThreadId::from_string(&action.thread_id).map_err(|_| StatusCode::BAD_REQUEST)?;
++    api.inner
++        .sender
++        .steer(thread_id, action.turn_id, action.text);
++    Ok(Json(serde_json::json!({ "ok": true })))
++}

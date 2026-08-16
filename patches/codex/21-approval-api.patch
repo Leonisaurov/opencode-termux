@@ -1,0 +1,13 @@
+diff --git a/codex-rs/tui/Cargo.toml b/codex-rs/tui/Cargo.toml
+index 8d79afc202..353a174a2e 100644
+--- a/codex-rs/tui/Cargo.toml
++++ b/codex-rs/tui/Cargo.toml
+@@ -23,6 +23,7 @@ workspace = true
+ 
+ [dependencies]
+ anyhow = { workspace = true }
++axum = { workspace = true, default-features = false, features = ["http1", "json", "tokio"] }
+ base64 = { workspace = true }
+ chrono = { workspace = true, features = ["serde"] }
+ clap = { workspace = true, features = ["derive"] }
+

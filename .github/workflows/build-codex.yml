@@ -11,14 +11,14 @@
 #   1. Instala deps de build (build-essential/cmake/perl para openssl-sys
 #      vendored, onig_sys y aws-lc-rs; protoc-bin-vendored descarga solo en
 #      build-time y funciona en host linux).
-#   2. Restaura del cache: toolchain Rust (codex-rust-*), registro/git de
-#      cargo (codex-cargo-*) y el NDK r28b recortado a aarch64 (codex-ndk-*).
+#   2. Restaura del cache: toolchain Rust (codex-rust-*), registro/git y
+#      package cache de cargo (codex-cargo-*), target incremental de Cargo
+#      (codex-target-*), sccache y el NDK r28b recortado a aarch64.
 #   3. Instala el NDK r28b solo si el cache falla y lo recorta a la ABI
 #      aarch64 (ahorra ~2 GB).
 #   4. scripts/build-codex-ci.sh: clona openai/codex al ref CODEX_REF (commit
 #      o tag), aplica patches/codex/*.patch, instala la toolchain Rust del
-#      rust-toolchain.toml y cross-compila codex-tui + codex-linux-sandbox +
-#      codex-cli.
+#      rust-toolchain.toml y cross-compila codex-cli + codex-code-mode-host.
 #   5. Empaqueta codex-v<version>-android-aarch64.zip, sube artifact y crea
 #      Release cuando github.ref es tag v* o input release=true.
 #
@@ -49,10 +49,10 @@ on:
         type: boolean
         default: false
       bins:
-        description: 'Binarios a compilar/empaquetar (espacios; default: codex codex-tui codex-linux-sandbox codex-code-mode-host)'
+        description: 'Binarios útiles a compilar/empaquetar (espacios; default: codex codex-code-mode-host)'
         required: false
         type: string
-        default: 'codex codex-tui codex-linux-sandbox codex-code-mode-host'
+        default: 'codex codex-code-mode-host'
   push:
     tags:
       - 'codex-v*'
@@ -91,8 +91,13 @@ jobs:
       - name: Cache Rust toolchain
         uses: actions/cache@v4
         with:
-          path: ~/.rustup/toolchains
-          key: codex-rust-1.95.0
+          path: |
+            ~/.rustup/toolchains
+            ~/.rustup/downloads
+            ~/.rustup/update-hashes
+          key: codex-rust-1.95.0-${{ runner.os }}-${{ runner.arch }}
+          restore-keys: |
+            codex-rust-1.95.0-${{ runner.os }}-
 
       # ── Cache: registro + git de cargo (por ref + hashes de los parches) ──
       # La key incluye el ref (commit/tag) y el hash de patches/codex/*.patch:
@@ -104,7 +109,10 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            ~/.cargo/.package-cache
           key: codex-cargo-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-${{ hashFiles('patches/codex/*.patch') }}
+          restore-keys: |
+            codex-cargo-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-
 
       # ── Cache: NDK r28b recortado a aarch64 ──
       # actions/cache restaura/escribe como el usuario runner: /opt no es
@@ -199,10 +207,32 @@ jobs:
           restore-keys: |
             codex-sccache-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-
 
+      # ── Cache: target Cargo incremental (la optimización principal) ──
+      # El script usa CARGO_TARGET_DIR=build/codex-ci/target. Se restaura
+      # aunque cambie un parche: Cargo verifica fingerprints contra el nuevo
+      # checkout y conserva los crates/artifacts que siguen siendo válidos.
+      # El target se separa del checkout clonado para que actions/cache pueda
+      # restaurarlo antes de que el helper prepare la fuente.
+      - name: Cache Cargo target and incremental state
+        uses: actions/cache@v4
+        with:
+          path: build/codex-ci/target
+          key: codex-target-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-rust1.95.0-ndk28b-${{ hashFiles('patches/codex/*.patch') }}
+          restore-keys: |
+            codex-target-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-rust1.95.0-ndk28b-
+
+      # El par rusty_v8 se verifica con su manifest antes de usarse. Cachearlo
+      # evita repetir la descarga cuando solo cambian scripts/parches de Codex.
+      - name: Cache verified rusty_v8 release pair
+        uses: actions/cache@v4
+        with:
+          path: build/codex-ci/rusty-v8
+          key: codex-rusty-v8-${{ hashFiles('scripts/env.sh') }}
+
       # ── Cross-compilar Codex (scripts/build-codex-ci.sh) ──
       # El script clona openai/codex@$CODEX_REF, aplica patches/codex/*.patch,
       # instala la toolchain Rust del rust-toolchain.toml y compila
-      # codex-tui + codex-linux-sandbox + codex-cli → $WORK_DIR/codex-android
+      # codex-cli + codex-code-mode-host → $WORK_DIR y el zip
       # + codex-v<version>-android-aarch64.zip. Emite version= a GITHUB_OUTPUT
       # (el prefijo 'v' se quita en la normalización del script).
       - name: Cross-compile Codex
@@ -214,7 +244,7 @@ jobs:
           # quitando el prefijo codex-v → 0.134.0-alpha.3.
           CODEX_VERSION: ${{ inputs.codex_version || github.ref_name }}
           # Binarios a compilar/empaquetar (input `bins`; vacío en push de tag →
-          # el script aplica su default de los 4 binarios).
+          # el script aplica su default de CLI + code-mode-host).
           CODEX_BINS: ${{ inputs.bins }}
           JOBS: '2'
           ANDROID_NDK_HOME: /opt/android-ndk
@@ -229,7 +259,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: codex-android-aarch64-${{ steps.build.outputs.version }}
-          path: ${{ github.workspace }}/build/codex-ci/*.zip
+          path: ${{ github.workspace }}/build/codex-ci/${{ steps.build.outputs.zip_name }}
           if-no-files-found: error
 
       # ── Release (tag codex-v* o input release=true) ──
@@ -241,7 +271,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ format('v{0}', steps.build.outputs.version) }}
-          files: ${{ github.workspace }}/build/codex-ci/*.zip
+          files: ${{ github.workspace }}/build/codex-ci/${{ steps.build.outputs.zip_name }}
           body: |
             ## Codex CLI ${{ steps.build.outputs.version }} for Android/Termux (aarch64)
 
@@ -258,9 +288,11 @@ jobs:
 
             ### Instalación
 
-            El zip contiene **dos binarios**: `codex-android` (CLI principal) y
-            `codex-code-mode-host` (runtime companion con V8 embebido). Instala
-            ambos en `$PREFIX/bin` y renombra `codex-android` a `codex`:
+            El ZIP contiene los binarios solicitados: `${{ steps.build.outputs.bins }}`.
+            En la configuración normal son `codex` (publicado como
+            `codex-android`) y `codex-code-mode-host` (runtime companion con V8
+            embebido). Instala ambos en `$PREFIX/bin` y renombra
+            `codex-android` a `codex`:
 
             ```bash
             unzip codex-v${{ steps.build.outputs.version }}-android-aarch64.zip -d "$PREFIX/bin"
@@ -284,4 +316,3 @@ jobs:
             > revisa `codex_build.sh` (build Termux) y `patches/codex/README.md`.
           draft: false
           prerelease: false
-          update_release_body: true
