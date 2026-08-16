@@ -80,27 +80,30 @@ PATCH_FILES=( "$PATCHES_DIR"/*.patch )
 shopt -u nullglob
 [ "${#PATCH_FILES[@]}" -gt 0 ] || die "no hay *.patch en $PATCHES_DIR"
 
-# Cargo fingerprints source files partly by mtime. A fresh checkout plus
-# git-apply gives every file the current runner time, so an otherwise identical
-# target cache looks dirty on the next runner. Give each file a stable timestamp
-# derived from its own content: unchanged files keep the same fingerprint even
-# when another patch changes, so Cargo can rebuild only the affected crates.
+# Cargo fingerprints source files and package directories partly by mtime. A
+# fresh checkout plus git-apply gives both the current runner time, so an
+# otherwise identical target cache looks dirty on the next runner. Give each
+# file a stable timestamp derived from its own content and each directory a
+# stable timestamp derived from its relative path. Directories are normalized
+# after files because touching a file updates its parent directory. This keeps
+# Cargo fingerprints stable across runners while a changed file still invalidates
+# the package that owns it.
 normalize_source_mtimes() {
     local stage="${CODEX_SOURCE_MTIME_STAGE:-pre}"
-    local patch_digest base_key lock_digest key marker files count
+    local patch_digest base_key lock_digest key marker files count dir_count
     case "$stage" in
         pre|post) ;;
         *) die "CODEX_SOURCE_MTIME_STAGE inválido: $stage (usa pre o post)" ;;
     esac
     patch_digest="$(for patch in "${PATCH_FILES[@]}"; do sha256sum "$patch" | awk '{print $1}'; done | sha256sum | awk '{print $1}')"
-    base_key="schema=3|ref=$CODEX_REF|patches=$patch_digest"
-    marker="${CODEX_SOURCE_MTIME_MARKER:-$CODEX_REPO/.git/codex-source-mtime-v3}"
+    base_key="schema=4|ref=$CODEX_REF|patches=$patch_digest"
+    marker="${CODEX_SOURCE_MTIME_MARKER:-$CODEX_REPO/.git/codex-source-mtime-v4}"
     mkdir -p "$(dirname "$marker")"
 
     if [ "$stage" = "pre" ]; then
         key="$base_key|stage=pre"
         if [ -f "$marker.pre" ] && [ "$(cat "$marker.pre")" = "$key" ]; then
-            msg "   mtimes de fuente ya normalizados (schema=3, skip)"
+            msg "   mtimes de fuente ya normalizados (schema=4, skip)"
             return 0
         fi
         files=( "$CODEX_REPO/codex-rs" )
@@ -108,15 +111,15 @@ normalize_source_mtimes() {
         lock_digest="$(sha256sum "$CODEX_REPO/codex-rs/Cargo.lock" 2>/dev/null | awk '{print $1}' || true)"
         key="$base_key|stage=post|lock=$lock_digest"
         if [ -f "$marker.post" ] && [ "$(cat "$marker.post")" = "$key" ]; then
-            msg "   mtime de Cargo.lock ya normalizado (schema=3, skip)"
+            msg "   mtime de Cargo.lock ya normalizado (schema=4, skip)"
             return 0
         fi
         files=( "$CODEX_REPO/codex-rs/Cargo.lock" )
     fi
 
-    # One Perl process handles all hashes and utime calls. A shell loop that
-    # starts sha256sum/awk/touch for each of ~5k files costs over a minute on
-    # Termux; this keeps the normalization below a second or two on CI/local.
+    # One Perl process handles all file hashes and utime calls. A shell loop
+    # that starts sha256sum/awk/touch for each of ~5k files costs over a minute
+    # on Termux; this keeps normalization below a second or two on CI/local.
     count="$(find "${files[@]}" -type d -name target -prune -o -type f -print0 \
         | perl -0ne '
             use strict; use warnings; use Digest::SHA;
@@ -132,8 +135,32 @@ normalize_source_mtimes() {
             }
             print "$count\n";
         ' )"
+    # Cargo can also retain directory mtimes in package fingerprints. Hash the
+    # path relative to CODEX_REPO, never the absolute checkout path, so local
+    # Termux and CI get the same values. `-depth` makes parent directories run
+    # after children; no later file operation may then change their mtimes.
+    dir_count="$(find "$CODEX_REPO/codex-rs" -depth -type d \
+        ! -path "$CODEX_REPO/codex-rs/target" \
+        ! -path "$CODEX_REPO/codex-rs/target/*" -print0 \
+        | CODEX_REPO="$CODEX_REPO" perl -0ne '
+            use strict; use warnings; use Digest::SHA;
+            my $root = $ENV{CODEX_REPO};
+            my $count = 0;
+            for my $dir (split /\0/) {
+                next unless length $dir;
+                my $relative = $dir;
+                $relative =~ s/^\Q$root\E\/?//;
+                my $sha = Digest::SHA->new(256);
+                $sha->add($relative);
+                my $bucket = hex(substr($sha->hexdigest, 0, 8)) % 100000000;
+                my $epoch = 946684800 + $bucket;
+                utime($epoch, $epoch, $dir) or die "utime $dir: $!\n";
+                $count++;
+            }
+            print "$count\n";
+        ' )"
     printf '%s\n' "$key" > "$marker.$stage"
-    msg "   mtimes de fuente normalizados por contenido (schema=3, archivos=$count, etapa=$stage)"
+    msg "   mtimes normalizados por contenido/ruta (schema=4, archivos=$count, directorios=$dir_count, etapa=$stage)"
 }
 
 # cargo fetch may rewrite Cargo.lock after the normal patch verification. This
