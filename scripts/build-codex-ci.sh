@@ -31,6 +31,7 @@ start_timer() { START_TS=$(date +%s); }
 elapsed() { local end=$(date +%s); echo $((end - START_TS)); }
 BUILD_START_TS=$(date +%s)
 elapsed_total() { local end=$(date +%s); echo $((end - BUILD_START_TS)); }
+msg() { echo "$*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
 
 # ── Artefacto rusty_v8 para codex-code-mode-host ──
