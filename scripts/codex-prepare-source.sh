@@ -196,7 +196,11 @@ verify_patched_state() {
         fi
     done < <(git -C "$CODEX_REPO" status --porcelain)
     local expected_sorted actual_sorted
-    expected_sorted="$(printf '%s\n' "${EXPECTED_FILES[@]}" | sort)"
+    # Several ordered patches may intentionally update the same source file
+    # (for example arg0's Android sandbox path and its bionic lock handling).
+    # Git status contains each path once, so compare the unique path set while
+    # retaining the one-file-per-patch validation above.
+    expected_sorted="$(printf '%s\n' "${EXPECTED_FILES[@]}" | sort -u)"
     actual_sorted="$(printf '%s\n' "${actual[@]}" | sort)"
     if [ "$expected_sorted" != "$actual_sorted" ]; then
         echo "ERROR: el estado del worktree no coincide con los archivos de los parches:" >&2
