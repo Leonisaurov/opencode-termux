@@ -1,0 +1,41 @@
+{
+  "schema": "opencode-termux.stack/v1",
+  "documentation_only": true,
+  "stack_version": "1.0.0",
+  "release": "v1.18.11",
+  "stability": "stable",
+  "android": { "arch": "aarch64", "api": 24, "abi": "arm64-v8a" },
+  "components": {
+    "bun": {
+      "version": "1.3.14", "tag": "bun-v1.3.14-android",
+      "asset": "bun-v1.3.14-android-aarch64.tar.gz",
+      "sha256": "<sha256 del artifact publicado>",
+      "size": 0, "archive": "tar.gz", "depends": [], "files": ["bun"]
+    },
+    "opentui": {
+      "version": "9eabce7", "tag": "opentui-9eabce7",
+      "asset": "libopentui-android-aarch64.tar.gz",
+      "sha256": "<sha256 del artifact publicado>",
+      "size": 0, "archive": "tar.gz", "depends": [], "files": ["libopentui.so"]
+    },
+    "opencode": {
+      "version": "1.3.13", "tag": "opencode-v1.3.13-android",
+      "asset": "opencode-v1.3.13-android-aarch64.tar.gz",
+      "sha256": "<sha256 del artifact publicado>",
+      "size": 0, "archive": "zip", "depends": ["bun", "opentui"], "files": ["opencode"]
+    },
+    "kilo": {
+      "version": "0.1.0", "tag": "kilo-v0.1.0-android",
+      "asset": "kilo-v0.1.0-android-aarch64.zip",
+      "sha256": "<sha256 del artifact publicado>",
+      "size": 0, "archive": "zip", "depends": ["bun"], "files": ["kilo"]
+    },
+    "codex": {
+      "version": "0.1.0", "tag": "codex-v0.1.0-android",
+      "asset": "codex-v0.1.0-android-aarch64.zip",
+      "sha256": "<sha256 del artifact publicado>",
+      "size": 0, "archive": "zip", "depends": [],
+      "files": ["codex-android", "codex-code-mode-host", "codex-linux-sandbox"]
+    }
+  }
+}

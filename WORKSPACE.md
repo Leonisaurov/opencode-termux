@@ -1,32 +1,25 @@
-# Mapa del workspace
+# Workspace map
 
-Consulta primero [AGENTS.md](AGENTS.md). Ese archivo contiene las reglas
-operativas y el enrutamiento obligatorio. Este documento resume únicamente la
-topología para navegación humana.
+`AGENTS.md` is the operational guide. This file is the quick navigation map.
 
-## Árbol de trabajo
+Each product owns its source, tests, scripts, build state, and artifacts:
 
-- `codex/`: checkout upstream de Codex. Todo trabajo de Codex empieza allí y
-  debe leer sus instrucciones locales.
-- `opencode-src/`: checkout upstream de OpenCode usado como fuente de trabajo.
-- `build/opencode-src-latest/`: checkout generado/cacheado; sirve para builds y
-  comparación, no para conservar cambios manuales.
-- `build/kilocode-src-latest/`: checkout generado/cacheado de Kilo.
-- `bun-source/`: fuente de Bun, incluida para el runtime Android.
-- `patches/`: parches del port para Bun, WebKit, Zig y OpenTUI.
-- `scripts/`: preparación, compilación, empaquetado y utilidades del port.
-- `.github/workflows/`: CI de Bun, OpenCode, OpenTUI, Codex/V8 y paquetes.
-- `termux-packages/`: recetas y herramientas de paquetes Termux.
-- `build/`: área regenerable de fuentes externas, caches, marcadores y salidas.
+```text
+opencode/{src,build,test,scripts,patches,deps,artifacts}
+kilo/{src,build,test,scripts,patches,deps,artifacts,config}
+codex/{src,build,test,scripts,artifacts,more}
+bun/{src,build,test,scripts,patches,artifacts,cmake}
+opentui/{src/{opencode,kilo},build,test,scripts,patches,artifacts}
+ci/{scripts,docker}
+tooling/termux-packages
+```
 
-## Artefactos Codex presentes
+`opencode/deps/` and `kilo/deps/` point to the shared Bun and product-specific
+OpenTUI checkouts. CI follows the dependency graph Bun → OpenTUI/OpenCode or
+Kilo, and Rusty V8 → Codex. It uses caches and artifacts between workflows;
+local builds are intentionally not part of the routine.
 
-- `codex-android`: CLI Codex para Android/aarch64, API 24.
-- `codex-code-mode-host`: companion de code mode para Android/aarch64.
-- `codex-linux-sandbox`: wrapper proot usado por el CLI en Termux.
-- `scripts/codex-ntfy-relay.ts`: relay opcional de aprobaciones de
-  `codex app-server`; su uso está documentado en el Markdown junto al script.
-
-Los binarios son artefactos y pueden quedar obsoletos respecto a `codex/`.
-Comprueba siempre `file`, el commit fuente, el workflow y los marcadores de
-`build/` antes de atribuirles una versión.
+Do not work from historical root paths such as `scripts/`, `patches/`,
+`opencode-src/`, `bun-source/`, or `build/`. Do not reset dirty nested
+checkouts. The root should contain documentation, repository metadata, CI
+configuration, and product directories—not binaries, logs, or scratch tests.

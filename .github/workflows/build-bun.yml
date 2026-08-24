@@ -2,23 +2,33 @@ name: Build Bun
 
 on:
   workflow_dispatch:
+    inputs:
+      bun_version:
+        required: false
+        default: '1.2.13'
   workflow_call:
+    inputs:
+      bun_version:
+        required: false
+        type: string
+        default: '1.2.13'
 
 concurrency:
   group: build-bun-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  BUN_VERSION: "1.2.13"
+  PRODUCT: bun
+  BUN_VERSION: "${{ inputs.bun_version || '1.2.13' }}"
   ANDROID_API: "24"
   ANDROID_NDK_VERSION: "28.1.13356709"
   ICU_VERSION: "75.1"
   ZIG_VERSION: "0.15.2"
   WEBKIT_COMMIT: "017930ebf915121f8f593bef61cbbca82d78132d"
   JOBS: "2"
-  WORK_DIR: "${{ github.workspace }}/build"
-  ANDROID_NDK_HOME: "${{ github.workspace }}/android-ndk"
-  ANDROID_NDK_ROOT: "${{ github.workspace }}/android-ndk"
+  WORK_DIR: "${{ github.workspace }}/bun/build"
+  ANDROID_NDK_HOME: "${{ github.workspace }}/bun/build/android-ndk"
+  ANDROID_NDK_ROOT: "${{ github.workspace }}/bun/build/android-ndk"
 
 jobs:
   build-bun:
@@ -49,15 +59,15 @@ jobs:
 
       # ── Install everything else ───────────────────────────────
       - name: Install build dependencies
-        run: source scripts/setup-runner.sh
+        run: source ci/scripts/setup-runner.sh
 
       # ── Patch hashes ──────────────────────────────────────────
       - name: Compute patch hashes
         id: hashes
         run: |
-          echo "bun_patch_hash=$(sha256sum patches/bun/android-support.patch | cut -c1-16)" >> $GITHUB_OUTPUT
-          echo "zig_patch_hash=$(sha256sum patches/zig/posix-android-sigaction.patch | cut -c1-16)" >> $GITHUB_OUTPUT
-          echo "webkit_patch_hash=$(sha256sum patches/webkit/android-support.patch | cut -c1-16)" >> $GITHUB_OUTPUT
+          echo "bun_patch_hash=$(sha256sum bun/patches/bun/android-support.patch | cut -c1-16)" >> $GITHUB_OUTPUT
+          echo "zig_patch_hash=$(sha256sum bun/patches/zig/posix-android-sigaction.patch | cut -c1-16)" >> $GITHUB_OUTPUT
+          echo "webkit_patch_hash=$(sha256sum bun/patches/webkit/android-support.patch | cut -c1-16)" >> $GITHUB_OUTPUT
 
       # ── Restore ICU (build if missing, ~5 min) ────────────────
       - name: Cache ICU build
@@ -67,11 +77,11 @@ jobs:
           path: |
             ${{ env.WORK_DIR }}/deps-android/prefix
             ${{ env.WORK_DIR }}/state/nodes/icu.json
-          key: build-v3-icu-${{ env.ICU_VERSION }}-${{ env.ANDROID_API }}-${{ hashFiles('scripts/build-icu.sh', 'scripts/env.sh') }}
+          key: build-v3-icu-${{ env.ICU_VERSION }}-${{ env.ANDROID_API }}-${{ hashFiles('bun/scripts/build-icu.sh', 'ci/scripts/env.sh') }}
 
       - name: Build ICU (if needed)
         run: |
-          source scripts/env.sh && ./scripts/build-icu.sh
+          source ci/scripts/env.sh && ./bun/scripts/build-icu.sh
 
       # ── Restore WebKit (required — run build-core first) ──────
       - name: Restore WebKit build
@@ -80,7 +90,7 @@ jobs:
           path: |
             ${{ env.WORK_DIR }}/webkit-android
             ${{ env.WORK_DIR }}/state/nodes/webkit.json
-          key: build-v3-webkit-${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}-${{ hashFiles('scripts/build-webkit.sh', 'scripts/env.sh', 'cmake/webkit-android-toolchain.cmake') }}
+          key: build-v3-webkit-${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}-${{ hashFiles('bun/scripts/build-webkit.sh', 'ci/scripts/env.sh', 'bun/cmake/webkit-android-toolchain.cmake') }}
 
       # ── Build Bun ─────────────────────────────────────────────
       - name: Cache Bun binary
@@ -90,13 +100,13 @@ jobs:
           path: |
             ${{ env.WORK_DIR }}/bun-build/bun
             ${{ env.WORK_DIR }}/state/nodes/bun.json
-          key: build-v3-bun-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}-${{ hashFiles('scripts/build-bun.sh', 'scripts/apply-patches.sh', 'scripts/env.sh') }}
+          key: build-v3-bun-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}-${{ hashFiles('bun/scripts/build-bun.sh', 'bun/scripts/apply-patches.sh', 'ci/scripts/env.sh') }}
 
       - name: Clone, patch, and build Bun
         run: |
-          source scripts/env.sh
-          ./scripts/apply-patches.sh
-          ./scripts/build-bun.sh
+          source ci/scripts/env.sh
+          ./bun/scripts/apply-patches.sh
+          ./bun/scripts/build-bun.sh
 
       - name: Verify Bun binary
         run: |

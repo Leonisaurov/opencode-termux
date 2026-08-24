@@ -50,7 +50,7 @@ on:
         default: '150.4.0'
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: build-rusty-v8-${{ inputs.v8_version }}
@@ -122,7 +122,7 @@ jobs:
             upstream-rusty-v8/target/aarch64-linux-android/release/build
             upstream-rusty-v8/target/sccache
             dist
-          key: rusty-v8-android-${{ inputs.v8_version }}-${{ hashFiles('upstream-rusty-v8/git_submodule_status.txt', 'upstream-rusty-v8/Cargo.lock', 'upstream-rusty-v8/build.rs') }}
+          key: rusty-v8-android-${{ inputs.v8_version }}-${{ hashFiles('upstream-rusty-v8/git_submodule_status.txt', 'upstream-rusty-v8/Cargo.lock', 'upstream-rusty-v8/build.rs', '.github/workflows/build-rusty-v8-android.yml') }}
           restore-keys: |
             rusty-v8-android-${{ inputs.v8_version }}-
 
@@ -132,6 +132,13 @@ jobs:
         env:
           V8_FROM_SOURCE: "1"
           SCCACHE_IDLE_TIMEOUT: "0"
+          # The v150.4.0 V8 checkout references android_ndk_version from
+          # build/config/android/BUILD.gn but does not declare a usable value
+          # for this standalone build. build.rs forwards EXTRA_GN_ARGS to GN.
+          EXTRA_GN_ARGS: >-
+            android_ndk_api_level=24
+            android_ndk_version="r26c"
+            android_ndk_root="${{ github.workspace }}/upstream-rusty-v8/third_party/android_ndk"
         working-directory: upstream-rusty-v8
         run: cargo +1.91.0 build --locked --release --target aarch64-linux-android --features v8_enable_sandbox
 
@@ -220,23 +227,3 @@ jobs:
           name: rusty-v8-${{ inputs.v8_version }}-ptrcomp-sandbox-aarch64-linux-android
           path: dist/*
           if-no-files-found: error
-
-      # ── Release del repo del port ──
-      # Los consumen scripts/build-codex-ci.sh (CI) y codex_build.sh (Termux)
-      # descargando de https://github.com/<repo>/releases/download/rusty-v8-v<V8_VERSION>/.
-      # Si el repo no puede publicar releases por política, los 3 archivos quedan
-      # en el artifact de arriba para subida manual con el mismo naming.
-      - name: Publish GitHub Release (rusty-v8-v<V8_VERSION>)
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          TAG="rusty-v8-v${{ inputs.v8_version }}"
-          if ! gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            gh release create "$TAG" --repo "${{ github.repository }}" --prerelease \
-              --title "rusty_v8 ${{ inputs.v8_version }} (aarch64-linux-android, ptrcomp sandbox)" \
-              --notes "Artefacto librusty_v8 para aarch64-linux-android generado desde fuente (V8_FROM_SOURCE=1, NDK r26c, API 24). Lo consumen scripts/build-codex-ci.sh y codex_build.sh vía RUSTY_V8_ARCHIVE + RUSTY_V8_SRC_BINDING_PATH (crate v8 = 150.4.0 del binario codex-code-mode-host)."
-          else
-            echo "Release $TAG ya existe; re-subiendo assets (--clobber)..."
-          fi
-          gh release upload "$TAG" dist/* --repo "${{ github.repository }}" --clobber

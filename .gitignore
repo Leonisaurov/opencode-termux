@@ -1,15 +1,17 @@
-# Build directories
-build/
+# Product-owned generated state (sources remain visible to Git).
+*/build/
+*/artifacts/
+*/dist/
+*/deps-android/
+*/zig-*/
+*/android-ndk-*/
+# Historical names must not reappear at the repository root.
 bun-src/
 webkit-src/
 opentui-src/
 opencode-src/
-deps-android/
+build/
 dist/
-
-# Downloaded tools
-zig-*/
-android-ndk-*/
 
 # Build artifacts
 *.o
@@ -36,3 +38,7 @@ Thumbs.db
 
 # Temporary files
 tmp/
+
+# Local Bun test fixtures
+bun/test/*/node_modules/
+bun/test/*/dist*/

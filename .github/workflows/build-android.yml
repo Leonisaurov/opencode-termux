@@ -1,119 +1,111 @@
-name: Build Android products
+name: Build and publish Android stack
 
 on:
   workflow_dispatch:
     inputs:
-      opencode_version:
-        description: 'Versión de OpenCode'
-        required: false
-        default: '1.3.13'
+      release:
+        required: true
+        default: '1.18.11'
+      bun_version:
+        required: true
+        default: '1.2.13'
       opentui_ref:
-        description: 'Commit, tag o branch de OpenTUI'
-        required: false
+        required: true
         default: '9eabce704096837148d935554fcae9c19e6e21f4'
-  push:
-    branches: [main]
-    paths:
-      - 'patches/**'
-      - 'cmake/**'
-      - 'scripts/apply-patches.sh'
-      - 'scripts/build-*.sh'
-      - 'scripts/build-*.ts'
-      - 'scripts/env.sh'
-      - 'scripts/setup-runner.sh'
-      - 'scripts/make-packages.sh'
-      - 'scripts/build-state.py'
-      - '.github/workflows/build-android.yml'
-      - '.github/workflows/build-core.yml'
-      - '.github/workflows/build-bun.yml'
-      - '.github/workflows/build-opentui.yml'
-      - '.github/workflows/build-opencode.yml'
+      opencode_version:
+        required: true
+        default: '1.3.13'
+      kilo_version:
+        required: true
+        default: '7.4.20'
+      codex_ref:
+        required: true
+        default: '50ef7395faee1d0e2d01730f9636aa06091c7be3'
+      v8_version:
+        required: true
+        default: '150.4.0'
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: android-products-${{ github.ref }}
-  cancel-in-progress: true
+  group: stack-release-${{ github.event.inputs.release || github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  changes:
-    name: Detect affected products
-    runs-on: ubuntu-latest
-    outputs:
-      all: ${{ steps.detect.outputs.all }}
-      core: ${{ steps.detect.outputs.core }}
-      bun: ${{ steps.detect.outputs.bun }}
-      opentui: ${{ steps.detect.outputs.opentui }}
-      opencode: ${{ steps.detect.outputs.opencode }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
-
-      - name: Classify changed inputs
-        id: detect
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BEFORE_SHA: ${{ github.event.before }}
-          HEAD_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          # Manual dispatches and the first push have no safe diff base.
-          if [ "$EVENT_NAME" != "push" ] || [ -z "$BEFORE_SHA" ] || \
-             [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ] || \
-             ! git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null; then
-            for name in all core bun opentui opencode; do echo "$name=true" >> "$GITHUB_OUTPUT"; done
-            exit 0
-          fi
-
-          changed="$(git diff --name-only "$BEFORE_SHA" "$HEAD_SHA")"
-          printf '%s\n' "$changed"
-
-          has() { printf '%s\n' "$changed" | grep -Eq "$1"; }
-          common='(^|/)(scripts/(env|setup-runner|build-state)\.py?|(scripts/(env|setup-runner|build-state)\.(sh|py))|\.github/workflows/build-android\.yml)$'
-          core='(^|/)(patches/webkit/|cmake/|scripts/(apply-patches|build-(icu|webkit|tinycc))\.(sh)|\.github/workflows/build-(core|bun)\.yml)$'
-          bun='(^|/)(patches/(bun|zig)/|scripts/build-bun\.sh|\.github/workflows/build-bun\.yml)$'
-          opentui='(^|/)(patches/opentui/|scripts/build-opentui\.sh|\.github/workflows/build-opentui\.yml)$'
-          opencode='(^|/)(scripts/(build-opencode|build-opencode-android)\.(sh|ts)|scripts/make-packages\.sh|\.github/workflows/build-opencode\.yml)$'
-
-          all=false; core=false; bun=false; opentui=false; opencode=false
-          if has "$common"; then all=true; core=true; bun=true; opentui=true; opencode=true; fi
-          if has "$core"; then core=true; bun=true; opencode=true; fi
-          if has "$bun"; then bun=true; opencode=true; fi
-          if has "$opentui"; then opentui=true; opencode=true; fi
-          if has "$opencode"; then opencode=true; fi
-          for name in all core bun opentui opencode; do eval "value=\${$name}"; echo "$name=$value" >> "$GITHUB_OUTPUT"; done
-
   core:
-    name: Core dependencies
-    needs: changes
-    if: needs.changes.outputs.core == 'true'
     uses: ./.github/workflows/build-core.yml
     secrets: inherit
-
   opentui:
-    name: OpenTUI native library
-    needs: changes
-    if: needs.changes.outputs.opentui == 'true'
+    needs: core
     uses: ./.github/workflows/build-opentui.yml
     with:
       opentui_ref: ${{ inputs.opentui_ref || '9eabce704096837148d935554fcae9c19e6e21f4' }}
     secrets: inherit
-
   bun:
-    name: Bun Android runtime
-    needs: [changes, core]
-    if: always() && needs.changes.outputs.bun == 'true' && (needs.core.result == 'success' || needs.core.result == 'skipped')
+    needs: core
     uses: ./.github/workflows/build-bun.yml
+    with:
+      bun_version: ${{ inputs.bun_version || '1.2.13' }}
     secrets: inherit
-
+  rusty-v8:
+    uses: ./.github/workflows/build-rusty-v8-android.yml
+    with:
+      v8_version: ${{ inputs.v8_version || '150.4.0' }}
+    secrets: inherit
   opencode:
-    name: OpenCode packages
-    needs: [changes, bun, opentui]
-    if: always() && needs.changes.outputs.opencode == 'true' && needs.bun.result != 'failure' && needs.opentui.result != 'failure'
+    needs: [bun, opentui]
     uses: ./.github/workflows/build-opencode.yml
     with:
+      opentui_ref: ${{ inputs.opentui_ref || '9eabce704096837148d935554fcae9c19e6e21f4' }}
       opencode_version: ${{ inputs.opencode_version || '1.3.13' }}
-      require_dependency_artifacts: ${{ needs.bun.result == 'success' && needs.opentui.result == 'success' }}
+      require_dependency_artifacts: true
     secrets: inherit
+  kilo:
+    needs: bun
+    uses: ./.github/workflows/build-kilo.yml
+    with:
+      use_existing_bun: true
+      bun_version: ${{ inputs.bun_version || '1.2.13' }}
+      kilo_version: ${{ inputs.kilo_version || '7.4.20' }}
+    secrets: inherit
+  codex:
+    needs: rusty-v8
+    uses: ./.github/workflows/build-codex.yml
+    with:
+      use_existing_v8: true
+      codex_ref: ${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}
+      v8_version: ${{ inputs.v8_version || '150.4.0' }}
+    secrets: inherit
+  publish:
+    needs: [bun, opentui, opencode, kilo, codex]
+    if: ${{ always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped') }}
+    permissions:
+      contents: write
+      actions: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-input
+      - name: Verify all producers and create manifest
+        env:
+          RELEASE: ${{ inputs.release || '1.18.11' }}
+          BUN_VERSION: ${{ inputs.bun_version || '1.2.13' }}
+          OPENTUI_REF: ${{ inputs.opentui_ref || '9eabce704096837148d935554fcae9c19e6e21f4' }}
+          OPENCODE_VERSION: ${{ inputs.opencode_version || '1.3.13' }}
+          KILO_VERSION: ${{ inputs.kilo_version || '7.4.20' }}
+          CODEX_VERSION: ${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}
+        run: |
+          set -euo pipefail
+          test -d release-input
+          python3 ci/scripts/package-stack-release.py --root release-input --out release-output --release "$RELEASE" --stack-version 1.0.0 --bun "$BUN_VERSION" --opentui "$OPENTUI_REF" --opencode "$OPENCODE_VERSION" --kilo "$KILO_VERSION" --codex "$CODEX_VERSION"
+      - name: Publish immutable release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: stack-v${{ inputs.release || '1.18.11' }}
+          name: opencode-termux stack ${{ inputs.release || '1.18.11' }}
+          files: release-output/*
+          make_latest: true
+          fail_on_unmatched_files: true

@@ -6,15 +6,16 @@
 # Flujo:
 #   1. Instala zig 0.15.2 (ziglang.org) + patchelf.
 #   2. Resuelve el commit de anomalyco/opentui a compilar (branch/tag/SHA).
-#   3. Clona (shallow) el commit resuelto en $WORK_DIR/opentui-src.
-#   4. scripts/build-opentui.sh: `zig build -Dtarget=aarch64-linux-musl
+#   3. Resuelve el checkout en $OPENTUI_SRC.
+#   4. opentui/scripts/build-opentui.sh: `zig build -Dtarget=aarch64-linux-musl
 #      -Doptimize=ReleaseSafe` + patchelf --add-needed libc.so.
-#   5. Verifica NEEDED: libc.so y sube el artifact `libopentui-arm64-musl`.
+#   5. Verifica NEEDED: libc.so y sube el artifact
+#      `opentui-android-aarch64-<commit>`.
 #
 # El artifact es consumido por build-opencode.yml (Fase 2) para ensamblar
 # OpenCode. El .so se guarda TAMBIÉN en el cache con key `opentui-android-<commit>`
-# (path REAL: $WORK_DIR/opentui-src/packages/core/src/lib) para que
-# build-opencode.yml lo restaure sin recompilar. Además se cachea opentui-src
+# (path REAL: $OPENTUI_SRC/packages/core/src/lib) para que
+# build-opencode.yml lo restaure sin recompilar. Además se cachea la fuente
 # keyed por commit para rebuilds rápidos y compartición del toolchain zig
 # con los otros workflows.
 
@@ -24,7 +25,7 @@ on:
   workflow_dispatch:
     inputs:
       # Debe coincidir con el fallback de env.OPENTUI_REF (commit verificado
-      # localmente en build/opentui-src). Cambiar a 'main' para seguir HEAD.
+      # localmente en opentui/src/opencode). Cambiar a 'main' para seguir HEAD.
       #
       # CAMINO FÁCIL DE UPGRADE: para actualizar opentui, cambiar este pin al
       # commit nuevo. La cache key del .so es POR COMMIT
@@ -54,7 +55,9 @@ env:
   OPENTUI_TARGET: "aarch64-linux-musl"
   OPENTUI_REF: "${{ inputs.opentui_ref || '9eabce704096837148d935554fcae9c19e6e21f4' }}"
   JOBS: "2"
-  WORK_DIR: "${{ github.workspace }}/build"
+  PRODUCT: opentui
+  WORK_DIR: "${{ github.workspace }}/opentui/build"
+  OPENTUI_SRC: "${{ github.workspace }}/opentui/src/opencode"
   # NOTA: PREFIX se define a nivel de step (build) — el contexto runner no
   # está disponible en el env de nivel workflow.
 
@@ -108,7 +111,7 @@ jobs:
         id: cache-opentui
         uses: actions/cache@v4
         with:
-          path: ${{ env.WORK_DIR }}/opentui-src
+          path: ${{ env.OPENTUI_SRC }}
           key: build-v3-opentui-src-${{ steps.resolve.outputs.commit }}
 
       # ── Toolchain ─────────────────────────────────────────────
@@ -129,7 +132,7 @@ jobs:
       # ── Fuente de opentui ──────────────────────────────────────
       - name: Prepare opentui source
         run: |
-          OPENTUI_SRC="$WORK_DIR/opentui-src"
+          OPENTUI_SRC="$OPENTUI_SRC"
           OPENTUI_COMMIT="${{ steps.resolve.outputs.commit }}"
           # Reutilizar fuente cacheada solo si está en el commit correcto.
           if [ -d "$OPENTUI_SRC/.git" ]; then
@@ -156,11 +159,11 @@ jobs:
         env:
           PREFIX: ${{ runner.temp }}
         run: |
-          source scripts/env.sh && ./scripts/build-opentui.sh
+          source ci/scripts/env.sh && ./opentui/scripts/build-opentui.sh
 
       - name: Verify libopentui.so
         run: |
-          LIB="$WORK_DIR/opentui-src/packages/core/src/lib/$OPENTUI_TARGET/libopentui.so"
+          LIB="$OPENTUI_SRC/packages/core/src/lib/$OPENTUI_TARGET/libopentui.so"
           ls -lh "$LIB"
           file "$LIB"
           readelf -h "$LIB" | grep -E "Machine|Class"
@@ -174,7 +177,7 @@ jobs:
       # ── Artifact ───────────────────────────────────────────────
       - name: Write build info
         run: |
-          LIB_DIR="$WORK_DIR/opentui-src/packages/core/src/lib/$OPENTUI_TARGET"
+          LIB_DIR="$OPENTUI_SRC/packages/core/src/lib/$OPENTUI_TARGET"
           {
             echo "workflow=$GITHUB_WORKFLOW"
             echo "opentui_ref=$OPENTUI_REF"
@@ -197,20 +200,20 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: |
-            ${{ env.WORK_DIR }}/opentui-src/packages/core/src/lib
+            ${{ env.OPENTUI_SRC }}/packages/core/src/lib
             ${{ env.WORK_DIR }}/state/nodes/opentui.json
-          key: build-v3-opentui-${{ steps.resolve.outputs.commit }}-${{ hashFiles('scripts/build-opentui.sh', 'scripts/env.sh', 'patches/opentui/**') }}
+          key: build-v3-opentui-${{ steps.resolve.outputs.commit }}-${{ hashFiles('opentui/scripts/build-opentui.sh', 'ci/scripts/env.sh', 'opentui/patches/**') }}
 
       - name: Upload libopentui.so artifact
         uses: actions/upload-artifact@v4
         with:
-          name: libopentui-arm64-musl
-          path: ${{ env.WORK_DIR }}/opentui-src/packages/core/src/lib/${{ env.OPENTUI_TARGET }}/
+          name: opentui-android-aarch64-${{ steps.resolve.outputs.commit }}
+          path: ${{ env.OPENTUI_SRC }}/packages/core/src/lib/${{ env.OPENTUI_TARGET }}/
           if-no-files-found: error
 
       # ── Cleanup ────────────────────────────────────────────────
       - name: Cleanup zig build caches (keep cache lean)
         if: always()
         run: |
-          find "$WORK_DIR/opentui-src" -type d -name ".zig-cache" -prune -exec rm -rf {} + 2>/dev/null || true
+          find "$OPENTUI_SRC" -type d -name ".zig-cache" -prune -exec rm -rf {} + 2>/dev/null || true
           df -h .

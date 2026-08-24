@@ -1,61 +1,57 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
+## Structure and routing
 
-This repository ports OpenCode and related runtimes to Android/Termux.
-`patches/` contains Bun, WebKit, Zig, and OpenTUI changes; `scripts/` contains
-the build and packaging pipeline; `.github/workflows/` contains CI; and
-`termux-packages/` contains package recipes. Upstream checkouts are kept in
-`codex/`, `opencode-src/`, and `bun-source/`. Generated or cached checkouts
-live under `build/` and are not sources of truth. The root artifacts
-`codex-android`, `codex-code-mode-host`, and `codex-linux-sandbox` are Android
-runtime outputs.
+This repository is the Android/Termux port workspace. Work only inside the
+product directory that owns the change:
 
-For Codex work, enter `codex/` first and read `codex/AGENTS.md`, its relevant
-`docs/`, `codex-rs/README.md`, and `justfile`. For OpenCode, Kilo, or Bun work,
-read the local `AGENTS.md`/`CONTEXT.md` in the corresponding checkout before
-editing it.
+- `opencode/`: OpenCode source, build, tests, patches, and artifacts.
+- `kilo/`: Kilo source, build, configuration, tests, and artifacts.
+- `codex/`: Codex source, build, tests, scripts, and artifacts. For Codex
+  work, enter this directory first and read its local `AGENTS.md`, `docs/`,
+  `codex-rs/README.md`, and `justfile`.
+- `bun/`: Bun source and Android runtime toolchain.
+- `opentui/`: OpenTUI checkouts for OpenCode and Kilo plus its port tests.
+- `ci/`: shared build-state helpers, runner setup, Docker assets, and pipeline
+  orchestration; `.github/workflows/` contains CI entry points.
+- `tooling/termux-packages/`: Termux packaging repository.
 
-## Build, Test, and Development Commands
+Dependencies are exposed through product-local `deps/` links. Do not create
+duplicate source checkouts, root-level build outputs, or ad-hoc test trees.
+Generated state belongs under the owning product's `build/` and final files
+under its `artifacts/`. Recoverable obsolete material belongs in the external
+quarantine documented by the workspace owner.
 
-From the repository root:
+## Development and validation
+
+Use the CI workflows for builds; this workspace is not a local build runner.
+For static checks, run `bash -n` on changed shell files, validate workflow YAML
+with the repository's CI tooling, and inspect state inputs with:
 
 ```sh
-source scripts/env.sh
-./scripts/apply-patches.sh
-./scripts/build-opencode.sh
+python3 ci/scripts/test-build-state.py
 ```
 
-Use the component scripts (`build-icu.sh`, `build-webkit.sh`,
-`build-bun.sh`, and `build-opentui.sh`) when rebuilding individual layers.
-Codex development commands run from `codex/` or `codex/codex-rs/`; follow its
-`justfile` and use `just test`, not direct `cargo test`.
+Use `opentui/test/test-renderer-invariants.sh` for OpenTUI patch idempotence.
+Never claim a build passed without reviewing its CI artifact and logs.
 
-## Coding Style & Naming Conventions
+## Version pins and patch compatibility
 
-Shell scripts use Bash with `set -euo pipefail`; validate them with `bash -n`.
-Use quoted paths, descriptive uppercase environment variables, and preserve
-existing script conventions. Rust and TypeScript formatting/linting rules are
-defined by their checkout-local instructions.
+Las versiones de Bun y OpenCode están fijadas deliberadamente por los parches
+Android existentes. Actualmente son Bun `1.2.13` y OpenCode `1.3.13`.
 
-## Testing Guidelines
+- No subir, reemplazar ni "alinear" estas versiones por inferencia, aunque haya
+  versiones más nuevas en otros workflows, manifiestos o upstream.
+- Cualquier actualización requiere primero verificar que todos los parches
+  aplican y funcionan con la nueva versión, actualizar los pins de forma
+  coordinada y contar con autorización explícita.
+- Los workflows, scripts, manifiestos y nombres de artifacts deben consumir los
+  inputs/versiones fijados; no deben introducir defaults contradictorios.
 
-Run focused checks for changed components. Use
-`.scripts/test-renderer-invariants.sh` for OpenTUI patch idempotence and
-`just test -p <crate>` for changed Codex crates. Validate final binaries with
-`file` and architecture/linker inspection; do not claim a build passed without
-checking its artifact.
+## Conventions
 
-## Commit & Pull Request Guidelines
-
-Use concise conventional commits such as `fix(android): ...`, `ci: ...`, or
-`docs: ...`. Pull requests should explain affected layers, pins or patches,
-validation performed, cache/build implications, and any Android/Termux
-limitations. Include logs or artifact details for build and CI changes.
-
-## Security & Configuration Tips
-
-Use `TMPDIR` for Termux temporaries; do not introduce `/tmp` or
-`/data/local/tmp` into Termux scripts. Preflight architecture, API/NDK,
-toolchain, memory, storage, and caches before heavy builds. The proot sandbox
-is filesystem isolation of convenience and does not isolate network access.
+Shell uses Bash, `set -euo pipefail`, quoted paths, and the canonical Termux
+`$TMPDIR`; do not add `/tmp` or `/data/local/tmp` to Termux scripts. Preserve
+checkout-local Rust, TypeScript, and Bun conventions. Keep commits concise,
+for example `ci: split product build roots` or `fix(android): ...`. PRs must
+describe affected products, dependency/cache implications, and validation.

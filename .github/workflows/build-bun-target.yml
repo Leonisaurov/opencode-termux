@@ -12,8 +12,9 @@ env:
   BUN_VERSION: "${{ github.event.inputs.bun_version || '1.3.14' }}"
   ANDROID_API: "24"
   ANDROID_NDK_VERSION: "28.1.13356709"
-  WORK_DIR: "${{ github.workspace }}/build"
-  ANDROID_NDK_HOME: "${{ github.workspace }}/android-ndk"
+  PRODUCT: bun
+  WORK_DIR: "${{ github.workspace }}/bun/build"
+  ANDROID_NDK_HOME: "${{ github.workspace }}/bun/build/android-ndk"
 
 jobs:
   build-bun-target:
@@ -29,10 +30,10 @@ jobs:
       - name: Compute patch hashes
         id: hashes
         run: |
-          echo "bun_patch_hash=$(sha256sum patches/bun/android-support.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
-          echo "bun_pr_hash=$(sha256sum patches/bun/pr31198.diff 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
-          echo "zig_patch_hash=$(sha256sum patches/zig/posix-android-sigaction.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
-          echo "android_backend_hash=$(sha256sum patches/bun/android-default-backend.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
+          echo "bun_patch_hash=$(sha256sum bun/patches/bun/android-support.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
+          echo "bun_pr_hash=$(sha256sum bun/patches/bun/pr31198.diff 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
+          echo "zig_patch_hash=$(sha256sum bun/patches/zig/posix-android-sigaction.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
+          echo "android_backend_hash=$(sha256sum bun/patches/bun/android-default-backend.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
           echo "TARGET_NAME=bun-linux-arm64-android-v${BUN_VERSION}" >> $GITHUB_ENV
 
       # ── Restore Bun binary ────────────────────────────────────

@@ -8,6 +8,7 @@ permissions:
   contents: read
 
 env:
+  PRODUCT: bun
   ICU_VERSION: "75.1"
   ANDROID_API: "24"
   ANDROID_NDK_VERSION: "28.1.13356709"
@@ -15,9 +16,9 @@ env:
   TINYCC_COMMIT: "b91835d8701523e895a2b447713630069514e291"
   ZIG_VERSION: "0.15.2"
   JOBS: "2"
-  WORK_DIR: "${{ github.workspace }}/build"
-  ANDROID_NDK_HOME: "${{ github.workspace }}/android-ndk"
-  ANDROID_NDK_ROOT: "${{ github.workspace }}/android-ndk"
+  WORK_DIR: "${{ github.workspace }}/bun/build"
+  ANDROID_NDK_HOME: "${{ github.workspace }}/bun/build/android-ndk"
+  ANDROID_NDK_ROOT: "${{ github.workspace }}/bun/build/android-ndk"
 
 jobs:
   build-core:
@@ -46,12 +47,12 @@ jobs:
 
       # ── Install everything else ───────────────────────────────
       - name: Install build dependencies
-        run: source scripts/setup-runner.sh
+        run: source ci/scripts/setup-runner.sh
 
       # ── Patch hashes ──────────────────────────────────────────
       - name: Compute patch hashes
         id: hashes
-        run: echo "webkit_patch_hash=$(sha256sum patches/webkit/android-support.patch | cut -c1-16)" >> $GITHUB_OUTPUT
+        run: echo "webkit_patch_hash=$(sha256sum bun/patches/webkit/android-support.patch | cut -c1-16)" >> $GITHUB_OUTPUT
 
       # ── ICU ───────────────────────────────────────────────────
       - name: Cache ICU build
@@ -61,12 +62,12 @@ jobs:
           path: |
             ${{ env.WORK_DIR }}/deps-android/prefix
             ${{ env.WORK_DIR }}/state/nodes/icu.json
-          key: build-v3-icu-${{ env.ICU_VERSION }}-${{ env.ANDROID_API }}-${{ hashFiles('scripts/build-icu.sh', 'scripts/env.sh') }}
+          key: build-v3-icu-${{ env.ICU_VERSION }}-${{ env.ANDROID_API }}-${{ hashFiles('bun/scripts/build-icu.sh', 'ci/scripts/env.sh') }}
 
       - name: Build ICU
         run: |
           df -h .
-          source scripts/env.sh && ./scripts/build-icu.sh
+          source ci/scripts/env.sh && ./bun/scripts/build-icu.sh
           df -h .
 
       # ── WebKit/JSC ────────────────────────────────────────────
@@ -77,18 +78,18 @@ jobs:
           path: |
             ${{ env.WORK_DIR }}/webkit-android
             ${{ env.WORK_DIR }}/state/nodes/webkit.json
-          key: build-v3-webkit-${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}-${{ hashFiles('scripts/build-webkit.sh', 'scripts/env.sh', 'cmake/webkit-android-toolchain.cmake') }}
+          key: build-v3-webkit-${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}-${{ hashFiles('bun/scripts/build-webkit.sh', 'ci/scripts/env.sh', 'bun/cmake/webkit-android-toolchain.cmake') }}
 
       - name: Clone, patch, and build WebKit/JSC
         run: |
-          source scripts/env.sh
-          ./scripts/apply-patches.sh
-          ./scripts/build-webkit.sh
+          source ci/scripts/env.sh
+          ./bun/scripts/apply-patches.sh
+          ./bun/scripts/build-webkit.sh
 
       # ── TinyCC ────────────────────────────────────────────────
       - name: Build TinyCC
         run: |
-          source scripts/env.sh && ./scripts/build-tinycc.sh
+          source ci/scripts/env.sh && ./bun/scripts/build-tinycc.sh
 
       - name: Cleanup intermediate files
         if: always()

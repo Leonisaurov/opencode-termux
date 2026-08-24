@@ -1,5 +1,7 @@
 # OpenCode for Termux (Android aarch64)
 
+<!-- Patch smoke test: harmless documentation-only change. -->
+
 > **Mapa para agentes y colaboradores:** lee primero [AGENTS.md](AGENTS.md).
 > Si el trabajo es de Codex, entra en `codex/` y sigue allí sus instrucciones;
 > para OpenCode, Kilo, Bun o el port usa el directorio indicado en ese mapa.
@@ -73,33 +75,21 @@ See the [OpenCode docs](https://github.com/anomalyco/opencode) for full configur
 
 ## What This Repo Contains
 
-This repo contains **patch files and build scripts** only -- not the full source trees of Bun or WebKit (which are 1.1GB and 2.7GB respectively). The CI workflow clones upstream repos and applies patches during build.
+This repo is an organized workspace for the Android/Termux ports of OpenCode,
+Kilo, Codex, Bun, and OpenTUI. Full upstream checkouts are kept in their
+own product directories; CI owns long builds and the repository keeps only
+reproducible state, scripts, and artifacts.
 
 ```
-opencode-termux/
-  patches/
-    bun/android-support.patch      # 33 files, Bun Android/aarch64 support
-    webkit/android-support.patch   # 5 files, WebKit/JSC Android fixes
-    zig/posix-android-sigaction.patch  # Zig stdlib sigaction/sigprocmask fix
-    opentui/android-libc-link.patch  # Link NDK libc.so for Android dlopen
-  scripts/
-    build-pipeline.sh          # Run the complete graph incrementally
-    apply-patches.sh               # Clone upstream repos + apply patches
-    build-icu.sh                   # Cross-compile ICU 75.1 for Android
-    build-webkit.sh                # Cross-compile WebKit/JSC for Android
-    build-tinycc.sh                # Cross-compile TinyCC (libtcc.a) for Android
-    build-bun.sh                   # Cross-compile Bun for Android
-    build-opentui.sh               # Build libopentui.so for Android
-    build-opencode.sh              # Build OpenCode standalone binary
-    make-packages.sh               # Create zip, pacman, and deb packages
-    build-state.py                 # Content-addressed manifests and cache checks
-    build-codex-android.sh         # Build Codex CLI + code-mode host (optional)
-    build-opencode-android.ts      # TypeScript helper (module graph extraction)
-  kilocode_build.sh                # Kilo build, wrapped by the same state graph
-  cmake/
-    webkit-android-toolchain.cmake # WebKit CMake cross-compilation toolchain
+opencode/{src,build,test,scripts,patches,deps,artifacts}/
+kilo/{src,build,test,scripts,patches,deps,artifacts,config}/
+codex/{src,build,test,scripts,artifacts}/
+bun/{src,build,test,scripts,patches,artifacts,cmake}/
+opentui/{src/{opencode,kilo},build,test,scripts,patches,artifacts}/
+ci/{scripts,docker}/              # shared state, runner, and CI helpers
+tooling/termux-packages/          # packaging repository
   .github/workflows/
-    build.yml                      # GitHub Actions CI workflow
+    build-*.yml                    # dependency-aware GitHub Actions workflows
 ```
 
 ---
@@ -138,9 +128,10 @@ With warm caches (WebKit + Bun cached), CI runs complete in ~4 minutes.
 
 ### Incremental operation
 
-Run `scripts/build-pipeline.sh` for the OpenCode graph. Set
-`BUILD_KILO=1` or `BUILD_CODEX=1` to include those independent products.
-Manifests live in `build/state`; `python3 scripts/build-state.py status`
+Use CI workflows for builds; do not launch the multi-hour toolchain locally.
+For static inspection, use `ci/scripts/build-pipeline.sh` only when needed and
+`python3 ci/scripts/build-state.py status` for manifests under each product's
+`build/state`.
 shows their current state. The engine hashes sources, toolchain/version values,
 dependencies, and outputs, so a no-op preserves compiler caches while a changed
 leaf invalidates only its descendants.

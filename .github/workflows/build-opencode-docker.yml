@@ -21,10 +21,10 @@ jobs:
       - name: Compute patch hashes
         id: hashes
         run: |
-          echo "bun_pr_hash=$(sha256sum patches/bun/pr31198.diff 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
-          echo "android_backend_hash=$(sha256sum patches/bun/android-default-backend.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
-          echo "webkit_hash=$(sha256sum patches/webkit/android-support.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
-          echo "zig_patch_hash=$(sha256sum patches/zig/posix-android-sigaction.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
+          echo "bun_pr_hash=$(sha256sum bun/patches/bun/pr31198.diff 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
+          echo "android_backend_hash=$(sha256sum bun/patches/bun/android-default-backend.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
+          echo "webkit_hash=$(sha256sum bun/patches/webkit/android-support.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
+          echo "zig_patch_hash=$(sha256sum bun/patches/zig/posix-android-sigaction.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
 
       - name: Restore Android Bun
         uses: actions/cache/restore@v4
@@ -51,9 +51,9 @@ jobs:
 
       - name: Compile libopentui.so
         run: |
-          source scripts/env.sh
+          source ci/scripts/env.sh
           mkdir -p "$WORK_DIR/opentui-src"
-          ./scripts/build-opentui.sh
+          ./opentui/scripts/build-opentui.sh
           # Build output goes to $WORK_DIR/opentui-src/zig-out/
           SO_FILE="$WORK_DIR/opentui-src/zig-out/lib/libopentui.so"
           if [ -f "$SO_FILE" ]; then

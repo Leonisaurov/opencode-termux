@@ -14,13 +14,26 @@ on:
   push:
     paths:
       - 'codex/**'
-      - 'scripts/build-codex-android.sh'
-      - 'scripts/build-state.py'
+      - 'ci/**'
       - '.github/workflows/build-codex.yml'
       - '.github/workflows/build-rusty-v8-android.yml'
+  workflow_call:
+    inputs:
+      codex_ref:
+        type: string
+        required: false
+        default: '50ef7395faee1d0e2d01730f9636aa06091c7be3'
+      v8_version:
+        type: string
+        required: false
+        default: '150.4.0'
+      use_existing_v8:
+        type: boolean
+        required: false
+        default: false
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: build-codex-${{ github.ref }}
@@ -29,12 +42,13 @@ concurrency:
 env:
   ANDROID_API: '24'
   ANDROID_NDK_VERSION: '28.1.13356709'
-  WORK_DIR: '${{ github.workspace }}/build'
-  ANDROID_NDK_HOME: '${{ github.workspace }}/android-ndk'
+  WORK_DIR: '${{ github.workspace }}/codex/build'
+  ANDROID_NDK_HOME: '${{ github.workspace }}/codex/build/android-ndk'
   JOBS: '2'
 
 jobs:
   rusty-v8:
+    if: ${{ !inputs.use_existing_v8 }}
     uses: ./.github/workflows/build-rusty-v8-android.yml
     with:
       v8_version: ${{ inputs.v8_version || '150.4.0' }}
@@ -42,6 +56,7 @@ jobs:
 
   build-codex:
     needs: rusty-v8
+    if: always() && (inputs.use_existing_v8 || needs.rusty-v8.result == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
@@ -51,7 +66,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq build-essential cmake perl pkg-config m4 zip unzip file protobuf-compiler
-          source scripts/setup-runner.sh
+          source ci/scripts/setup-runner.sh
 
       - name: Clone pinned Codex source
         env:
@@ -73,7 +88,7 @@ jobs:
             ${{ env.WORK_DIR }}/codex-target
             ~/.cargo/registry
             ~/.cargo/git
-          key: codex-android-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-${{ hashFiles('build/codex-src/codex-rs/Cargo.lock', 'scripts/build-codex-android.sh', 'scripts/env.sh') }}
+          key: codex-android-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-${{ hashFiles('codex/src/codex-rs/Cargo.lock', 'codex/scripts/build-codex-android.sh', 'ci/scripts/env.sh') }}
 
       - name: Download verified Rusty V8 artifact
         uses: actions/download-artifact@v4
@@ -91,13 +106,14 @@ jobs:
           echo "RUSTY_V8_SRC_BINDING_PATH=$BINDING" >> "$GITHUB_ENV"
 
       - name: Build Codex CLI and code-mode host
-        run: source scripts/env.sh && ./scripts/build-codex-android.sh
+        run: source ci/scripts/env.sh && ./codex/scripts/build-codex-android.sh
 
       - name: Upload Codex binaries
         uses: actions/upload-artifact@v4
         with:
           name: codex-android-aarch64-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}
           path: |
-            codex-android
-            codex-code-mode-host
+            codex/artifacts/codex-android
+            codex/artifacts/codex-code-mode-host
+            codex/artifacts/codex-linux-sandbox
           if-no-files-found: error

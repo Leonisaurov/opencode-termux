@@ -3,6 +3,10 @@ name: Build OpenCode (final assembly)
 on:
   workflow_dispatch:
     inputs:
+      opentui_ref:
+        description: 'Commit, tag o branch de OpenTUI'
+        required: false
+        default: '9eabce704096837148d935554fcae9c19e6e21f4'
       opencode_version:
         description: 'OpenCode version to build'
         required: false
@@ -11,13 +15,17 @@ on:
     tags:
       - 'v*'
     paths:
-      - 'patches/opentui/**'
-      - 'scripts/build-opentui.sh'
-      - 'scripts/build-opencode.sh'
-      - 'scripts/build-opencode-android.ts'
-      - 'scripts/make-packages.sh'
+      - 'opencode/**'
+      - 'opentui/**'
+      - 'bun/**'
+      - 'ci/**'
   workflow_call:
     inputs:
+      opentui_ref:
+        description: 'Commit, tag o branch de OpenTUI'
+        required: false
+        type: string
+        default: '9eabce704096837148d935554fcae9c19e6e21f4'
       opencode_version:
         description: 'Versión de OpenCode'
         required: false
@@ -37,20 +45,22 @@ permissions:
   contents: read
 
 env:
+  PRODUCT: opencode
   BUN_VERSION: "1.2.13"
-  OPENCODE_VERSION: "1.3.13"
+  OPENTUI_REF: "${{ inputs.opentui_ref || '9eabce704096837148d935554fcae9c19e6e21f4' }}"
+  OPENCODE_VERSION: "${{ inputs.opencode_version || '1.3.13' }}"
   ANDROID_API: "24"
   ANDROID_NDK_VERSION: "28.1.13356709"
   ZIG_VERSION: "0.15.2"
   JOBS: "2"
-  WORK_DIR: "${{ github.workspace }}/build"
-  ANDROID_NDK_HOME: "${{ github.workspace }}/android-ndk"
-  ANDROID_NDK_ROOT: "${{ github.workspace }}/android-ndk"
+  WORK_DIR: "${{ github.workspace }}/opencode/build"
+  ANDROID_NDK_HOME: "${{ github.workspace }}/opencode/build/android-ndk"
+  ANDROID_NDK_ROOT: "${{ github.workspace }}/opencode/build/android-ndk"
 
 jobs:
   build-opencode:
     permissions:
-      contents: write
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -89,7 +99,7 @@ jobs:
 
       # ── Install everything else ───────────────────────────────
       - name: Install build dependencies
-        run: source scripts/setup-runner.sh
+        run: source ci/scripts/setup-runner.sh
 
       - name: Receive Bun artifact
         uses: actions/download-artifact@v4
@@ -106,15 +116,15 @@ jobs:
             exit 1
           fi
           if [ -n "$BUN" ]; then
-            mkdir -p "$WORK_DIR/bun-build"
-            install -m 0755 "$BUN" "$WORK_DIR/bun-build/bun"
+            mkdir -p "$GITHUB_WORKSPACE/bun/build/bun-build"
+            install -m 0755 "$BUN" "$GITHUB_WORKSPACE/bun/build/bun-build/bun"
           fi
 
       - name: Receive OpenTUI artifact
         uses: actions/download-artifact@v4
         continue-on-error: ${{ !inputs.require_dependency_artifacts }}
         with:
-          name: libopentui-arm64-musl
+          name: opentui-android-aarch64-${{ env.OPENTUI_REF }}
           path: ${{ env.WORK_DIR }}/artifact-opentui
 
       - name: Materialize OpenTUI artifact
@@ -125,7 +135,7 @@ jobs:
             exit 1
           fi
           if [ -n "$LIB" ]; then
-            DEST="$WORK_DIR/opentui-src/packages/core/src/lib/aarch64-linux-musl"
+            DEST="$GITHUB_WORKSPACE/opentui/src/opencode/packages/core/src/lib/aarch64-linux-musl"
             mkdir -p "$DEST"
             install -m 0755 "$LIB" "$DEST/libopentui.so"
           fi
@@ -135,32 +145,34 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: |
-            ${{ env.WORK_DIR }}/bun-build/bun
-            ${{ env.WORK_DIR }}/state/nodes/bun.json
+            ${{ github.workspace }}/bun/build/bun-build/bun
+            ${{ github.workspace }}/bun/build/state/nodes/bun.json
           key: build-v3-bun-${{ env.BUN_VERSION }}-restore
           restore-keys: |
             build-v3-bun-${{ env.BUN_VERSION }}-
 
       # ── Build libopentui.so ───────────────────────────────────
       - name: Cache OpenTUI build
+        if: ${{ !inputs.require_dependency_artifacts }}
         id: cache-opentui
         uses: actions/cache@v4
         with:
           path: |
-            ${{ env.WORK_DIR }}/opentui-src/packages/core/src/lib
-            ${{ env.WORK_DIR }}/state/nodes/opentui.json
+            ${{ github.workspace }}/opentui/src/opencode/packages/core/src/lib
+            ${{ github.workspace }}/opentui/build/state/nodes/opentui.json
           key: build-v3-opentui-restore
           restore-keys: |
             build-v3-opentui-
 
       - name: Build libopentui.so
+        if: ${{ !inputs.require_dependency_artifacts }}
         run: |
-          source scripts/env.sh && ./scripts/build-opentui.sh
+          PRODUCT=opentui ./opentui/scripts/build-opentui.sh
 
       # ── Build OpenCode + packages ─────────────────────────────
       - name: Build OpenCode standalone binary
         run: |
-          source scripts/env.sh && ./scripts/build-opencode.sh
+          source ci/scripts/env.sh && ./opencode/scripts/build-opencode.sh
 
       - name: Verify OpenCode binary
         run: |
@@ -171,7 +183,7 @@ jobs:
 
       - name: Create distribution packages
         run: |
-          source scripts/env.sh && ./scripts/make-packages.sh
+          source ci/scripts/env.sh && ./opencode/scripts/make-packages.sh
 
       - name: List packages
         run: ls -lh "${WORK_DIR}/packages/"
@@ -186,40 +198,12 @@ jobs:
             ${{ env.WORK_DIR }}/packages/*.pkg.tar.xz
             ${{ env.WORK_DIR }}/packages/*.deb
 
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+      - name: Upload standalone OpenCode artifact
+        uses: actions/upload-artifact@v4
         with:
-          files: |
-            ${{ env.WORK_DIR }}/packages/*.zip
-            ${{ env.WORK_DIR }}/packages/*.pkg.tar.xz
-            ${{ env.WORK_DIR }}/packages/*.deb
-          body: |
-            ## OpenCode ${{ env.OPENCODE_VERSION }} for Android/Termux (aarch64)
-
-            ### Installation
-
-            **Termux (pacman):**
-            ```bash
-            pacman -U opencode-${{ env.OPENCODE_VERSION }}-1-aarch64.pkg.tar.xz
-            ```
-
-            **Termux (dpkg):**
-            ```bash
-            dpkg -i opencode_${{ env.OPENCODE_VERSION }}_aarch64.deb
-            ```
-
-            **Standalone binary:**
-            ```bash
-            chmod +x opencode && mv opencode $PREFIX/bin/
-            ```
-
-            ### Build info
-            - Bun: v${{ env.BUN_VERSION }} (cross-compiled for Android aarch64)
-            - Android API level: ${{ env.ANDROID_API }}
-            - NDK: r28b (${{ env.ANDROID_NDK_VERSION }})
-          draft: false
-          prerelease: false
+          name: opencode-android-aarch64-${{ env.OPENCODE_VERSION }}
+          path: ${{ env.WORK_DIR }}/dist/opencode
+          if-no-files-found: error
 
       - name: Cleanup intermediate files
         if: always()
