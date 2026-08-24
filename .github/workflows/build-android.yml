@@ -30,7 +30,7 @@ on:
       - '.github/workflows/build-opencode.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: android-products-${{ github.ref }}
