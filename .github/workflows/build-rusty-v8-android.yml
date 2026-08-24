@@ -41,6 +41,13 @@ on:
         description: 'Versión del crate v8 (tag de denoland/rusty_v8) a compilar desde fuente'
         required: false
         default: '150.4.0'
+  workflow_call:
+    inputs:
+      v8_version:
+        description: 'Versión del crate v8 de denoland/rusty_v8'
+        required: false
+        type: string
+        default: '150.4.0'
 
 permissions:
   contents: write

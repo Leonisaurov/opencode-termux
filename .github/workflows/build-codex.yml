@@ -1,0 +1,94 @@
+name: Build Codex (Android aarch64)
+
+on:
+  workflow_dispatch:
+    inputs:
+      codex_ref:
+        description: 'Commit o tag de openai/codex'
+        required: false
+        default: '50ef7395faee1d0e2d01730f9636aa06091c7be3'
+      v8_version:
+        description: 'Versión de rusty_v8 compatible con codex-code-mode-host'
+        required: false
+        default: '150.4.0'
+  push:
+    paths:
+      - 'codex/**'
+      - 'scripts/build-codex-android.sh'
+      - 'scripts/build-state.py'
+      - '.github/workflows/build-codex.yml'
+      - '.github/workflows/build-rusty-v8-android.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-codex-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ANDROID_API: '24'
+  ANDROID_NDK_VERSION: '28.1.13356709'
+  WORK_DIR: '${{ github.workspace }}/build'
+  ANDROID_NDK_HOME: '${{ github.workspace }}/android-ndk'
+  JOBS: '2'
+
+jobs:
+  rusty-v8:
+    uses: ./.github/workflows/build-rusty-v8-android.yml
+    with:
+      v8_version: ${{ inputs.v8_version || '150.4.0' }}
+    secrets: inherit
+
+  build-codex:
+    needs: rusty-v8
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies and NDK
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential cmake perl pkg-config m4 zip unzip file protobuf-compiler
+          source scripts/setup-runner.sh
+
+      - name: Clone pinned Codex source
+        env:
+          CODEX_REF: ${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}
+        run: |
+          set -euo pipefail
+          CODEX_SRC="$WORK_DIR/codex-src"
+          rm -rf "$CODEX_SRC"
+          git clone --filter=blob:none --no-checkout https://github.com/openai/codex.git "$CODEX_SRC"
+          git -C "$CODEX_SRC" fetch --depth 1 origin "$CODEX_REF"
+          git -C "$CODEX_SRC" checkout --detach FETCH_HEAD
+          echo "CODEX_SRC=$CODEX_SRC" >> "$GITHUB_ENV"
+          git -C "$CODEX_SRC" log -1 --oneline
+
+      - name: Download verified Rusty V8 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: rusty-v8-${{ inputs.v8_version || '150.4.0' }}-ptrcomp-sandbox-aarch64-linux-android
+          path: ${{ env.WORK_DIR }}/rusty-v8
+
+      - name: Export Rusty V8 paths
+        run: |
+          set -euo pipefail
+          ARCHIVE="$(find "$WORK_DIR/rusty-v8" -name 'librusty_v8_*.a.gz' -print -quit)"
+          BINDING="$(find "$WORK_DIR/rusty-v8" -name 'src_binding_*.rs' -print -quit)"
+          test -n "$ARCHIVE" && test -n "$BINDING"
+          echo "RUSTY_V8_ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+          echo "RUSTY_V8_SRC_BINDING_PATH=$BINDING" >> "$GITHUB_ENV"
+
+      - name: Build Codex CLI and code-mode host
+        run: source scripts/env.sh && ./scripts/build-codex-android.sh
+
+      - name: Upload Codex binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-android-aarch64-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}
+          path: |
+            codex-android
+            codex-code-mode-host
+          if-no-files-found: error

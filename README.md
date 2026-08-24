@@ -145,6 +145,11 @@ shows their current state. The engine hashes sources, toolchain/version values,
 dependencies, and outputs, so a no-op preserves compiler caches while a changed
 leaf invalidates only its descendants.
 
+Codex follows the same dependency rule in CI: `build-codex.yml` calls the
+reusable Rusty V8 workflow first, downloads its verified artifact, and only
+then builds `codex-cli` and `codex-code-mode-host`. Codex builds run only for
+Codex/build workflow changes or manual dispatch.
+
 ---
 
 ## What Was Patched and Why
