@@ -17,6 +17,12 @@ TINYCC_COMMIT="${TINYCC_COMMIT:-b91835d8701523e895a2b447713630069514e291}"
 TINYCC_SRC="${WORK_DIR}/tinycc-src"
 TINYCC_BUILD="${TINYCC_SRC}/build-android"
 
+incremental_exec tinycc \
+    --input scripts/build-tinycc.sh --input scripts/env.sh --input "$TINYCC_SRC" \
+    --value "TINYCC_COMMIT=$TINYCC_COMMIT" --value "ANDROID_API=$ANDROID_API" \
+    --dep "$BUILD_STATE_DIR/nodes/webkit.json" \
+    --output "$WEBKIT_OUTPUT/lib/libtcc.a"
+
 echo "=== Building TinyCC (libtcc.a) for Android aarch64 ==="
 
 # Check if already built and installed

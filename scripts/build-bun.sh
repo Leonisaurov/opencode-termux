@@ -20,6 +20,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/env.sh"
 
+incremental_exec bun \
+    --input scripts/build-bun.sh --input scripts/env.sh \
+    --input patches/bun/android-support.patch \
+    --input patches/zig/posix-android-sigaction.patch --input "$BUN_SRC" \
+    --value "BUN_VERSION=$BUN_VERSION" --value "ANDROID_API=$ANDROID_API" \
+    --value "ANDROID_NDK_VERSION=$ANDROID_NDK_VERSION" \
+    --dep "$BUILD_STATE_DIR/nodes/webkit.json" \
+    --output "$BUN_BUILD/bun"
+
 echo "=== Building Bun v${BUN_VERSION} for Android aarch64 ==="
 
 # Verify prerequisites

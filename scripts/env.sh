@@ -5,6 +5,13 @@
 
 set -euo pipefail
 
+# Termux owns the process temporary directory. Validate it before any build
+# helper or compiler is allowed to create temporary files.
+: "${TMPDIR:=/data/data/com.termux/files/usr/tmp}"
+export TMPDIR
+mkdir -p "$TMPDIR"
+test -d "$TMPDIR" && test -w "$TMPDIR"
+
 export REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Versions
@@ -15,6 +22,7 @@ export ICU_VERSION="${ICU_VERSION:-75.1}"
 export ZIG_VERSION="${ZIG_VERSION:-0.15.2}"
 export OPENCODE_VERSION="${OPENCODE_VERSION:-1.3.13}"
 export ANDROID_API="${ANDROID_API:-24}"
+export ANDROID_NDK_VERSION="${ANDROID_NDK_VERSION:-28.1.13356709}"
 
 # Android NDK
 export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-/opt/android-ndk}"
@@ -47,6 +55,7 @@ export WEBKIT_BUILD="${WORK_DIR}/webkit-build"
 export WEBKIT_OUTPUT="${WORK_DIR}/webkit-android"
 export BUN_BUILD="${WORK_DIR}/bun-build"
 export DIST_DIR="${WORK_DIR}/dist"
+export BUILD_STATE_DIR="${BUILD_STATE_DIR:-${WORK_DIR}/state}"
 
 # Number of parallel jobs (can be overridden for low-RAM machines)
 export JOBS="${JOBS:-$(nproc)}"
@@ -62,3 +71,20 @@ echo "WebKit commit: ${WEBKIT_COMMIT}"
 echo "OpenCode ver:  ${OPENCODE_VERSION}"
 echo "Jobs:          ${JOBS}"
 echo "==========================================="
+
+# Run a legacy build script through the shared content-addressed state engine.
+# Each caller supplies the node metadata and this function appends the caller
+# script as the command. The guard is re-entrant so the actual script body runs
+# exactly once after a cache miss.
+incremental_exec() {
+  if [ "${BUILD_STATE_ACTIVE:-0}" = "1" ]; then
+    return 0
+  fi
+  local node="$1"
+  shift
+  local script_path
+  script_path="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+  exec env BUILD_STATE_ACTIVE=1 python3 "$REPO_ROOT/scripts/build-state.py" run \
+    --root "$REPO_ROOT" --state-dir "$BUILD_STATE_DIR" --node "$node" \
+    --input scripts/build-state.py "$@" -- "$script_path"
+}

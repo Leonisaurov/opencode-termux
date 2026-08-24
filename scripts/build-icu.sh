@@ -13,6 +13,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/env.sh"
 
+incremental_exec icu \
+    --input scripts/build-icu.sh --input scripts/env.sh \
+    --value "ICU_VERSION=$ICU_VERSION" --value "ANDROID_API=$ANDROID_API" \
+    --value "ANDROID_NDK_VERSION=$ANDROID_NDK_VERSION" \
+    --output "$DEPS_PREFIX"
+
 ICU_VERSION_UNDERSCORE="${ICU_VERSION//./_}"
 ICU_TARBALL="icu4c-${ICU_VERSION_UNDERSCORE}-src.tgz"
 ICU_URL="https://github.com/unicode-org/icu/releases/download/release-${ICU_VERSION_UNDERSCORE//_/-}/${ICU_TARBALL}"

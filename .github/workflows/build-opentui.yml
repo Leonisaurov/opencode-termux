@@ -1,0 +1,216 @@
+# build-opentui.yml
+#
+# Cross-compila libopentui.so para Android ARM64 (aarch64) usando el Zig
+# ESTÁNDAR de ziglang.org 0.15.2 (NO el fork oven-sh/zig que usa Bun).
+#
+# Flujo:
+#   1. Instala zig 0.15.2 (ziglang.org) + patchelf.
+#   2. Resuelve el commit de anomalyco/opentui a compilar (branch/tag/SHA).
+#   3. Clona (shallow) el commit resuelto en $WORK_DIR/opentui-src.
+#   4. scripts/build-opentui.sh: `zig build -Dtarget=aarch64-linux-musl
+#      -Doptimize=ReleaseSafe` + patchelf --add-needed libc.so.
+#   5. Verifica NEEDED: libc.so y sube el artifact `libopentui-arm64-musl`.
+#
+# El artifact es consumido por build-opencode.yml (Fase 2) para ensamblar
+# OpenCode. El .so se guarda TAMBIÉN en el cache con key `opentui-android-<commit>`
+# (path REAL: $WORK_DIR/opentui-src/packages/core/src/lib) para que
+# build-opencode.yml lo restaure sin recompilar. Además se cachea opentui-src
+# keyed por commit para rebuilds rápidos y compartición del toolchain zig
+# con los otros workflows.
+
+name: Build libopentui.so (Android ARM64)
+
+on:
+  workflow_dispatch:
+    inputs:
+      # Debe coincidir con el fallback de env.OPENTUI_REF (commit verificado
+      # localmente en build/opentui-src). Cambiar a 'main' para seguir HEAD.
+      #
+      # CAMINO FÁCIL DE UPGRADE: para actualizar opentui, cambiar este pin al
+      # commit nuevo. La cache key del .so es POR COMMIT
+      # (opentui-android-<commit>) → al cambiar el pin, la key cambia
+      # automáticamente → cache miss → se recompila. Nada más que tocar.
+      opentui_ref:
+        description: 'Branch, tag, o commit SHA de anomalyco/opentui a compilar (default: commit verificado 9eabce70). Para actualizar: cambiar este pin; la cache key por commit invalida automáticamente.'
+        required: false
+        default: '9eabce704096837148d935554fcae9c19e6e21f4'
+  push:
+    paths:
+      - 'patches/opentui/**'
+      - 'scripts/build-opentui.sh'
+      - 'scripts/env.sh'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ZIG_VERSION: "0.15.2"                    # ziglang.org estándar (NO oven-sh)
+  OPENTUI_TARGET: "aarch64-linux-musl"
+  OPENTUI_REF: "${{ inputs.opentui_ref || '9eabce704096837148d935554fcae9c19e6e21f4' }}"
+  JOBS: "2"
+  WORK_DIR: "${{ github.workspace }}/build"
+  # NOTA: PREFIX se define a nivel de step (build) — el contexto runner no
+  # está disponible en el env de nivel workflow.
+
+jobs:
+  build-opentui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create work directory
+        run: mkdir -p "$WORK_DIR"
+
+      - name: Install patchelf
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq patchelf
+
+      # ── Resolve el commit exacto de opentui (branch/tag/SHA) ──
+      - name: Resolve opentui commit
+        id: resolve
+        run: |
+          # Ramas y tags resuelven vía ls-remote; los SHAs crudos (o refs
+          # no convencionales) caen al fetch de validación.
+          RESOLVED="$(git ls-remote https://github.com/anomalyco/opentui.git \
+            "refs/heads/$OPENTUI_REF" "refs/tags/$OPENTUI_REF" "refs/tags/$OPENTUI_REF^{}" \
+            2>/dev/null | head -1 | awk '{print $1}')"
+          if [ -z "$RESOLVED" ]; then
+            rm -rf "$RUNNER_TEMP/opentui-resolve"
+            git init -q "$RUNNER_TEMP/opentui-resolve"
+            git -C "$RUNNER_TEMP/opentui-resolve" remote add origin https://github.com/anomalyco/opentui.git
+            git -C "$RUNNER_TEMP/opentui-resolve" fetch -q --depth 1 origin "$OPENTUI_REF"
+            RESOLVED="$(git -C "$RUNNER_TEMP/opentui-resolve" rev-parse FETCH_HEAD)"
+          fi
+          if [ -z "$RESOLVED" ]; then
+            echo "ERROR: no se pudo resolver opentui_ref='$OPENTUI_REF'"
+            exit 1
+          fi
+          echo "commit=$RESOLVED" >> "$GITHUB_OUTPUT"
+          echo ">>> opentui_ref=$OPENTUI_REF -> commit $RESOLVED"
+
+      # ── Cachés ────────────────────────────────────────────────
+      - name: Cache Zig toolchain
+        id: cache-zig
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+          key: zig-${{ env.ZIG_VERSION }}          # key compartida con build-bun/build-opencode
+
+      - name: Cache opentui source
+        id: cache-opentui
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.WORK_DIR }}/opentui-src
+          key: build-v2-opentui-src-${{ steps.resolve.outputs.commit }}-${{ github.sha }}
+          restore-keys: |
+            build-v2-opentui-src-${{ steps.resolve.outputs.commit }}-
+
+      # ── Toolchain ─────────────────────────────────────────────
+      - name: Install Zig ${{ env.ZIG_VERSION }} (ziglang.org)
+        run: |
+          if [ ! -x "$WORK_DIR/zig-$ZIG_VERSION/zig" ]; then
+            mkdir -p "$WORK_DIR"
+            cd "$RUNNER_TEMP"
+            wget -q "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" -O zig.tar.xz
+            mkdir -p "$WORK_DIR/zig-$ZIG_VERSION"
+            tar xf zig.tar.xz -C "$WORK_DIR/zig-$ZIG_VERSION" --strip-components=1
+            rm zig.tar.xz
+          fi
+          echo "ZIG_BIN=$WORK_DIR/zig-$ZIG_VERSION/zig" >> "$GITHUB_ENV"
+          echo "$WORK_DIR/zig-$ZIG_VERSION" >> "$GITHUB_PATH"
+          "$WORK_DIR/zig-$ZIG_VERSION/zig" version
+
+      # ── Fuente de opentui ──────────────────────────────────────
+      - name: Prepare opentui source
+        run: |
+          OPENTUI_SRC="$WORK_DIR/opentui-src"
+          OPENTUI_COMMIT="${{ steps.resolve.outputs.commit }}"
+          # Reutilizar fuente cacheada solo si está en el commit correcto.
+          if [ -d "$OPENTUI_SRC/.git" ]; then
+            CURRENT="$(git -C "$OPENTUI_SRC" rev-parse HEAD 2>/dev/null || true)"
+            if [ "$CURRENT" = "$OPENTUI_COMMIT" ]; then
+              echo ">>> Reusing cached opentui source at $OPENTUI_COMMIT"
+              exit 0
+            fi
+          fi
+          # Fetch shallow del ref solicitado (branch, tag o SHA alcanzable).
+          rm -rf "$OPENTUI_SRC"
+          mkdir -p "$(dirname "$OPENTUI_SRC")"
+          git init -q "$OPENTUI_SRC"
+          git -C "$OPENTUI_SRC" remote add origin https://github.com/anomalyco/opentui.git
+          git -C "$OPENTUI_SRC" fetch -q --depth 1 origin "$OPENTUI_REF"
+          git -C "$OPENTUI_SRC" checkout -q FETCH_HEAD
+          echo ">>> opentui source ready at $(git -C "$OPENTUI_SRC" rev-parse --short HEAD)"
+
+      # ── Build libopentui.so ────────────────────────────────────
+      - name: Build libopentui.so (state validated)
+        # build-opentui.sh escribe el zig cache en $TMPDIR (patrón
+        # Termux); en el runner apuntamos PREFIX a runner.temp para que el
+        # script (set -u) no falle por variable sin definir.
+        env:
+          PREFIX: ${{ runner.temp }}
+        run: |
+          source scripts/env.sh && ./scripts/build-opentui.sh
+
+      - name: Verify libopentui.so
+        run: |
+          LIB="$WORK_DIR/opentui-src/packages/core/src/lib/$OPENTUI_TARGET/libopentui.so"
+          ls -lh "$LIB"
+          file "$LIB"
+          readelf -h "$LIB" | grep -E "Machine|Class"
+          echo "DT_NEEDED:"
+          readelf -d "$LIB" | grep NEEDED
+          if ! readelf -d "$LIB" | grep -q "NEEDED.*libc.so"; then
+            echo "ERROR: libopentui.so is missing NEEDED: libc.so"
+            exit 1
+          fi
+
+      # ── Artifact ───────────────────────────────────────────────
+      - name: Write build info
+        run: |
+          LIB_DIR="$WORK_DIR/opentui-src/packages/core/src/lib/$OPENTUI_TARGET"
+          {
+            echo "workflow=$GITHUB_WORKFLOW"
+            echo "opentui_ref=$OPENTUI_REF"
+            echo "opentui_commit=${{ steps.resolve.outputs.commit }}"
+            echo "zig_version=$ZIG_VERSION"
+            echo "target=$OPENTUI_TARGET"
+            echo "job_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } > "$LIB_DIR/build-info.txt"
+          cat "$LIB_DIR/build-info.txt"
+
+      - name: Save libopentui.so to cache (key por commit)
+        # build-opencode.yml restaura esta key y copia el .so a node_modules.
+        # La key incluye el commit resuelto (opentui-android-<commit>): cada
+        # commit genera una entrada de cache PROPIA, así actions/cache
+        # (que no sobreescribe) no choca entre runs con commits distintos.
+        # Ya no se necesita continue-on-error: la key es única por commit.
+        # UPGRADE FÁCIL: al cambiar el pin opentui_ref a un commit nuevo, la
+        # key cambia automáticamente → cache miss → se recompila. Sin pasos
+        # manuales.
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.WORK_DIR }}/opentui-src/packages/core/src/lib
+            ${{ env.WORK_DIR }}/state/nodes/opentui.json
+          key: build-v2-opentui-${{ steps.resolve.outputs.commit }}-${{ github.sha }}
+
+      - name: Upload libopentui.so artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libopentui-arm64-musl
+          path: ${{ env.WORK_DIR }}/opentui-src/packages/core/src/lib/${{ env.OPENTUI_TARGET }}/
+          if-no-files-found: error
+
+      # ── Cleanup ────────────────────────────────────────────────
+      - name: Cleanup zig build caches (keep cache lean)
+        if: always()
+        run: |
+          find "$WORK_DIR/opentui-src" -type d -name ".zig-cache" -prune -exec rm -rf {} + 2>/dev/null || true
+          df -h .

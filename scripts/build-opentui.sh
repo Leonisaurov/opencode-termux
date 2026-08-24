@@ -13,6 +13,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/env.sh"
 
+incremental_exec opentui \
+    --input scripts/build-opentui.sh --input scripts/env.sh \
+    --input patches/opentui --input "$OPENTUI_SRC" \
+    --value "ZIG_VERSION=$ZIG_VERSION" --value "ANDROID_API=$ANDROID_API" \
+    --output "$OPENTUI_SRC/packages/core/src/lib/aarch64-linux-musl/libopentui.so"
+
 ZIG_BIN="${ZIG_BIN:-zig}"
 
 echo "=== Building libopentui.so for Android aarch64 ==="

@@ -22,6 +22,12 @@ if [ ! -f "$OPENCODE_BINARY" ]; then
     exit 1
 fi
 
+incremental_exec packages \
+    --input scripts/make-packages.sh --input scripts/env.sh \
+    --input "$OPENCODE_BINARY" --value "OPENCODE_VERSION=$OPENCODE_VERSION" \
+    --dep "$BUILD_STATE_DIR/nodes/opencode.json" \
+    --output "$PKG_DIR"
+
 echo "=== Creating packages for OpenCode v${OPENCODE_VERSION} ==="
 
 BINARY_SIZE=$(stat -c%s "$OPENCODE_BINARY")

@@ -13,6 +13,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/env.sh"
 
+incremental_exec webkit \
+    --input scripts/build-webkit.sh --input scripts/env.sh \
+    --input cmake/webkit-android-toolchain.cmake \
+    --input patches/webkit/android-support.patch --input "$WEBKIT_SRC" \
+    --value "WEBKIT_COMMIT=$WEBKIT_COMMIT" --value "ANDROID_API=$ANDROID_API" \
+    --value "ANDROID_NDK_VERSION=$ANDROID_NDK_VERSION" \
+    --dep "$BUILD_STATE_DIR/nodes/icu.json" \
+    --output "$WEBKIT_OUTPUT"
+
 TOOLCHAIN="$REPO_ROOT/cmake/webkit-android-toolchain.cmake"
 
 # Compiler flags matching oven-sh/WebKit's Dockerfile

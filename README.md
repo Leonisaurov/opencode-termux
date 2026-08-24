@@ -1,5 +1,9 @@
 # OpenCode for Termux (Android aarch64)
 
+> **Mapa para agentes y colaboradores:** lee primero [AGENTS.md](AGENTS.md).
+> Si el trabajo es de Codex, entra en `codex/` y sigue allí sus instrucciones;
+> para OpenCode, Kilo, Bun o el port usa el directorio indicado en ese mapa.
+
 Build system for cross-compiling [OpenCode](https://github.com/anomalyco/opencode) to run natively on Android devices via [Termux](https://termux.dev/).
 
 OpenCode is an AI-powered coding assistant for the terminal. It uses [Bun](https://bun.sh/) as its JavaScript runtime and compiles to a standalone binary via `bun build --compile`. Since Bun has no official Android support ([marked "not planned"](https://github.com/oven-sh/bun/issues/9)), this project cross-compiles Bun itself from source for Android/aarch64, including the full WebKit/JavaScriptCore engine.
@@ -79,6 +83,7 @@ opencode-termux/
     zig/posix-android-sigaction.patch  # Zig stdlib sigaction/sigprocmask fix
     opentui/android-libc-link.patch  # Link NDK libc.so for Android dlopen
   scripts/
+    build-pipeline.sh          # Run the complete graph incrementally
     apply-patches.sh               # Clone upstream repos + apply patches
     build-icu.sh                   # Cross-compile ICU 75.1 for Android
     build-webkit.sh                # Cross-compile WebKit/JSC for Android
@@ -87,7 +92,10 @@ opencode-termux/
     build-opentui.sh               # Build libopentui.so for Android
     build-opencode.sh              # Build OpenCode standalone binary
     make-packages.sh               # Create zip, pacman, and deb packages
+    build-state.py                 # Content-addressed manifests and cache checks
+    build-codex-android.sh         # Build Codex CLI + code-mode host (optional)
     build-opencode-android.ts      # TypeScript helper (module graph extraction)
+  kilocode_build.sh                # Kilo build, wrapped by the same state graph
   cmake/
     webkit-android-toolchain.cmake # WebKit CMake cross-compilation toolchain
   .github/workflows/
@@ -127,6 +135,15 @@ Stage 7: Packages          ~10 sec   (zip + pacman + deb)
 ```
 
 With warm caches (WebKit + Bun cached), CI runs complete in ~4 minutes.
+
+### Incremental operation
+
+Run `scripts/build-pipeline.sh` for the OpenCode graph. Set
+`BUILD_KILO=1` or `BUILD_CODEX=1` to include those independent products.
+Manifests live in `build/state`; `python3 scripts/build-state.py status`
+shows their current state. The engine hashes sources, toolchain/version values,
+dependencies, and outputs, so a no-op preserves compiler caches while a changed
+leaf invalidates only its descendants.
 
 ---
 

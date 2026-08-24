@@ -18,6 +18,7 @@ on:
       - 'scripts/make-packages.sh'
       - 'scripts/env.sh'
       - 'scripts/setup-runner.sh'
+      - 'scripts/build-state.py'
 
 permissions:
   contents: write
@@ -77,22 +78,26 @@ jobs:
       - name: Restore Bun binary
         uses: actions/cache/restore@v4
         with:
-          path: ${{ env.WORK_DIR }}/bun-build/bun
-          key: bun-android-${{ env.BUN_VERSION }}-restore
+          path: |
+            ${{ env.WORK_DIR }}/bun-build/bun
+            ${{ env.WORK_DIR }}/state/nodes/bun.json
+          key: build-v2-bun-${{ env.BUN_VERSION }}-restore-${{ github.sha }}
           restore-keys: |
-            bun-android-${{ env.BUN_VERSION }}-
-          fail-on-cache-miss: true
+            build-v2-bun-${{ env.BUN_VERSION }}-
 
       # ── Build libopentui.so ───────────────────────────────────
       - name: Cache OpenTUI build
         id: cache-opentui
         uses: actions/cache@v4
         with:
-          path: ${{ env.WORK_DIR }}/opentui-src/zig-out
-          key: opentui-android
+          path: |
+            ${{ env.WORK_DIR }}/opentui-src/packages/core/src/lib
+            ${{ env.WORK_DIR }}/state/nodes/opentui.json
+          key: build-v2-opentui-${{ env.OPENCODE_VERSION }}-${{ github.sha }}
+          restore-keys: |
+            build-v2-opentui-
 
       - name: Build libopentui.so
-        if: steps.cache-opentui.outputs.cache-hit != 'true'
         run: |
           source scripts/env.sh && ./scripts/build-opentui.sh
 
@@ -163,5 +168,5 @@ jobs:
       - name: Cleanup intermediate files
         if: always()
         run: |
-          rm -rf "${WORK_DIR}/opentui-src" "${WORK_DIR}/opencode-src"
+          find "${WORK_DIR}" -maxdepth 1 -type f -name '*.tgz' -delete
           df -h .

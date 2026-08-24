@@ -10,6 +10,7 @@ on:
       - 'scripts/build-tinycc.sh'
       - 'scripts/env.sh'
       - 'scripts/setup-runner.sh'
+      - 'scripts/build-state.py'
       - 'cmake/**'
 
 env:
@@ -63,11 +64,14 @@ jobs:
         id: cache-icu
         uses: actions/cache@v4
         with:
-          path: ${{ env.WORK_DIR }}/deps-android/prefix
-          key: icu-android-${{ env.ICU_VERSION }}-${{ env.ANDROID_API }}
+          path: |
+            ${{ env.WORK_DIR }}/deps-android/prefix
+            ${{ env.WORK_DIR }}/state/nodes/icu.json
+          key: build-v2-icu-${{ env.ICU_VERSION }}-${{ env.ANDROID_API }}-${{ github.sha }}
+          restore-keys: |
+            build-v2-icu-${{ env.ICU_VERSION }}-${{ env.ANDROID_API }}-
 
       - name: Build ICU
-        if: steps.cache-icu.outputs.cache-hit != 'true'
         run: |
           df -h .
           source scripts/env.sh && ./scripts/build-icu.sh
@@ -78,11 +82,14 @@ jobs:
         id: cache-webkit
         uses: actions/cache@v4
         with:
-          path: ${{ env.WORK_DIR }}/webkit-android
-          key: webkit-android-${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}
+          path: |
+            ${{ env.WORK_DIR }}/webkit-android
+            ${{ env.WORK_DIR }}/state/nodes/webkit.json
+          key: build-v2-webkit-${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}-${{ github.sha }}
+          restore-keys: |
+            build-v2-webkit-${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}-
 
       - name: Clone, patch, and build WebKit/JSC
-        if: steps.cache-webkit.outputs.cache-hit != 'true'
         run: |
           source scripts/env.sh
           ./scripts/apply-patches.sh
@@ -90,7 +97,6 @@ jobs:
 
       # ── TinyCC ────────────────────────────────────────────────
       - name: Build TinyCC
-        if: steps.cache-webkit.outputs.cache-hit != 'true'
         run: |
           source scripts/env.sh && ./scripts/build-tinycc.sh
 
@@ -106,7 +112,6 @@ jobs:
       - name: Cleanup intermediate files
         if: always()
         run: |
-          rm -rf "${WORK_DIR}/webkit-src" "${WORK_DIR}/icu-src"
-          rm -rf "${WORK_DIR}/icu-host-build" "${WORK_DIR}/icu-android-build"
-          rm -rf "${WORK_DIR}/webkit-build"
+          # Keep source and compiler state: build-state.py decides what is reusable.
+          find "${WORK_DIR}" -maxdepth 1 -type f -name '*.tgz' -delete
           df -h .

@@ -9,6 +9,7 @@ on:
       - 'scripts/build-bun.sh'
       - 'scripts/env.sh'
       - 'scripts/setup-runner.sh'
+      - 'scripts/build-state.py'
 
 env:
   BUN_VERSION: "1.2.13"
@@ -64,11 +65,14 @@ jobs:
         id: cache-icu
         uses: actions/cache@v4
         with:
-          path: ${{ env.WORK_DIR }}/deps-android/prefix
-          key: icu-android-${{ env.ICU_VERSION }}-${{ env.ANDROID_API }}
+          path: |
+            ${{ env.WORK_DIR }}/deps-android/prefix
+            ${{ env.WORK_DIR }}/state/nodes/icu.json
+          key: build-v2-icu-${{ env.ICU_VERSION }}-${{ env.ANDROID_API }}-${{ github.sha }}
+          restore-keys: |
+            build-v2-icu-${{ env.ICU_VERSION }}-${{ env.ANDROID_API }}-
 
       - name: Build ICU (if needed)
-        if: steps.cache-icu.outputs.cache-hit != 'true'
         run: |
           source scripts/env.sh && ./scripts/build-icu.sh
 
@@ -76,20 +80,26 @@ jobs:
       - name: Restore WebKit build
         uses: actions/cache/restore@v4
         with:
-          path: ${{ env.WORK_DIR }}/webkit-android
-          key: webkit-android-${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}
-          fail-on-cache-miss: true
+          path: |
+            ${{ env.WORK_DIR }}/webkit-android
+            ${{ env.WORK_DIR }}/state/nodes/webkit.json
+          key: build-v2-webkit-${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}-${{ github.sha }}
+          restore-keys: |
+            build-v2-webkit-${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}-
 
       # ── Build Bun ─────────────────────────────────────────────
       - name: Cache Bun binary
         id: cache-bun
         uses: actions/cache@v4
         with:
-          path: ${{ env.WORK_DIR }}/bun-build/bun
-          key: bun-android-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}
+          path: |
+            ${{ env.WORK_DIR }}/bun-build/bun
+            ${{ env.WORK_DIR }}/state/nodes/bun.json
+          key: build-v2-bun-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}-${{ github.sha }}
+          restore-keys: |
+            build-v2-bun-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}-
 
       - name: Clone, patch, and build Bun
-        if: steps.cache-bun.outputs.cache-hit != 'true'
         run: |
           source scripts/env.sh
           ./scripts/apply-patches.sh
@@ -112,7 +122,5 @@ jobs:
       - name: Cleanup intermediate files
         if: always()
         run: |
-          rm -rf "${WORK_DIR}/bun-src" "${WORK_DIR}/icu-src"
-          rm -rf "${WORK_DIR}/icu-host-build" "${WORK_DIR}/icu-android-build"
-          rm -rf "${WORK_DIR}/bun-build/cache/zig"
+          find "${WORK_DIR}" -maxdepth 1 -type f -name '*.tgz' -delete
           df -h .

@@ -19,6 +19,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/env.sh"
 
+incremental_exec opencode \
+    --input scripts/build-opencode.sh --input scripts/build-opencode-android.ts \
+    --input scripts/env.sh --input "$OPENCODE_SRC" \
+    --value "OPENCODE_VERSION=$OPENCODE_VERSION" --value "BUN_VERSION=$BUN_VERSION" \
+    --dep "$BUILD_STATE_DIR/nodes/bun.json" \
+    --dep "$BUILD_STATE_DIR/nodes/opentui.json" \
+    --output "$DIST_DIR/opencode"
+
 HOST_BUN="${HOST_BUN:-bun}"
 
 echo "=== Building OpenCode v${OPENCODE_VERSION} for Android aarch64 ==="
