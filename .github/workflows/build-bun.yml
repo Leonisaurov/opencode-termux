@@ -75,7 +75,7 @@ jobs:
           path: |
             ${{ env.WORK_DIR }}/deps-android/prefix
             ${{ env.WORK_DIR }}/state/nodes/icu.json
-          key: build-v2-icu-${{ env.ICU_VERSION }}-${{ env.ANDROID_API }}-${{ github.sha }}
+          key: build-v2-icu-${{ env.ICU_VERSION }}-${{ env.ANDROID_API }}-${{ github.event.workflow_run.head_sha || github.sha }}
           restore-keys: |
             build-v2-icu-${{ env.ICU_VERSION }}-${{ env.ANDROID_API }}-
 
@@ -90,7 +90,7 @@ jobs:
           path: |
             ${{ env.WORK_DIR }}/webkit-android
             ${{ env.WORK_DIR }}/state/nodes/webkit.json
-          key: build-v2-webkit-${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}-${{ github.sha }}
+          key: build-v2-webkit-${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}-${{ github.event.workflow_run.head_sha || github.sha }}
           restore-keys: |
             build-v2-webkit-${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}-
 
@@ -102,7 +102,7 @@ jobs:
           path: |
             ${{ env.WORK_DIR }}/bun-build/bun
             ${{ env.WORK_DIR }}/state/nodes/bun.json
-          key: build-v2-bun-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}-${{ github.sha }}
+          key: build-v2-bun-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}-${{ github.event.workflow_run.head_sha || github.sha }}
           restore-keys: |
             build-v2-bun-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}-
 

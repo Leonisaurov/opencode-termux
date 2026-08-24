@@ -88,7 +88,7 @@ jobs:
           path: |
             ${{ env.WORK_DIR }}/bun-build/bun
             ${{ env.WORK_DIR }}/state/nodes/bun.json
-          key: build-v2-bun-${{ env.BUN_VERSION }}-restore-${{ github.sha }}
+          key: build-v2-bun-${{ env.BUN_VERSION }}-restore-${{ github.event.workflow_run.head_sha || github.sha }}
           restore-keys: |
             build-v2-bun-${{ env.BUN_VERSION }}-
 
@@ -100,7 +100,7 @@ jobs:
           path: |
             ${{ env.WORK_DIR }}/opentui-src/packages/core/src/lib
             ${{ env.WORK_DIR }}/state/nodes/opentui.json
-          key: build-v2-opentui-${{ env.OPENCODE_VERSION }}-${{ github.sha }}
+          key: build-v2-opentui-${{ env.OPENCODE_VERSION }}-${{ github.event.workflow_run.head_sha || github.sha }}
           restore-keys: |
             build-v2-opentui-
 
