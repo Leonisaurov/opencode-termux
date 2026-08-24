@@ -2,14 +2,7 @@ name: Build Bun
 
 on:
   workflow_dispatch:
-  workflow_run:
-    workflows: ["Build Core (ICU + WebKit + TinyCC)"]
-    types: [completed]
-  push:
-    paths:
-      - 'patches/bun/**'
-      - 'patches/zig/**'
-      - 'scripts/build-bun.sh'
+  workflow_call:
 
 concurrency:
   group: build-bun-${{ github.event.workflow_run.head_branch || github.ref }}
@@ -30,7 +23,6 @@ env:
 jobs:
   build-bun:
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
@@ -58,6 +50,13 @@ jobs:
       # ── Install everything else ───────────────────────────────
       - name: Install build dependencies
         run: source scripts/setup-runner.sh
+
+      - name: Receive Core artifacts
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: core-android-artifacts
+          path: ${{ env.WORK_DIR }}
 
       # ── Patch hashes ──────────────────────────────────────────
       - name: Compute patch hashes

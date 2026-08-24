@@ -2,16 +2,7 @@ name: Build Core (ICU + WebKit + TinyCC)
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - 'patches/webkit/**'
-      - 'scripts/build-icu.sh'
-      - 'scripts/build-webkit.sh'
-      - 'scripts/build-tinycc.sh'
-      - 'scripts/env.sh'
-      - 'scripts/setup-runner.sh'
-      - 'scripts/build-state.py'
-      - 'cmake/**'
+  workflow_call:
 
 env:
   ICU_VERSION: "75.1"

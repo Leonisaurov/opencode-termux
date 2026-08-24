@@ -34,12 +34,13 @@ on:
         description: 'Branch, tag, o commit SHA de anomalyco/opentui a compilar (default: commit verificado 9eabce70). Para actualizar: cambiar este pin; la cache key por commit invalida automáticamente.'
         required: false
         default: '9eabce704096837148d935554fcae9c19e6e21f4'
-  push:
-    paths:
-      - 'patches/opentui/**'
-      - 'scripts/build-opentui.sh'
-      - 'scripts/env.sh'
-      - 'scripts/build-state.py'
+  workflow_call:
+    inputs:
+      opentui_ref:
+        description: 'Commit, tag o branch de OpenTUI'
+        required: false
+        type: string
+        default: '9eabce704096837148d935554fcae9c19e6e21f4'
 
 permissions:
   contents: read

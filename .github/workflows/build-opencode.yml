@@ -16,9 +16,13 @@ on:
       - 'scripts/build-opencode.sh'
       - 'scripts/build-opencode-android.ts'
       - 'scripts/make-packages.sh'
-  workflow_run:
-    workflows: ["Build Bun"]
-    types: [completed]
+  workflow_call:
+    inputs:
+      opencode_version:
+        description: 'Versión de OpenCode'
+        required: false
+        type: string
+        default: '1.3.13'
 
 concurrency:
   group: build-opencode-${{ github.event.workflow_run.head_branch || github.ref }}
@@ -41,7 +45,6 @@ env:
 jobs:
   build-opencode:
     runs-on: ubuntu-latest
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -80,6 +83,37 @@ jobs:
       # ── Install everything else ───────────────────────────────
       - name: Install build dependencies
         run: source scripts/setup-runner.sh
+
+      - name: Receive Bun artifact
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: bun-android-aarch64-${{ env.BUN_VERSION }}
+          path: ${{ env.WORK_DIR }}/artifact-bun
+
+      - name: Materialize Bun artifact
+        run: |
+          BUN="$(find "$WORK_DIR/artifact-bun" -type f -name bun -print -quit 2>/dev/null || true)"
+          if [ -n "$BUN" ]; then
+            mkdir -p "$WORK_DIR/bun-build"
+            install -m 0755 "$BUN" "$WORK_DIR/bun-build/bun"
+          fi
+
+      - name: Receive OpenTUI artifact
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: libopentui-arm64-musl
+          path: ${{ env.WORK_DIR }}/artifact-opentui
+
+      - name: Materialize OpenTUI artifact
+        run: |
+          LIB="$(find "$WORK_DIR/artifact-opentui" -type f -name libopentui.so -print -quit 2>/dev/null || true)"
+          if [ -n "$LIB" ]; then
+            DEST="$WORK_DIR/opentui-src/packages/core/src/lib/aarch64-linux-musl"
+            mkdir -p "$DEST"
+            install -m 0755 "$LIB" "$DEST/libopentui.so"
+          fi
 
       # ── Restore Bun binary (required — run build-bun first) ──
       - name: Restore Bun binary
