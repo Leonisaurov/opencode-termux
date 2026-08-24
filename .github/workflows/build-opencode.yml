@@ -23,13 +23,18 @@ on:
         required: false
         type: string
         default: '1.3.13'
+      require_dependency_artifacts:
+        description: 'Falla si faltan artifacts producidos por el DAG caller'
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
-  group: build-opencode-${{ github.event.workflow_run.head_branch || github.ref }}
+  group: build-opencode-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   BUN_VERSION: "1.2.13"
@@ -44,12 +49,14 @@ env:
 
 jobs:
   build-opencode:
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.sha }}
 
       - name: Override OpenCode version from input
         if: github.event.inputs.opencode_version
@@ -86,7 +93,7 @@ jobs:
 
       - name: Receive Bun artifact
         uses: actions/download-artifact@v4
-        continue-on-error: true
+        continue-on-error: ${{ !inputs.require_dependency_artifacts }}
         with:
           name: bun-android-aarch64-${{ env.BUN_VERSION }}
           path: ${{ env.WORK_DIR }}/artifact-bun
@@ -94,6 +101,10 @@ jobs:
       - name: Materialize Bun artifact
         run: |
           BUN="$(find "$WORK_DIR/artifact-bun" -type f -name bun -print -quit 2>/dev/null || true)"
+          if [ -z "$BUN" ] && [ "${{ inputs.require_dependency_artifacts }}" = "true" ]; then
+            echo 'Required Bun artifact is missing or malformed.' >&2
+            exit 1
+          fi
           if [ -n "$BUN" ]; then
             mkdir -p "$WORK_DIR/bun-build"
             install -m 0755 "$BUN" "$WORK_DIR/bun-build/bun"
@@ -101,7 +112,7 @@ jobs:
 
       - name: Receive OpenTUI artifact
         uses: actions/download-artifact@v4
-        continue-on-error: true
+        continue-on-error: ${{ !inputs.require_dependency_artifacts }}
         with:
           name: libopentui-arm64-musl
           path: ${{ env.WORK_DIR }}/artifact-opentui
@@ -109,6 +120,10 @@ jobs:
       - name: Materialize OpenTUI artifact
         run: |
           LIB="$(find "$WORK_DIR/artifact-opentui" -type f -name libopentui.so -print -quit 2>/dev/null || true)"
+          if [ -z "$LIB" ] && [ "${{ inputs.require_dependency_artifacts }}" = "true" ]; then
+            echo 'Required OpenTUI artifact is missing or malformed.' >&2
+            exit 1
+          fi
           if [ -n "$LIB" ]; then
             DEST="$WORK_DIR/opentui-src/packages/core/src/lib/aarch64-linux-musl"
             mkdir -p "$DEST"
@@ -122,9 +137,9 @@ jobs:
           path: |
             ${{ env.WORK_DIR }}/bun-build/bun
             ${{ env.WORK_DIR }}/state/nodes/bun.json
-          key: build-v2-bun-${{ env.BUN_VERSION }}-restore-${{ github.event.workflow_run.head_sha || github.sha }}
+          key: build-v3-bun-${{ env.BUN_VERSION }}-restore
           restore-keys: |
-            build-v2-bun-${{ env.BUN_VERSION }}-
+            build-v3-bun-${{ env.BUN_VERSION }}-
 
       # ── Build libopentui.so ───────────────────────────────────
       - name: Cache OpenTUI build
@@ -134,9 +149,9 @@ jobs:
           path: |
             ${{ env.WORK_DIR }}/opentui-src/packages/core/src/lib
             ${{ env.WORK_DIR }}/state/nodes/opentui.json
-          key: build-v2-opentui-${{ env.OPENCODE_VERSION }}-${{ github.event.workflow_run.head_sha || github.sha }}
+          key: build-v3-opentui-restore
           restore-keys: |
-            build-v2-opentui-
+            build-v3-opentui-
 
       - name: Build libopentui.so
         run: |

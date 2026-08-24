@@ -4,6 +4,9 @@ on:
   workflow_dispatch:
   workflow_call:
 
+permissions:
+  contents: read
+
 env:
   ICU_VERSION: "75.1"
   ANDROID_API: "24"
@@ -58,9 +61,7 @@ jobs:
           path: |
             ${{ env.WORK_DIR }}/deps-android/prefix
             ${{ env.WORK_DIR }}/state/nodes/icu.json
-          key: build-v2-icu-${{ env.ICU_VERSION }}-${{ env.ANDROID_API }}-${{ github.sha }}
-          restore-keys: |
-            build-v2-icu-${{ env.ICU_VERSION }}-${{ env.ANDROID_API }}-
+          key: build-v3-icu-${{ env.ICU_VERSION }}-${{ env.ANDROID_API }}-${{ hashFiles('scripts/build-icu.sh', 'scripts/env.sh') }}
 
       - name: Build ICU
         run: |
@@ -76,9 +77,7 @@ jobs:
           path: |
             ${{ env.WORK_DIR }}/webkit-android
             ${{ env.WORK_DIR }}/state/nodes/webkit.json
-          key: build-v2-webkit-${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}-${{ github.sha }}
-          restore-keys: |
-            build-v2-webkit-${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}-
+          key: build-v3-webkit-${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}-${{ hashFiles('scripts/build-webkit.sh', 'scripts/env.sh', 'cmake/webkit-android-toolchain.cmake') }}
 
       - name: Clone, patch, and build WebKit/JSC
         run: |
@@ -90,15 +89,6 @@ jobs:
       - name: Build TinyCC
         run: |
           source scripts/env.sh && ./scripts/build-tinycc.sh
-
-      - name: Upload core build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: core-android-artifacts
-          path: |
-            ${{ env.WORK_DIR }}/deps-android/prefix
-            ${{ env.WORK_DIR }}/webkit-android
-          if-no-files-found: error
 
       - name: Cleanup intermediate files
         if: always()

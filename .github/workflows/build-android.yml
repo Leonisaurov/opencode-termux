@@ -30,7 +30,7 @@ on:
       - '.github/workflows/build-opencode.yml'
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: android-products-${{ github.ref }}
@@ -61,4 +61,5 @@ jobs:
     uses: ./.github/workflows/build-opencode.yml
     with:
       opencode_version: ${{ inputs.opencode_version || '1.3.13' }}
+      require_dependency_artifacts: true
     secrets: inherit

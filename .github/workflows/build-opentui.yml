@@ -109,9 +109,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.WORK_DIR }}/opentui-src
-          key: build-v2-opentui-src-${{ steps.resolve.outputs.commit }}-${{ github.sha }}
-          restore-keys: |
-            build-v2-opentui-src-${{ steps.resolve.outputs.commit }}-
+          key: build-v3-opentui-src-${{ steps.resolve.outputs.commit }}
 
       # ── Toolchain ─────────────────────────────────────────────
       - name: Install Zig ${{ env.ZIG_VERSION }} (ziglang.org)
@@ -201,7 +199,7 @@ jobs:
           path: |
             ${{ env.WORK_DIR }}/opentui-src/packages/core/src/lib
             ${{ env.WORK_DIR }}/state/nodes/opentui.json
-          key: build-v2-opentui-${{ steps.resolve.outputs.commit }}-${{ github.sha }}
+          key: build-v3-opentui-${{ steps.resolve.outputs.commit }}-${{ hashFiles('scripts/build-opentui.sh', 'scripts/env.sh', 'patches/opentui/**') }}
 
       - name: Upload libopentui.so artifact
         uses: actions/upload-artifact@v4
