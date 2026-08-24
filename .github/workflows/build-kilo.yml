@@ -1,0 +1,71 @@
+name: Build Kilo (Android aarch64)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'kilocode_build.sh'
+      - 'scripts/build-kilo-android.ts'
+      - 'scripts/build-state.py'
+      - 'scripts/env.sh'
+      - '.kilo/**'
+      - '.github/workflows/build-kilo.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-kilo-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ANDROID_API: '24'
+  ANDROID_NDK_VERSION: '28.1.13356709'
+  WORK_DIR: '${{ github.workspace }}/build'
+  ANDROID_NDK_HOME: '${{ github.workspace }}/android-ndk'
+  JOBS: '2'
+
+jobs:
+  core:
+    uses: ./.github/workflows/build-core.yml
+    secrets: inherit
+
+  bun:
+    needs: core
+    uses: ./.github/workflows/build-bun.yml
+    secrets: inherit
+
+  kilo:
+    needs: bun
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies and NDK
+        run: source scripts/setup-runner.sh
+
+      - name: Receive Bun artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bun-android-aarch64-1.2.13
+          path: ${{ env.WORK_DIR }}/artifact-bun
+
+      - name: Materialize Android Bun for Kilo
+        run: |
+          set -euo pipefail
+          BUN="$(find "$WORK_DIR/artifact-bun" -type f -name bun -print -quit)"
+          test -n "$BUN"
+          mkdir -p "$GITHUB_WORKSPACE/.bun-artifact"
+          install -m 0755 "$BUN" "$GITHUB_WORKSPACE/.bun-artifact/bun-downloaded"
+
+      - name: Build Kilo
+        run: ./kilocode_build.sh
+
+      - name: Upload Kilo binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: kilo-android-aarch64
+          path: kilo-android
+          if-no-files-found: error
