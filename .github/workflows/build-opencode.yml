@@ -16,9 +16,13 @@ on:
       - 'scripts/build-opencode.sh'
       - 'scripts/build-opencode-android.ts'
       - 'scripts/make-packages.sh'
-      - 'scripts/env.sh'
-      - 'scripts/setup-runner.sh'
-      - 'scripts/build-state.py'
+  workflow_run:
+    workflows: ["Build Bun"]
+    types: [completed]
+
+concurrency:
+  group: build-opencode-${{ github.event.workflow_run.head_branch || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -37,9 +41,12 @@ env:
 jobs:
   build-opencode:
     runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Override OpenCode version from input
         if: github.event.inputs.opencode_version

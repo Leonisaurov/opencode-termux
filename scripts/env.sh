@@ -7,7 +7,11 @@ set -euo pipefail
 
 # Termux owns the process temporary directory. Validate it before any build
 # helper or compiler is allowed to create temporary files.
-: "${TMPDIR:=/data/data/com.termux/files/usr/tmp}"
+if [ -n "${GITHUB_ACTIONS:-}" ]; then
+  : "${TMPDIR:=${RUNNER_TEMP:-${REPO_ROOT:-.}/build/tmp}}"
+else
+  : "${TMPDIR:=/data/data/com.termux/files/usr/tmp}"
+fi
 export TMPDIR
 mkdir -p "$TMPDIR"
 test -d "$TMPDIR" && test -w "$TMPDIR"

@@ -2,14 +2,18 @@ name: Build Bun
 
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows: ["Build Core (ICU + WebKit + TinyCC)"]
+    types: [completed]
   push:
     paths:
       - 'patches/bun/**'
       - 'patches/zig/**'
       - 'scripts/build-bun.sh'
-      - 'scripts/env.sh'
-      - 'scripts/setup-runner.sh'
-      - 'scripts/build-state.py'
+
+concurrency:
+  group: build-bun-${{ github.event.workflow_run.head_branch || github.ref }}
+  cancel-in-progress: true
 
 env:
   BUN_VERSION: "1.2.13"
@@ -26,9 +30,12 @@ env:
 jobs:
   build-bun:
     runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Create work directory
         run: mkdir -p "$WORK_DIR"

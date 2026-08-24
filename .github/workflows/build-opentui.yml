@@ -39,6 +39,7 @@ on:
       - 'patches/opentui/**'
       - 'scripts/build-opentui.sh'
       - 'scripts/env.sh'
+      - 'scripts/build-state.py'
 
 permissions:
   contents: read
