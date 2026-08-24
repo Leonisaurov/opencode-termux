@@ -66,6 +66,15 @@ jobs:
           echo "CODEX_SRC=$CODEX_SRC" >> "$GITHUB_ENV"
           git -C "$CODEX_SRC" log -1 --oneline
 
+      - name: Cache Codex Cargo target and registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.WORK_DIR }}/codex-target
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: codex-android-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-${{ hashFiles('build/codex-src/codex-rs/Cargo.lock', 'scripts/build-codex-android.sh', 'scripts/env.sh') }}
+
       - name: Download verified Rusty V8 artifact
         uses: actions/download-artifact@v4
         with:
