@@ -98,6 +98,18 @@ jobs:
           sudo apt-get install -y python3 curl git unzip libglib2.0-dev libclang-19-dev
           echo "LIBCLANG_PATH=/usr/lib/llvm-19/lib" >> "$GITHUB_ENV"
 
+      - name: Cache Chromium host sysroot
+        id: cache-sysroot
+        uses: actions/cache@v4
+        with:
+          path: upstream-rusty-v8/build/linux/debian_bullseye_amd64-sysroot
+          key: rusty-v8-sysroot-${{ inputs.v8_version || '150.4.0' }}-debian-bullseye-amd64
+
+      - name: Install Chromium host sysroot
+        if: steps.cache-sysroot.outputs.cache-hit != 'true'
+        working-directory: upstream-rusty-v8
+        run: python3 build/linux/sysroot_scripts/install-sysroot.py --arch=amd64
+
       # ── Toolchain Rust del crate v8 150.4.0 (rustup channel del repo) ──
       - name: Install Rust 1.91.0 + android target
         run: |
@@ -136,6 +148,7 @@ jobs:
         with:
           path: |
             upstream-rusty-v8/third_party
+            upstream-rusty-v8/build/linux/debian_bullseye_amd64-sysroot
             upstream-rusty-v8/target/aarch64-linux-android/release/gn_out
             upstream-rusty-v8/target/aarch64-linux-android/release/build
             upstream-rusty-v8/target/sccache
