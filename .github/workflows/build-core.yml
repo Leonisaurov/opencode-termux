@@ -45,10 +45,6 @@ jobs:
           path: ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
           key: zig-${{ env.ZIG_VERSION }}
 
-      # ── Install everything else ───────────────────────────────
-      - name: Install build dependencies
-        run: source ci/scripts/setup-runner.sh
-
       # ── Patch hashes ──────────────────────────────────────────
       - name: Compute patch hashes
         id: hashes
@@ -75,13 +71,6 @@ jobs:
             echo "ready=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build ICU
-        if: steps.cache-icu.outputs.cache-hit != 'true' || steps.validate-icu.outputs.ready != 'true'
-        run: |
-          df -h .
-          source ci/scripts/env.sh && ./bun/scripts/build-icu.sh
-          df -h .
-
       # ── WebKit/JSC ────────────────────────────────────────────
       - name: Cache WebKit build
         id: cache-webkit
@@ -106,13 +95,6 @@ jobs:
             echo "ready=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Clone, patch, and build WebKit/JSC
-        if: steps.cache-webkit.outputs.cache-hit != 'true' || steps.validate-webkit.outputs.ready != 'true'
-        run: |
-          source ci/scripts/env.sh
-          ./bun/scripts/apply-patches.sh
-          ./bun/scripts/build-webkit.sh
-
       # ── TinyCC ────────────────────────────────────────────────
       - name: Validate TinyCC cache
         id: validate-tinycc
@@ -124,6 +106,25 @@ jobs:
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
           fi
+
+      # Installing packages is unnecessary when every validated cache is ready.
+      - name: Install build dependencies
+        if: steps.cache-icu.outputs.cache-hit != 'true' || steps.validate-icu.outputs.ready != 'true' || steps.cache-webkit.outputs.cache-hit != 'true' || steps.validate-webkit.outputs.ready != 'true' || steps.validate-tinycc.outputs.ready != 'true'
+        run: source ci/scripts/setup-runner.sh
+
+      - name: Build ICU
+        if: steps.cache-icu.outputs.cache-hit != 'true' || steps.validate-icu.outputs.ready != 'true'
+        run: |
+          df -h .
+          source ci/scripts/env.sh && ./bun/scripts/build-icu.sh
+          df -h .
+
+      - name: Clone, patch, and build WebKit/JSC
+        if: steps.cache-webkit.outputs.cache-hit != 'true' || steps.validate-webkit.outputs.ready != 'true'
+        run: |
+          source ci/scripts/env.sh
+          ./bun/scripts/apply-patches.sh
+          ./bun/scripts/build-webkit.sh
 
       - name: Build TinyCC
         if: steps.cache-webkit.outputs.cache-hit != 'true' || steps.validate-tinycc.outputs.ready != 'true'
