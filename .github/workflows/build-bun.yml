@@ -95,7 +95,17 @@ jobs:
 
       - name: Build or verify TinyCC prerequisite
         run: |
-          source ci/scripts/env.sh && ./bun/scripts/build-tinycc.sh
+          set -euo pipefail
+          source ci/scripts/env.sh
+          if ! test -s "${WORK_DIR}/webkit-android/cmakeconfig.h" \
+             || ! test -d "${WORK_DIR}/webkit-android/include/JavaScriptCore" \
+             || ! find "${WORK_DIR}/webkit-android/lib" -maxdepth 1 -type f -name '*.a' -size +0c -print -quit | grep -q .; then
+            echo "ERROR: Core cache is incomplete; WebKit/JSC is unavailable for Bun." >&2
+            exit 1
+          fi
+          if ! test -s "${WORK_DIR}/webkit-android/lib/libtcc.a"; then
+            ./bun/scripts/build-tinycc.sh
+          fi
 
       # ── Build Bun ─────────────────────────────────────────────
       - name: Cache Bun binary

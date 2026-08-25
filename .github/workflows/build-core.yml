@@ -64,7 +64,19 @@ jobs:
             ${{ env.WORK_DIR }}/state/nodes/icu.json
           key: build-v3-icu-${{ env.ICU_VERSION }}-${{ env.ANDROID_API }}-${{ hashFiles('bun/scripts/build-icu.sh', 'ci/scripts/env.sh') }}
 
+      - name: Validate ICU cache
+        id: validate-icu
+        run: |
+          set -euo pipefail
+          if test -s "${WORK_DIR}/deps-android/prefix/lib/libicuuc.a" \
+             && test -s "${WORK_DIR}/state/nodes/icu.json"; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build ICU
+        if: steps.cache-icu.outputs.cache-hit != 'true' || steps.validate-icu.outputs.ready != 'true'
         run: |
           df -h .
           source ci/scripts/env.sh && ./bun/scripts/build-icu.sh
@@ -81,14 +93,40 @@ jobs:
             ${{ env.WORK_DIR }}/state/nodes/tinycc.json
           key: build-v4-webkit-${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}-${{ hashFiles('bun/scripts/build-webkit.sh', 'bun/scripts/build-tinycc.sh', 'ci/scripts/env.sh', 'bun/cmake/webkit-android-toolchain.cmake') }}
 
+      - name: Validate WebKit cache
+        id: validate-webkit
+        run: |
+          set -euo pipefail
+          if test -s "${WORK_DIR}/webkit-android/cmakeconfig.h" \
+             && test -d "${WORK_DIR}/webkit-android/include/JavaScriptCore" \
+             && find "${WORK_DIR}/webkit-android/lib" -maxdepth 1 -type f -name '*.a' -size +0c -print -quit | grep -q . \
+             && test -s "${WORK_DIR}/state/nodes/webkit.json"; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Clone, patch, and build WebKit/JSC
+        if: steps.cache-webkit.outputs.cache-hit != 'true' || steps.validate-webkit.outputs.ready != 'true'
         run: |
           source ci/scripts/env.sh
           ./bun/scripts/apply-patches.sh
           ./bun/scripts/build-webkit.sh
 
       # ── TinyCC ────────────────────────────────────────────────
+      - name: Validate TinyCC cache
+        id: validate-tinycc
+        run: |
+          set -euo pipefail
+          if test -s "${WORK_DIR}/webkit-android/lib/libtcc.a" \
+             && test -s "${WORK_DIR}/state/nodes/tinycc.json"; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build TinyCC
+        if: steps.cache-webkit.outputs.cache-hit != 'true' || steps.validate-tinycc.outputs.ready != 'true'
         run: |
           source ci/scripts/env.sh && ./bun/scripts/build-tinycc.sh
 
