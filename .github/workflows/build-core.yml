@@ -78,7 +78,7 @@ jobs:
           path: |
             ${{ env.WORK_DIR }}/webkit-android
             ${{ env.WORK_DIR }}/state/nodes/webkit.json
-          key: build-v3-webkit-${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}-${{ hashFiles('bun/scripts/build-webkit.sh', 'ci/scripts/env.sh', 'bun/cmake/webkit-android-toolchain.cmake') }}
+          key: build-v4-webkit-${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}-${{ hashFiles('bun/scripts/build-webkit.sh', 'bun/scripts/build-tinycc.sh', 'ci/scripts/env.sh', 'bun/cmake/webkit-android-toolchain.cmake') }}
 
       - name: Clone, patch, and build WebKit/JSC
         run: |

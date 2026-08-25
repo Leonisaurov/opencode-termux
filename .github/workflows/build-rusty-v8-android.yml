@@ -134,8 +134,8 @@ jobs:
           SCCACHE_IDLE_TIMEOUT: "0"
           # The v150.4.0 V8 checkout references android_ndk_version from
           # build/config/android/BUILD.gn but does not declare a usable value
-          # for this standalone build. build.rs forwards EXTRA_GN_ARGS to GN.
-          EXTRA_GN_ARGS: >-
+          # for this standalone build. rusty_v8's build.rs reads GN_ARGS.
+          GN_ARGS: >-
             android_ndk_api_level=24
             android_ndk_version="r26c"
             android_ndk_root="${{ github.workspace }}/upstream-rusty-v8/third_party/android_ndk"
