@@ -71,6 +71,24 @@ jobs:
           path: upstream-rusty-v8
           submodules: recursive
 
+      - name: Declare standalone Android NDK GN argument
+        working-directory: upstream-rusty-v8
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("build/config/android/BUILD.gn")
+          text = path.read_text(encoding="utf-8")
+          declaration = 'declare_args() {\n  android_ndk_version = "r26c"\n}\n\n'
+          if "android_ndk_version =" not in text:
+              marker = "assert(is_android)\n"
+              if marker not in text:
+                  raise SystemExit("android BUILD.gn layout changed; cannot declare android_ndk_version")
+              path.write_text(text.replace(marker, declaration + marker, 1), encoding="utf-8")
+          PY
+          grep -n -A3 '^declare_args' build/config/android/BUILD.gn
+
       # ── Deps del sistema ──
       # libclang-19: lo usa el configure de GN vía LIBCLANG_PATH; el resto
       # (python3/curl/git/unzip) son del flujo de build/descarga de V8.
@@ -134,8 +152,8 @@ jobs:
           SCCACHE_IDLE_TIMEOUT: "0"
           # The v150.4.0 V8 checkout references android_ndk_version from
           # build/config/android/BUILD.gn but does not declare a usable value
-          # for this standalone build. rusty_v8's build.rs reads GN_ARGS.
-          GN_ARGS: >-
+          # for this standalone build. rusty_v8's build.rs appends EXTRA_GN_ARGS.
+          EXTRA_GN_ARGS: >-
             android_ndk_api_level=24
             android_ndk_version="r26c"
             android_ndk_root="${{ github.workspace }}/upstream-rusty-v8/third_party/android_ndk"
