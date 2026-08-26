@@ -52,9 +52,18 @@ export RANLIB_aarch64_linux_android="$ANDROID_RANLIB"
 export RUSTY_V8_ARCHIVE RUSTY_V8_SRC_BINDING_PATH
 
 cd "$CODEX_SRC/codex-rs"
+CORE_MANIFEST="$CODEX_SRC/codex-rs/core/Cargo.toml"
+if ! grep -qF '[target.aarch64-linux-android.dependencies]' "$CORE_MANIFEST"; then
+    cat >> "$CORE_MANIFEST" <<'EOF'
+
+# Build OpenSSL from source for Android cross-compilation.
+[target.aarch64-linux-android.dependencies]
+openssl-sys = { workspace = true, features = ["vendored"] }
+EOF
+fi
+
 cargo build --locked --release --target "$ANDROID_TRIPLE" \
-    --package codex-cli --package codex-code-mode-host \
-    --features openssl-sys/vendored
+    --package codex-cli --package codex-code-mode-host
 
 install -m 0755 "$CODEX_TARGET_DIR/$ANDROID_TRIPLE/release/codex" "$CODEX_OUT"
 install -m 0755 "$CODEX_TARGET_DIR/$ANDROID_TRIPLE/release/codex-code-mode-host" "$CODEX_HOST_OUT"
