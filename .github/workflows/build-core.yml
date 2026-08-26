@@ -80,7 +80,7 @@ jobs:
             ${{ env.WORK_DIR }}/webkit-android
             ${{ env.WORK_DIR }}/state/nodes/webkit.json
             ${{ env.WORK_DIR }}/state/nodes/tinycc.json
-          key: build-v4-webkit-${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}-${{ hashFiles('bun/scripts/build-webkit.sh', 'bun/scripts/build-tinycc.sh', 'ci/scripts/env.sh', 'bun/cmake/webkit-android-toolchain.cmake') }}
+          key: build-v5-webkit-${{ env.WEBKIT_COMMIT }}-${{ env.TINYCC_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}-${{ hashFiles('bun/scripts/build-webkit.sh', 'bun/scripts/build-tinycc.sh', 'ci/scripts/env.sh', 'bun/cmake/webkit-android-toolchain.cmake') }}
 
       - name: Validate WebKit cache
         id: validate-webkit

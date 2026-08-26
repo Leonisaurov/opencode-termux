@@ -89,6 +89,27 @@ jobs:
           PY
           grep -n -A3 '^declare_args' build/config/android/BUILD.gn
 
+      - name: Patch Chromium libc++ for Android mbstate_t
+        working-directory: upstream-rusty-v8
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("third_party/libc++/src/include/__mbstate_t.h")
+          text = path.read_text(encoding="utf-8")
+          android = "#elif __has_include(<bits/mbstate_t.h>)\n# include <bits/mbstate_t.h> // Android bionic\n"
+          if "<bits/mbstate_t.h>" not in text:
+              marker = "#elif __has_include_next(<wchar.h>)"
+              if marker not in text:
+                  raise SystemExit(f"unexpected libc++ header layout: {path}")
+              text = text.replace(marker, android + marker, 1)
+              path.write_text(text, encoding="utf-8")
+          elif android not in text:
+              raise SystemExit(f"unexpected existing Android mbstate_t branch: {path}")
+          PY
+          grep -n -A2 -B2 'bits/mbstate_t.h' third_party/libc++/src/include/__mbstate_t.h
+
       - name: Cache Chromium host sysroot
         id: cache-sysroot
         uses: actions/cache@v4
@@ -125,8 +146,6 @@ jobs:
             upstream-rusty-v8/target/sccache
             dist
           key: rusty-v8-android-${{ inputs.v8_version }}-${{ hashFiles('upstream-rusty-v8/git_submodule_status.txt', 'upstream-rusty-v8/Cargo.lock', 'upstream-rusty-v8/build.rs', '.github/workflows/build-rusty-v8-android.yml') }}
-          restore-keys: |
-            rusty-v8-android-${{ inputs.v8_version }}-
 
       - name: Validate Rusty V8 cache
         id: validate-v8

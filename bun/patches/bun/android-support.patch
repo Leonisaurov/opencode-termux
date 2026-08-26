@@ -458,7 +458,7 @@ index c960084..aa591ff 100644
  endif()
  
  # --- Symbols list ---
-@@ -1059,7 +1122,23 @@ set(BUN_DEPENDENCIES
+@@ -1059,7 +1122,26 @@ set(BUN_DEPENDENCIES
    LolHtml
    Lshpack
    Mimalloc
@@ -468,7 +468,10 @@ index c960084..aa591ff 100644
 +# TinyCC: on Android, use prebuilt libtcc.a (cross-compiled separately)
 +# because the TCC build needs a host c2str.exe tool that can't run under cross-compilation.
 +if(ANDROID)
-+  set(PREBUILT_LIBTCC "${CMAKE_SOURCE_DIR}/../webkit-android/lib/libtcc.a")
++  # WEBKIT_PATH is supplied by ci/scripts/env.sh and is absolute.  Do not
++  # derive this prerequisite from CMAKE_SOURCE_DIR: the artifact lives in the
++  # shared product build root, not inside the Bun checkout.
++  set(PREBUILT_LIBTCC "${WEBKIT_PATH}/lib/libtcc.a")
 +  if(EXISTS "${PREBUILT_LIBTCC}")
 +    message(STATUS "Using prebuilt libtcc.a for Android: ${PREBUILT_LIBTCC}")
 +    target_link_libraries(${bun} PRIVATE "${PREBUILT_LIBTCC}")
