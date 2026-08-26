@@ -44,7 +44,6 @@ env:
   ANDROID_API: "24"
   ANDROID_NDK_VERSION: "28.1.13356709"
   ZIG_VERSION: "0.15.2"
-  JOBS: "2"
   WORK_DIR: "${{ github.workspace }}/opencode/build"
   ANDROID_NDK_HOME: "${{ github.workspace }}/opencode/build/android-ndk"
   ANDROID_NDK_ROOT: "${{ github.workspace }}/opencode/build/android-ndk"

@@ -22,9 +22,9 @@ source "$SCRIPT_DIR/../../ci/scripts/env.sh"
 incremental_exec opencode \
     --input "$SCRIPT_DIR/build-opencode.sh" --input "$SCRIPT_DIR/build-opencode-android.ts" \
     --input "$REPO_ROOT/ci/scripts/env.sh" --input "$OPENCODE_SRC" \
+    --input "$BUN_BUILD/bun" \
+    --input "$OPENTUI_SRC/packages/core/src/lib/aarch64-linux-android.24/libopentui.so" \
     --value "OPENCODE_VERSION=$OPENCODE_VERSION" --value "BUN_VERSION=$BUN_VERSION" \
-    --dep "$BUN_STATE_DIR/nodes/bun.json" \
-    --dep "$OPENTUI_STATE_DIR/nodes/opentui.json" \
     --output "$DIST_DIR/opencode"
 
 HOST_BUN="${HOST_BUN:-bun}"
@@ -56,7 +56,7 @@ fi
 
 # Find ARM64 libopentui.so
 # build.zig installs to ../lib/{target} relative to the zig dir
-ARM64_LIBOPENTUI="$OPENTUI_SRC/packages/core/src/lib/aarch64-linux-musl/libopentui.so"
+ARM64_LIBOPENTUI="$OPENTUI_SRC/packages/core/src/lib/aarch64-linux-android.24/libopentui.so"
 if [ ! -f "$ARM64_LIBOPENTUI" ]; then
     echo "ERROR: ARM64 libopentui.so not found at $ARM64_LIBOPENTUI"
     echo "       Run scripts/build-opentui.sh first."

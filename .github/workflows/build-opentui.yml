@@ -57,7 +57,6 @@ env:
   ANDROID_API: "24"
   ANDROID_NDK_VERSION: "28.1.13356709"
   OPENTUI_REF: "${{ inputs.opentui_ref || '9eabce704096837148d935554fcae9c19e6e21f4' }}"
-  JOBS: "2"
   PRODUCT: opentui
   WORK_DIR: "${{ github.workspace }}/opentui/build"
   OPENTUI_SRC: "${{ github.workspace }}/opentui/src/opencode"

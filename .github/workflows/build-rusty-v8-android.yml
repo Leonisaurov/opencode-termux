@@ -119,6 +119,29 @@ jobs:
           PY
           grep -n -A8 'target_os == "android"' build.rs
 
+      - name: Patch Chromium libc++ for Android Bionic mbstate_t
+        working-directory: upstream-rusty-v8
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("third_party/libc++/src/include/__mbstate_t.h")
+          if not path.is_file():
+              raise SystemExit(f"Chromium libc++ header not found: {path}")
+          text = path.read_text(encoding="utf-8")
+          branch = "#elif __has_include(<bits/mbstate_t.h>)\n# include <bits/mbstate_t.h> // Android Bionic\n"
+          if branch not in text:
+              marker = "#elif __has_include_next(<wchar.h>)"
+              if marker not in text:
+                  raise SystemExit("__mbstate_t.h layout changed; cannot add Bionic mbstate_t branch")
+              text = text.replace(marker, branch + marker, 1)
+              path.write_text(text, encoding="utf-8")
+          if branch not in path.read_text(encoding="utf-8"):
+              raise SystemExit("Android Bionic mbstate_t branch was not applied")
+          print(f"verified {path}: Bionic bits/mbstate_t.h")
+          PY
+
       - name: Cache Chromium host sysroot
         id: cache-sysroot
         uses: actions/cache@v4

@@ -38,7 +38,6 @@ env:
   ANDROID_NDK_VERSION: '28.1.13356709'
   WORK_DIR: '${{ github.workspace }}/codex/build'
   ANDROID_NDK_HOME: '${{ github.workspace }}/codex/build/android-ndk'
-  JOBS: '2'
 
 jobs:
   rusty-v8:

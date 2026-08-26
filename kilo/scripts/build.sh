@@ -6,7 +6,7 @@
 #   - Fases [1/4]..[4/4]: Android Bun, deps de sistema, source+deps+parches, compile
 #   - Parches sed "OTUI Android fix" (doble loop node_modules + store .bun/)
 #   - Cache models.dev con refresh >10080 min
-#   - Invocación final con tcr del Android Bun
+#   - Invocación directa del Android Bun, usando todos los CPUs disponibles
 # Diferencias deliberadas (documentadas inline):
 #   1. libopentui.so se compila para @opentui/core 0.3.4 (kilo) en un src SEPARADO
 #      (build/opentui-src-kilo) — NO se reutiliza build/opentui-src (checkout 0.4.5
@@ -22,10 +22,9 @@ JOBS_OVERRIDE="${JOBS:-}"
 source "$SCRIPT_DIR/../../ci/scripts/env.sh" >/dev/null 2>&1
 
 # ── Low-end optimizations (Android OOM killer) ──
-# JOBS: default 3; respeta el override del usuario (ej. JOBS=1 en RAM baja).
-export JOBS="${JOBS_OVERRIDE:-3}"
+# JOBS: usa todos los CPUs del runner por defecto; respeta un override explícito.
+export JOBS="${JOBS_OVERRIDE:-$(nproc)}"
 export ZIG_JOBS="$JOBS"
-# tcr: restringe CPUs y prioridad del proceso para builds pesados sin OOM killer
 
 # ── Config ──
 ANDROID_BUN="${ANDROID_BUN:-${REPO_ROOT}/bun/artifacts/bun-android}"
@@ -381,8 +380,7 @@ if [ ! -f "$MARKERS/kilo-deps" ]; then
         rm -rf "$ZIG_LOCAL_CACHE_DIR" "$ZIG_GLOBAL_CACHE_DIR"
         mkdir -p "$ZIG_LOCAL_CACHE_DIR" "$ZIG_GLOBAL_CACHE_DIR"
 
-        # tcr: compilación zig pesada → restringe CPUs/prioridad (evita OOM killer).
-        # build-opentui.sh usa -j$JOBS; aquí además va envuelto en tcr.
+        # La compilación Zig usa todos los CPUs del job mediante -j$JOBS.
         #
         # ── Bionic stubs (dl/pthread/rt/util viven dentro de libc.so en Android) ──
         # El target aarch64-linux-android.24 fallaba SIEMPRE al enlazar porque zig no
@@ -1884,7 +1882,7 @@ PYEOF
             }
         fi
 
-        if ! tcr "$ZIG_BIN" build \
+        if ! "$ZIG_BIN" build \
             -Dtarget="$KILO_OPENTUI_TARGET" \
             -Doptimize=ReleaseSafe \
             --prefix . \
@@ -1946,8 +1944,8 @@ PYEOF
     # NOTA --ignore-scripts intencional: el postinstall del monorepo (fix-node-pty,
     # setup-git, ripgrep, tree-sitter) apunta a node/glibc; en la condition "bun" se
     # usa bun-pty (no node-pty) y ripgrep es opcional. El store .bun/ se crea aquí.
-    tcr "$ANDROID_BUN" install --frozen-lockfile --ignore-scripts || \
-    tcr "$ANDROID_BUN" install --ignore-scripts
+    "$ANDROID_BUN" install --frozen-lockfile --ignore-scripts || \
+    "$ANDROID_BUN" install --ignore-scripts
 
     # ── Copiar libopentui.so (FALLBACK: .bun/ cache) ──
     # Método principal: .so compilado con Zig (paso anterior).
@@ -2125,7 +2123,7 @@ fi
 cd "$REPO_ROOT"
 KILO_OUTFILE="$OUTPUT" KILO_SRC="$KILO_SRC" KILO_VERSION="$KILO_VERSION" KILO_MINIFY="${KILO_MINIFY:-1}" \
     MODELS_DEV_API_JSON="${MODELS_DEV_API_JSON:-}" \
-    tcr "$ANDROID_BUN" run "$SCRIPT_DIR/build-kilo-android.ts" 2>&1
+    "$ANDROID_BUN" run "$SCRIPT_DIR/build-kilo-android.ts" 2>&1
 
 echo ""
 echo "✅ Build completado: ${OUTPUT}"

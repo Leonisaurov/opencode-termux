@@ -29,7 +29,6 @@ env:
   ZIG_VERSION: '0.15.2'
   WORK_DIR: '${{ github.workspace }}/kilo/build'
   ANDROID_NDK_HOME: '${{ github.workspace }}/kilo/build/android-ndk'
-  JOBS: '2'
 
 jobs:
   core:

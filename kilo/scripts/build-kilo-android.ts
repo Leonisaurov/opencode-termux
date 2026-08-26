@@ -6,7 +6,7 @@
 // patrón que scripts/build-android.ts de opencode). CLAVE: aplica
 // createSolidTransformPlugin() que el CLI `bun build --compile` no aplica.
 //
-// NO copia del build.ts de Kilo: stage bubblewrap, patchelf --set-interpreter,
+// NO copia del build.ts de Kilo: stage bubblewrap ni postprocesado del ELF,
 // copyKiloConsole (deprecated), copyTreeSitterWasms, KiloSandboxWorker/Network,
 // smoke tests, el loop de 12 targets, `bun install --os="*" --cpu="*"` (lo hace
 // kilocode_build.sh) ni el upload a GH Releases. Solo el bundle del binario.
