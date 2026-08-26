@@ -53,7 +53,8 @@ export RUSTY_V8_ARCHIVE RUSTY_V8_SRC_BINDING_PATH
 
 cd "$CODEX_SRC/codex-rs"
 cargo build --locked --release --target "$ANDROID_TRIPLE" \
-    --package codex-cli --package codex-code-mode-host
+    --package codex-cli --package codex-code-mode-host \
+    --features openssl-sys/vendored
 
 install -m 0755 "$CODEX_TARGET_DIR/$ANDROID_TRIPLE/release/codex" "$CODEX_OUT"
 install -m 0755 "$CODEX_TARGET_DIR/$ANDROID_TRIPLE/release/codex-code-mode-host" "$CODEX_HOST_OUT"
