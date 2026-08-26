@@ -23,12 +23,7 @@ index 5a8bcb8..b1d4642 100644
          else => {},
      }
  }
-@@ -488,6 +490,29 @@ fn buildTarget(
-         .name = LIB_NAME,
-         .root_module = module,
-         .linkage = .dynamic,
-     });
-
+@@ -497,1 +497,24 @@ fn buildTarget(
 +    // On Android, the .so must have NEEDED libc.so so dlopen can resolve
 +    // symbols like getauxval. Zig doesn't bundle Android libc, so we directly
 +    // add the NDK sysroot's libc.so stub as a link input.
