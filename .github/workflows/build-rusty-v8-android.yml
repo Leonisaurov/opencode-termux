@@ -107,13 +107,14 @@ jobs:
               clang_args.push("--target=aarch64-linux-android24".to_string());
               clang_args.push(format!("--sysroot={}", sysroot.display()));
           } else if target_os == "ios" {'''
-          if 'target_os == "android"' not in text:
+          sysroot = "third_party/android_ndk/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          if sysroot not in text:
               if marker not in text:
                   raise SystemExit("rusty_v8 build.rs layout changed; Android bindgen patch cannot be applied")
               text = text.replace(marker, android, 1)
               path.write_text(text, encoding="utf-8")
-          elif "third_party/android_ndk/toolchains/llvm/prebuilt/linux-x86_64/sysroot" not in text:
-              raise SystemExit("rusty_v8 build.rs has an unexpected Android branch")
+          elif "--target=aarch64-linux-android24" not in text:
+              raise SystemExit("rusty_v8 build.rs has an incomplete Android bindgen branch")
           print("verified Android bindgen target and NDK sysroot")
           PY
           grep -n -A8 'target_os == "android"' build.rs

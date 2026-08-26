@@ -5,8 +5,8 @@
 #
 # Strategy:
 #   Build with Zig's aarch64-linux-android.24 target and the pinned Android libc
-#   source patch. The patch links the NDK libc.so stub directly, so the final
-#   ELF already has the Android DT_NEEDED contract and needs no post-link hack.
+#   source port. The generated android-libc.txt points Zig at the NDK Bionic
+#   headers/CRT, so the final ELF is linked for Android without post-link hacks.
 
 set -euo pipefail
 
@@ -15,13 +15,27 @@ source "$SCRIPT_DIR/../../ci/scripts/env.sh"
 
 OPENTUI_TARGET="${OPENTUI_TARGET:-aarch64-linux-android.24}"
 ANDROID_NDK_LIB_DIR="${ANDROID_NDK_LIB_DIR:-${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/${ANDROID_API}}"
+ZIG_LIBC_FILE="${ZIG_LIBC_FILE:-${WORK_DIR}/android-libc.txt}"
 export OPENTUI_TARGET ANDROID_NDK_LIB_DIR
+
+if [ ! -f "$ZIG_LIBC_FILE" ] && [ -d "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot" ]; then
+    mkdir -p "$(dirname "$ZIG_LIBC_FILE")"
+    cat > "$ZIG_LIBC_FILE" <<EOF
+include_dir=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include
+sys_include_dir=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/aarch64-linux-android
+crt_dir=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/$ANDROID_API
+msvc_lib_dir=
+kernel32_lib_dir=
+gcc_dir=
+EOF
+fi
 
 incremental_exec opentui \
     --input "$SCRIPT_DIR/build-opentui.sh" --input "$REPO_ROOT/ci/scripts/env.sh" \
     --input "$REPO_ROOT/opentui/patches" --input "$OPENTUI_SRC" \
     --value "ZIG_VERSION=$ZIG_VERSION" --value "ANDROID_API=$ANDROID_API" \
     --value "OPENTUI_TARGET=$OPENTUI_TARGET" --value "ANDROID_NDK_LIB_DIR=$ANDROID_NDK_LIB_DIR" \
+    --value "ZIG_LIBC_FILE=$ZIG_LIBC_FILE" \
     --output "$OPENTUI_SRC/packages/core/src/lib/$OPENTUI_TARGET/libopentui.so"
 
 ZIG_BIN="${ZIG_BIN:-zig}"
@@ -73,10 +87,15 @@ fi
 echo ">>> Building with Zig (target: $OPENTUI_TARGET)..."
 cd "$OPENTUI_ZIG_DIR"
 
+LIBC_ARGS=()
+if [ -f "$ZIG_LIBC_FILE" ]; then
+    LIBC_ARGS=(--libc "$ZIG_LIBC_FILE")
+fi
+
 "$ZIG_BIN" build \
     -Dtarget="$OPENTUI_TARGET" \
     -Doptimize=ReleaseSafe \
-    --prefix . 2>&1
+    --prefix . "${LIBC_ARGS[@]}" 2>&1
 
 # The build.zig installs to dest_dir="../lib/{output_name}" relative to
 # the --prefix dir. With --prefix=. (= OPENTUI_ZIG_DIR), the .so ends

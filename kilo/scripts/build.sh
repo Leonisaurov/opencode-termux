@@ -50,7 +50,7 @@ KILO_OPENTUI_TAG="${KILO_OPENTUI_TAG:-v0.3.4}"
 KILO_OPENTUI_SRC="${KILO_OPENTUI_SRC:-${REPO_ROOT}/opentui/src/kilo}"
 KILO_OPENTUI_TARGET="aarch64-linux-android.24"
 # libc bionic del NDK para zig (mismo archivo que usa opencode_build.sh)
-ZIG_LIBC_FILE="${ZIG_LIBC_FILE:-$WORK_DIR/libc-android.txt}"
+ZIG_LIBC_FILE="${ZIG_LIBC_FILE:-$WORK_DIR/android-libc.txt}"
 ZIG_BIN="${ZIG_BIN:-zig}"
 
 OUTPUT="${KILO_OUTFILE:-${ARTIFACT_DIR}/kilo-android}"

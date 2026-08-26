@@ -68,6 +68,28 @@ echo "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_P
 echo "NDK: $(ls "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android"*clang 2>/dev/null | head -1)"
 echo "ANDROID_NDK_ROOT=${ANDROID_NDK_HOME}" >> "$GITHUB_ENV"
 
+# Zig 0.15 does not infer an Android libc from the NDK path. Keep this
+# configuration in the shared runner setup so Kilo and any future Zig Android
+# product use the same Bionic headers and API-24 CRT directory.
+NDK_SYSROOT="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+ZIG_LIBC_FILE="${WORK_DIR}/android-libc.txt"
+cat > "$ZIG_LIBC_FILE" <<EOF
+# Android NDK bionic libc specification for Zig
+# The directory that contains stdlib.h
+include_dir=${NDK_SYSROOT}/usr/include
+# The system-specific include directory (sys/errno.h etc)
+sys_include_dir=${NDK_SYSROOT}/usr/include/aarch64-linux-android
+# Android uses crtbegin_static.o and crtend_android.o instead of crt1.o
+crt_dir=${NDK_SYSROOT}/usr/lib/aarch64-linux-android/${ANDROID_API:-24}
+# Windows-only paths (not needed)
+msvc_lib_dir=
+kernel32_lib_dir=
+gcc_dir=
+EOF
+test -d "${NDK_SYSROOT}/usr/include"
+test -d "${NDK_SYSROOT}/usr/lib/aarch64-linux-android/${ANDROID_API:-24}"
+echo "ZIG_LIBC_FILE=${ZIG_LIBC_FILE}" >> "$GITHUB_ENV"
+
 # ── Rust + Android target ───────────────────────────────────────
 if ! command -v rustup &>/dev/null; then
   echo "=== Installing Rust ==="

@@ -166,6 +166,30 @@ jobs:
           echo "$WORK_DIR/zig-$ZIG_VERSION" >> "$GITHUB_PATH"
           "$WORK_DIR/zig-$ZIG_VERSION/zig" version
 
+      - name: Write Android libc configuration for Zig
+        if: steps.validate-opentui.outputs.ready != 'true'
+        run: |
+          set -euo pipefail
+          ZIG_LIBC_FILE="$WORK_DIR/android-libc.txt"
+          SYSROOT="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          cat > "$ZIG_LIBC_FILE" <<EOF
+          # Android NDK bionic libc specification for Zig
+          # The directory that contains stdlib.h
+          include_dir=$SYSROOT/usr/include
+          # The system-specific include directory (sys/errno.h etc)
+          sys_include_dir=$SYSROOT/usr/include/aarch64-linux-android
+          # Android uses crtbegin_static.o and crtend_android.o instead of crt1.o
+          crt_dir=$SYSROOT/usr/lib/aarch64-linux-android/$ANDROID_API
+          # Windows-only paths (not needed)
+          msvc_lib_dir=
+          kernel32_lib_dir=
+          gcc_dir=
+          EOF
+          test -d "$SYSROOT/usr/include"
+          test -d "$SYSROOT/usr/lib/aarch64-linux-android/$ANDROID_API"
+          echo "ZIG_LIBC_FILE=$ZIG_LIBC_FILE" >> "$GITHUB_ENV"
+          cat "$ZIG_LIBC_FILE"
+
       # ── Fuente de opentui ──────────────────────────────────────
       - name: Prepare opentui source
         if: steps.validate-opentui.outputs.ready != 'true'
