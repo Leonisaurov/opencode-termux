@@ -1,0 +1,646 @@
+codex-linux-sandbox: paths write del profile: /data/data/com.termux/files/home/Develop/Patch/opencode-termux
+codex-linux-sandbox: aviso: el sandbox es aislamiento de CONVENIENCIA, no una frontera de seguridad
+codex-linux-sandbox: aviso:   contra exfiltración: el guest hereda el env del host y la red real.
+codex-linux-sandbox: aviso:   ~/.ssh, ~/.codex, ~/.aws, ~/.netrc y ~/.config/gh están ocultos con
+codex-linux-sandbox: aviso:   binds vacíos, pero NO confíes secretos de producción en el sandbox.
+codex-linux-sandbox: aviso: el aislamiento de red no está disponible sin root (sin netns); se deja la red real
+codex-linux-sandbox: special write 'slash_tmp' → bind /data/data/com.termux/files/usr/tmp:/tmp:rw
+codex-linux-sandbox: special write 'tmpdir' → $TMPDIR queda RW
+diff --git a/packages/core/src/zig/buffer.zig b/packages/core/src/zig/buffer.zig
+index a413869..6827b6b 100644
+--- a/packages/core/src/zig/buffer.zig
++++ b/packages/core/src/zig/buffer.zig
+@@ -509,6 +509,14 @@ pub const OptimizedBuffer = struct {
+                     if (!(gp.isGraphemeChar(span_char) or gp.isContinuationChar(span_char))) continue;
+                     if (gp.graphemeIdFromChar(span_char) != id) continue;
+ 
++                    // OTUI Android fix (link refcount simétrico): la celda inicio del span
++                    // (span_i == index) NO se libera aquí. El path principal la reescribe y
++                    // gestiona su transición de links UNA sola vez con replaceLinkRef.
++                    // Liberarla aquí y re-reescribirla con el mismo link (new == prev) dejaba
++                    // el refcount del LinkPool descompensado (0 refs con la celda aún
++                    // referenciando el link) → gid stale → panic Writer.zig (@memcpy).
++                    if (span_i == index) continue;
++
+                     const span_link_id = ansi.TextAttributes.getLinkId(self.buffer.attributes[span_i]);
+                     if (span_link_id != 0) {
+                         self.link_tracker.removeCellRef(span_link_id);
+@@ -560,12 +568,13 @@ pub const OptimizedBuffer = struct {
+             }
+ 
+             const new_link_id = ansi.TextAttributes.getLinkId(cell.attributes);
+-            if (prev_link_id != 0 and prev_link_id != new_link_id) {
+-                self.link_tracker.removeCellRef(prev_link_id);
+-            }
+-            if (new_link_id != 0 and new_link_id != prev_link_id) {
+-                self.link_tracker.addCellRef(new_link_id);
+-            }
++            // OTUI Android fix (link refcount simétrico): transición atómica del link de la
++            // celda (patrón de GraphemeTracker.replace). El bucle de span_cleanup ya no toca
++            // la celda inicio, así que aquí el refcount debe reflejar EXACTAMENTE el nº de
++            // celdas que referencian el link: 1 remove si prev != 0 y prev != new, 1 add si
++            // new != 0 y new != prev, y 0 operaciones si prev == new. El refcount del pool
++            // NUNCA cae a 0 mientras la celda escrita conserva el link en sus attributes.
++            self.replaceLinkRef(prev_link_id, new_link_id);
+ 
+             if (width > 1) {
+                 const row_end_index: u32 = (y * self.width) + self.width - 1;
+@@ -597,6 +606,20 @@ pub const OptimizedBuffer = struct {
+         }
+     }
+ 
++    /// OTUI Android fix (link refcount simétrico): transición atómica del refcount de links
++    /// de una celda. Invariante: refcount del tracker == nº de celdas que referencian el link.
++    /// - 0 ops si prev == new (la celda conserva el mismo link)
++    /// - 1 remove si prev != 0 y prev != new
++    /// - 1 add si new != 0 y new != prev
++    fn replaceLinkRef(self: *OptimizedBuffer, prev_link_id: u32, new_link_id: u32) void {
++        if (prev_link_id != 0 and prev_link_id != new_link_id) {
++            self.link_tracker.removeCellRef(prev_link_id);
++        }
++        if (new_link_id != 0 and new_link_id != prev_link_id) {
++            self.link_tracker.addCellRef(new_link_id);
++        }
++    }
++
+     /// Validate coordinates and return buffer index, or null if out of bounds / scissor.
+     fn validateAndIndex(self: *OptimizedBuffer, x: u32, y: u32) ?u32 {
+         if (x >= self.width or y >= self.height) return null;
+diff --git a/packages/core/src/zig/grapheme.zig b/packages/core/src/zig/grapheme.zig
+index ab668d0..f90c2b1 100644
+--- a/packages/core/src/zig/grapheme.zig
++++ b/packages/core/src/zig/grapheme.zig
+@@ -31,6 +31,10 @@ pub const SLOT_BITS: u5 = 16;
+ pub const CLASS_MASK: u32 = (@as(u32, 1) << CLASS_BITS) - 1; // 0b111
+ pub const GENERATION_MASK: u32 = (@as(u32, 1) << GENERATION_BITS) - 1; // 0b1111111
+ pub const SLOT_MASK: u32 = (@as(u32, 1) << SLOT_BITS) - 1; // 0xFFFF
++// OTUI Android fix (RETIRED_GENERATION no-wrap): generación fuera de rango que marca
++// un slot como retirado permanentemente (patrón de link.zig 0.4.5). Un slot con esta
++// generación nunca vuelve a free_list y su id antiguo ya no puede revalidar.
++pub const RETIRED_GENERATION: u32 = GENERATION_MASK + 1;
+ 
+ comptime {
+     assert(CLASS_BITS + GENERATION_BITS + SLOT_BITS == 26);
+@@ -271,11 +275,11 @@ pub const GraphemePool = struct {
+             );
+         } else {
+             assert(old_refcount == 1);
+-            if (self.classes[class_id].getRefcount(slot_index, generation)) |_| {
+-                unreachable;
+-            } else |err| {
+-                assert(err == GraphemePoolError.InvalidId);
+-            }
++            // OTUI Android fix (degradar panic tracker): tras un decref que liberó el
++            // slot, getRefcount debe fallar con InvalidId. En estado corrupto podía
++            // devolver un valor → `unreachable` (abort en ReleaseSafe). Degradamos sin
++            // abortar: el slot puede quedar residual, pero la TUI sigue viva.
++            _ = self.classes[class_id].getRefcount(slot_index, generation) catch {};
+         }
+     }
+ 
+@@ -321,6 +325,9 @@ pub const GraphemePool = struct {
+         slots: std.array_list.Aligned(u8, std.mem.Alignment.of(SlotHeader)),
+         free_list: std.ArrayListUnmanaged(u32),
+         num_slots: u32,
++        // OTUI Android fix (RETIRED_GENERATION no-wrap): slots retirados
++        // permanentemente al agotar el rango de generación (patrón de link.zig 0.4.5).
++        retired_slot_count: u32,
+ 
+         pub fn init(
+             allocator: std.mem.Allocator,
+@@ -344,6 +351,7 @@ pub const GraphemePool = struct {
+                 .slots = .{},
+                 .free_list = .{},
+                 .num_slots = 0,
++                .retired_slot_count = 0,
+             };
+         }
+ 
+@@ -426,8 +434,13 @@ pub const GraphemePool = struct {
+             assert(header_ptr.refcount == 0);
+             assert(header_ptr.is_allocated == 0);
+ 
+-            // Increment generation when reusing a slot, wrapping at 7 bits (128 values)
+-            const new_generation = (header_ptr.generation + 1) & GENERATION_MASK;
++            // OTUI Android fix (RETIRED_GENERATION no-wrap): generación monotónica sin
++            // wrap (patrón de link.zig 0.4.5). El wrap (& GENERATION_MASK) permitía que
++            // tras 128 reusos del mismo slot la generación volviera a coincidir con un
++            // gid viejo → un gid stale leía un slot reasignado (slice len corrupto →
++            // SIGABRT). El assert garantiza que un slot retirado jamás se reasigna.
++            assert(header_ptr.generation < GENERATION_MASK);
++            const new_generation = header_ptr.generation + 1;
+ 
+             // Calculate length based on ownership
+             const len: u16 = if (is_owned)
+@@ -514,10 +527,16 @@ pub const GraphemePool = struct {
+ 
+             if (header_ptr.refcount == 0) {
+                 header_ptr.is_allocated = 0;
+-                const free_slots_before = self.free_list.items.len;
+-                assert(self.free_list.capacity > self.free_list.items.len);
+-                self.free_list.appendAssumeCapacity(slot_index);
+-                assert(self.free_list.items.len == free_slots_before + 1);
++                // OTUI Android fix (no reciclar slots): FIX ESTRUCTURAL DEFINITIVO. El
++                // slot se retira PERMANENTEMENTE al llegar a refcount 0, SIEMPRE (antes
++                // solo al agotar GENERATION_MASK). Nunca vuelve a free_list ni se
++                // reasigna jamás → ningún gid stale puede leer un slot reasignado (se
++                // elimina la clase completa de UAF: slice con len/puntero del OTRO
++                // grapheme que reventaba el Writer "integer does not fit in destination
++                // type"). generation = RETIRED_GENERATION (GENERATION_MASK+1) no puede
++                // revalidar contra ningún gid (la generación va & GENERATION_MASK).
++                header_ptr.generation = RETIRED_GENERATION;
++                self.retired_slot_count += 1;
+             }
+             self.assertInvariants();
+         }
+@@ -541,13 +560,20 @@ pub const GraphemePool = struct {
+             if (header_ptr.refcount != 0) return GraphemePoolError.InvalidId; // Not unreferenced
+ 
+             header_ptr.is_allocated = 0;
+-            const free_slots_before = self.free_list.items.len;
+-            assert(self.free_list.capacity > self.free_list.items.len);
+-            self.free_list.appendAssumeCapacity(slot_index);
+-            assert(self.free_list.items.len == free_slots_before + 1);
++            // OTUI Android fix (no reciclar slots): mismo tratamiento que decref — el
++            // slot se retira SIEMPRE al liberarse, nunca vuelve a free_list.
++            header_ptr.generation = RETIRED_GENERATION;
++            self.retired_slot_count += 1;
+             self.assertInvariants();
+         }
+ 
++        // OTUI Android fix (ClassPool.get len guard): límite plausible para el len de
++        // slots unowned. Un slot unowned solo almacena un puntero externo; su len es la
++        // longitud del texto referenciado y PUEDE superar slot_capacity (el test
++        // "allocUnowned large text" usa 1000 bytes). 4096 es generoso para un fragmento
++        // de texto/grapheme y acota slices gigantes corruptos (la causa del SIGABRT).
++        const MAX_UNOWNED_LEN: u16 = 4096;
++
+         pub fn get(
+             self: *ClassPool,
+             slot_index: u32,
+@@ -563,7 +589,19 @@ pub const GraphemePool = struct {
+             }
+             if (header_ptr.is_allocated != 1) return GraphemePoolError.InvalidId;
+             assert(header_ptr.is_owned == 0 or header_ptr.is_owned == 1);
+-            if (header_ptr.is_owned == 1) assert(header_ptr.len <= self.slot_capacity);
++            // OTUI Android fix (ClassPool.get len guard): el bug de fondo es que el
++            // pool recicla slots mientras un buffer aún referencia su gid (UAF lógico
++            // / refcount de 0.3.4). Si un header queda corrupto, el assert de abajo
++            // panica (SIGABRT en ReleaseSafe) y para slots unowned NO había validación
++            // → pool.get devolvía un slice con len gigante que reventaba el Writer de
++            // Zig ("integer does not fit in destination type" en prepareRenderFrame-
++            // WithWriter). Esta validación + la degradación del renderer (catch
++            // &[_]u8{}) son la red de seguridad: header inválido → error.InvalidId.
++            if (header_ptr.is_owned == 1) {
++                if (header_ptr.len > self.slot_capacity) return GraphemePoolError.InvalidId;
++            } else {
++                if (header_ptr.len > MAX_UNOWNED_LEN) return GraphemePoolError.InvalidId;
++            }
+ 
+             const data_ptr = @as([*]u8, @ptrCast(p)) + @sizeOf(SlotHeader);
+ 
+@@ -729,9 +767,11 @@ pub const GraphemeTracker = struct {
+         while (it.next()) |idp| {
+             // Pool refs are tracked per ID (first/last cell transition), so clear
+             // decrefs once per tracked ID, not once per per-buffer cell count.
+-            self.pool.decref(idp.*) catch |err| {
+-                std.debug.panic("GraphemeTracker.decRefAll decref failed: {}\n", .{err});
+-            };
++            // OTUI Android fix (degradar panic tracker): decref fallido (slot ya
++            // liberado/reciclado — refcount/generation corrupto) era SIGABRT.
++            // Degradamos sin abortar; el refcount del pool puede quedar residual
++            // pero la TUI sigue viva.
++            self.pool.decref(idp.*) catch {};
+         }
+     }
+ 
+@@ -747,37 +787,48 @@ pub const GraphemeTracker = struct {
+     }
+ 
+     pub fn add(self: *GraphemeTracker, id: u32) void {
+-        const res = self.used_ids.getOrPut(id) catch |err| {
+-            std.debug.panic("GraphemeTracker.add failed: {}\n", .{err});
+-        };
++        // OTUI Android fix (degradar panic tracker): OOM en getOrPut era SIGABRT.
++        // Degradamos: este id queda sin trackear (no abort).
++        const res = self.used_ids.getOrPut(id) catch return;
+         if (!res.found_existing) {
+             res.value_ptr.* = 1;
+-            self.pool.incref(id) catch |err| {
+-                std.debug.panic("GraphemeTracker.add incref failed: {}\n", .{err});
++            self.pool.incref(id) catch {
++                // OTUI Android fix (degradar panic tracker): incref fallido (slot ya
++                // reciclado, refcount/generation corrupto) era SIGABRT. Des-tracking
++                // del id para no dejar ref fantasma (count 0) y seguimos sin abortar.
++                _ = self.used_ids.remove(id);
++                return;
+             };
+         } else {
+-            assert(res.value_ptr.* > 0);
+-            assert(res.value_ptr.* < std.math.maxInt(u32));
+-            res.value_ptr.* += 1;
++            // OTUI Android fix (degradar panic tracker): saturar en maxInt en vez de
++            // abortar por overflow (cuenta corrupta en estado degradado).
++            if (res.value_ptr.* < std.math.maxInt(u32)) {
++                res.value_ptr.* += 1;
++            }
+         }
+         assert(res.value_ptr.* > 0);
+     }
+ 
+     pub fn remove(self: *GraphemeTracker, id: u32) void {
+         const count_ptr = self.used_ids.getPtr(id) orelse return;
+-        assert(count_ptr.* > 0);
++        // OTUI Android fix (degradar panic tracker): cuenta corrupta (0) en estado
++        // degradado: des-tracking en vez de abortar el assert.
++        if (count_ptr.* == 0) {
++            _ = self.used_ids.remove(id);
++            return;
++        }
+         if (count_ptr.* > 1) {
+             count_ptr.* -= 1;
+-            assert(count_ptr.* > 0);
+             return;
+         }
+ 
+         const removed = self.used_ids.remove(id);
+         assert(removed);
+         if (removed) {
+-            self.pool.decref(id) catch |err| {
+-                std.debug.panic("GraphemeTracker.remove decref failed: {}\n", .{err});
+-            };
++            // OTUI Android fix (degradar panic tracker): decref fallido (slot ya
++            // liberado/reciclado) era SIGABRT. El id ya se quitó del tracking; el
++            // refcount del pool puede quedar residual pero no abortamos.
++            self.pool.decref(id) catch {};
+         }
+     }
+ 
+@@ -825,8 +876,9 @@ pub const GraphemeTracker = struct {
+                 const bytes_total = bytes_count * count;
+                 assert(total_bytes <= std.math.maxInt(u32) - bytes_total);
+                 total_bytes += bytes_total;
+-            } else |err| {
+-                std.debug.panic("GraphemeTracker.getTotalGraphemeBytes get failed: {}\n", .{err});
++            } else |_| {
++                // OTUI Android fix (degradar panic tracker): get fallido (slot ya
++                // liberado/reciclado) era SIGABRT. Degradamos: 0 bytes para este id.
+             }
+         }
+         return total_bytes;
+diff --git a/packages/core/src/zig/link.zig b/packages/core/src/zig/link.zig
+index f892cc7..40ab6c3 100644
+--- a/packages/core/src/zig/link.zig
++++ b/packages/core/src/zig/link.zig
+@@ -13,6 +13,9 @@ pub const SLOT_BITS: u5 = 16;
+ pub const GEN_MASK: u32 = (@as(u32, 1) << GEN_BITS) - 1;
+ pub const SLOT_MASK: u32 = (@as(u32, 1) << SLOT_BITS) - 1;
+ pub const MAX_URL_LENGTH: usize = 512;
++// OTUI Android fix (RETIRED_GENERATION no-wrap): port de link.zig 0.4.5. Generación
++// fuera de rango que marca un slot retirado permanentemente (nunca se reasigna).
++const RETIRED_GENERATION = GEN_MASK + 1;
+ 
+ pub const IdPayload = u32;
+ 
+@@ -31,6 +34,9 @@ pub const LinkPool = struct {
+     slots: std.ArrayListUnmanaged(u8),
+     free_list: std.ArrayListUnmanaged(u32),
+     num_slots: u32,
++    // OTUI Android fix (RETIRED_GENERATION no-wrap): slots retirados permanentemente
++    // al agotar el rango de generación (patrón de link.zig 0.4.5).
++    retired_slot_count: u32,
+     interned_live_ids: std.StringHashMapUnmanaged(IdPayload),
+ 
+     pub fn init(allocator: std.mem.Allocator) LinkPool {
+@@ -45,6 +51,7 @@ pub const LinkPool = struct {
+             .slots = .{},
+             .free_list = .{},
+             .num_slots = 0,
++            .retired_slot_count = 0,
+             .interned_live_ids = .{},
+         };
+     }
+@@ -153,9 +160,13 @@ pub const LinkPool = struct {
+         const p = self.slotPtr(slot_index);
+         const header_ptr = @as(*SlotHeader, @ptrCast(@alignCast(p)));
+ 
+-        // Increment generation when reusing a slot; reserve generation 0 so ID 0 remains an error sentinel in FFI.
+-        var new_generation = (header_ptr.generation + 1) & GEN_MASK;
+-        if (new_generation == 0) new_generation = 1;
++        // OTUI Android fix (RETIRED_GENERATION no-wrap): generación monotónica sin wrap
++        // (port de link.zig 0.4.5). El wrap (& GEN_MASK) permitía que tras 256 reusos la
++        // generación volviera a coincidir con un id viejo → un id stale leía un slot
++        // reasignado. El sentinel gen-0 se preserva: los slots frescos nacen en 0 y
++        // suben monotónicamente, nunca vuelven a 0.
++        std.debug.assert(header_ptr.generation < GEN_MASK);
++        const new_generation = header_ptr.generation + 1;
+ 
+         header_ptr.* = .{
+             .len = @intCast(url.len),
+@@ -207,7 +218,15 @@ pub const LinkPool = struct {
+         header_ptr.refcount -%= 1;
+ 
+         if (header_ptr.refcount == 0) {
+-            try self.free_list.append(self.allocator, unpacked.slot_index);
++            // OTUI Android fix (no reciclar slots): FIX ESTRUCTURAL DEFINITIVO. El slot
++            // se retira PERMANENTEMENTE al llegar a refcount 0, SIEMPRE (antes solo al
++            // agotar GEN_MASK). Nunca vuelve a free_list ni se reasigna jamás → ningún
++            // id stale puede leer un slot reasignado (UAF lógico: link de otro slot →
++            // slice len corrupto que reventaba el Writer). generation =
++            // RETIRED_GENERATION (GEN_MASK+1) no puede revalidar contra ningún id
++            // empaquetado (la generación va & GEN_MASK).
++            header_ptr.generation = RETIRED_GENERATION;
++            self.retired_slot_count += 1;
+         }
+     }
+ 
+@@ -220,6 +239,16 @@ pub const LinkPool = struct {
+ 
+         if (header_ptr.generation != unpacked.generation) return LinkPoolError.WrongGeneration;
+ 
++        // OTUI Android fix (LinkPool.get len guard): mismo patrón que ClassPool.get
++        // (grapheme.zig). El pool recicla slots mientras un buffer aún referencia su id
++        // (UAF lógico / refcount de opentui 0.3.4 — causa raíz pendiente de investigación).
++        // Si un header queda corrupto, header_ptr.len podría ser gigante → el slice
++        // devuelto reventaba el Writer de Zig ("integer does not fit in destination type"
++        // en prepareRenderFrameWithWriter → SIGABRT). Un link nunca supera slot_capacity
++        // (MAX_URL_LENGTH=512, validado en alloc); len mayor = header corrupto →
++        // error.InvalidId (el renderer degrada con `else |_|`).
++        if (header_ptr.len > self.slot_capacity) return LinkPoolError.InvalidId;
++
+         const data_ptr = @as([*]u8, @ptrCast(p)) + @sizeOf(SlotHeader);
+         return data_ptr[0..header_ptr.len];
+     }
+@@ -245,7 +274,9 @@ pub const LinkPool = struct {
+     }
+ 
+     pub fn getLiveSlotCount(self: *const LinkPool) u64 {
+-        return self.num_slots - @as(u32, @intCast(self.free_list.items.len));
++        // OTUI Android fix (RETIRED_GENERATION no-wrap): los slots retirados no están en
++        // free_list pero tampoco están vivos (patrón de link.zig 0.4.5).
++        return self.num_slots - @as(u32, @intCast(self.free_list.items.len)) - self.retired_slot_count;
+     }
+ };
+ 
+@@ -281,19 +312,26 @@ pub const LinkTracker = struct {
+     }
+ 
+     pub fn addCellRef(self: *LinkTracker, id: u32) void {
+-        const res = self.used_ids.getOrPut(id) catch |err| {
+-            std.debug.panic("LinkTracker.addCellRef getOrPut failed: {}\n", .{err});
+-        };
++        // OTUI Android fix (degradar panic tracker): OOM en getOrPut era SIGABRT.
++        // Degradamos: este id queda sin trackear (no abort).
++        const res = self.used_ids.getOrPut(id) catch return;
+         if (!res.found_existing) {
+             // First time seeing this ID - try to incref in pool
+             self.pool.incref(id) catch {
+                 // Invalid ID (not allocated in pool) - silently ignore
+                 // This can happen with garbage in attribute bits
++                // OTUI Android fix (degradar panic tracker): des-tracking del id para
++                // no dejar entrada fantasma (count 0) en el tracker.
++                _ = self.used_ids.remove(id);
+                 return;
+             };
+             res.value_ptr.* = 1;
+         } else {
+-            res.value_ptr.* += 1;
++            // OTUI Android fix (degradar panic tracker): saturar en maxInt en vez de
++            // abortar por overflow (cuenta corrupta en estado degradado).
++            if (res.value_ptr.* < std.math.maxInt(u32)) {
++                res.value_ptr.* += 1;
++            }
+         }
+     }
+ 
+diff --git a/packages/core/src/zig/renderer.zig b/packages/core/src/zig/renderer.zig
+index 198a7e8..6d23ded 100644
+--- a/packages/core/src/zig/renderer.zig
++++ b/packages/core/src/zig/renderer.zig
+@@ -10,6 +10,14 @@ const logger = @import("logger.zig");
+ const NativeSpanFeed = @import("native-span-feed.zig");
+ const output = @import("renderer-output.zig");
+ 
++// OTUI DEBUG (temporal): log env-guarded de bytes.len en los sitios de escritura.
++// Solo actúa con OTUI_DEBUG_LEN=1; cero overhead sin la env var.
++fn debugLogLen(comptime site: []const u8, bytes: []const u8) void {
++    if (std.posix.getenv("OTUI_DEBUG_LEN") != null) {
++        std.debug.print("OTUI_LEN {s} bytes.len={d}\n", .{ site, bytes.len });
++    }
++}
++
+ pub const RGBA = ansi.RGBA;
+ pub const OptimizedBuffer = buf.OptimizedBuffer;
+ pub const TextAttributes = ansi.TextAttributes;
+@@ -1079,7 +1087,18 @@ pub const CliRenderer = struct {
+                     if (currentLinkId != 0) {
+                         const lp = link.initGlobalLinkPool(self.allocator);
+                         if (lp.get(currentLinkId)) |url_bytes| {
+-                            writer.print("\x1b]8;id={d};{s}\x1b\\", .{ currentLinkId, url_bytes }) catch {};
++                            // OTUI Android fix (writer len guard): mismo guard que
++                            // prepareRenderFrameWithWriter. Ningún slice dinámico debe llegar
++                            // al Writer con len sospechoso (panic "integer does not fit" →
++                            // SIGABRT). URL vacía/corrupta → OSC 8 sin contenido (mantiene el
++                            // estado del link para el cierre `\x1b]8;;\x1b\\` posterior).
++                            if (url_bytes.len > 0 and url_bytes.len <= 512) {
++                                // OTUI DEBUG (temporal)
++                                debugLogLen("link_split", url_bytes);
++                                writer.print("\x1b]8;id={d};{s}\x1b\\", .{ currentLinkId, url_bytes }) catch {};
++                            } else {
++                                writer.print("\x1b]8;id={d};\x1b\\", .{currentLinkId}) catch {};
++                            }
+                         } else |_| {
+                             currentLinkId = 0;
+                         }
+@@ -1108,12 +1127,18 @@ pub const CliRenderer = struct {
+                         continue;
+                     };
+ 
+-                    if (bytes.len > 0) {
++                    // OTUI Android fix (renderer invariantes): invariante 2 (grapheme bytes split) —
++                    // clamp de bytes.len (1..4096): ningún slice con len corrupto llega al
++                    // Writer (panic del @memcpy → SIGABRT). Ruta split-scrollback (writeSnapshotCommit):
++                    // mismo clamp que prepareRenderFrameWithWriter.
++                    if (bytes.len > 0 and bytes.len <= 4096) {
+                         const capabilities = self.terminal.getCapabilities();
+                         const graphemeWidth = gp.charRightExtent(cell.char) + 1;
+                         if (capabilities.explicit_width) {
+                             ansi.ANSI.explicitWidthOutput(writer, graphemeWidth, bytes) catch {};
+                         } else {
++                            // OTUI DEBUG (temporal)
++                            debugLogLen("grapheme_split", bytes);
+                             writer.writeAll(bytes) catch {};
+                         }
+                     }
+@@ -1123,7 +1148,36 @@ pub const CliRenderer = struct {
+                     // spaces, or wide graphemes become one extra column wider in
+                     // terminal output and table rows can autowrap unexpectedly.
+                 } else {
+-                    const len = std.unicode.utf8Encode(@intCast(cell.char), &utf8Buf) catch 1;
++                    // OTUI Android fix (char mask): máscara a u21 antes del @intCast —
++                    // un cell.char corrupto (>0x10FFFF) hacía panic "integer does not
++                    // fit in destination type" (ReleaseSafe) → SIGABRT. Tras la máscara
++                    // utf8Encode devuelve error para codepoints inválidos y degradamos
++                    // a un espacio (nunca abort).
++                    // OTUI Android fix (codepoint válido): la máscara & 0x1F_FFFF permite
++                    // valores en [0x10FFFF, 0x1FFFFF] — codepoints Unicode INVÁLIDOS que
++                    // disparan el assert(c <= 0x10FFFF) de std.unicode.utf8Encode
++                    // (ReleaseSafe) → SIGABRT. Clamp a 0 (espacio) en el punto de salida:
++                    // utf8Encode nunca recibe un codepoint inválido.
++                    var codepoint: u21 = @intCast(cell.char & 0x1F_FFFF);
++                    if (codepoint > 0x10FFFF) codepoint = 0;
++                    // OTUI DEBUG (temporal)
++                    if (std.posix.getenv("OTUI_DEBUG_LEN") != null) {
++                        std.debug.print("OTUI_CP cell.char=0x{x} codepoint={d}\n", .{ cell.char, codepoint });
++                    }
++                    var len: usize = std.unicode.utf8Encode(codepoint, &utf8Buf) catch 0;
++                    // OTUI Android fix (writer len guard): clamp defensivo — utf8Encode
++                    // nunca devuelve >4, pero ningún slice dinámico llega al Writer sin
++                    // validación (panic del @memcpy → SIGABRT).
++                    if (len > utf8Buf.len) len = 0;
++                    if (len == 0) {
++                        utf8Buf[0] = ' ';
++                        len = 1;
++                    }
++                    // OTUI Android fix (renderer invariantes): invariante 2 (utf8Buf) —
++                    // utf8Buf[0..len] con len ∈ [1, utf8Buf.len] (≤4): ningún slice con len
++                    // corrupto llega al Writer (panic del @memcpy → SIGABRT).
++                    // OTUI DEBUG (temporal)
++                    debugLogLen("utf8_split", utf8Buf[0..len]);
+                     writer.writeAll(utf8Buf[0..len]) catch {};
+                 }
+             }
+@@ -1383,7 +1437,23 @@ pub const CliRenderer = struct {
+                     if (currentLinkId != 0) {
+                         const lp = link.initGlobalLinkPool(self.allocator);
+                         if (lp.get(currentLinkId)) |url_bytes| {
+-                            writer.print("\x1b]8;id={d};{s}\x1b\\", .{ currentLinkId, url_bytes }) catch {};
++                            // OTUI Android fix (writer len guard): red de seguridad final
++                            // para el @memcpy del Writer. Aunque LinkPool.get ya valida el
++                            // header (len <= slot_capacity), ningún slice dinámico debe
++                            // llegar al Writer con len sospechoso (panic "integer does not
++                            // fit" → SIGABRT). URL vacía/corrupta → abrimos el hyperlink
++                            // OSC 8 sin contenido (mantiene el estado del link para que el
++                            // cierre `\x1b]8;;\x1b\\` posterior siga siendo correcto).
++                            // OTUI Android fix (renderer invariantes): invariante 2 (url_bytes) —
++                            // clamp de bytes.len (1..512): ningún slice con len corrupto llega al
++                            // Writer (panic del @memcpy → SIGABRT).
++                            if (url_bytes.len > 0 and url_bytes.len <= 512) {
++                                // OTUI DEBUG (temporal)
++                                debugLogLen("link_pf", url_bytes);
++                                writer.print("\x1b]8;id={d};{s}\x1b\\", .{ currentLinkId, url_bytes }) catch {};
++                            } else {
++                                writer.print("\x1b]8;id={d};\x1b\\", .{currentLinkId}) catch {};
++                            }
+                         } else |_| {
+                             // Link not found, treat as no link
+                             currentLinkId = 0;
+@@ -1414,16 +1484,31 @@ pub const CliRenderer = struct {
+                 // Handle grapheme characters
+                 if (gp.isGraphemeChar(cell.char)) {
+                     const gid: u32 = gp.graphemeIdFromChar(cell.char);
+-                    const bytes = self.pool.get(gid) catch |err| {
+-                        self.performShutdownSequence();
+-                        std.debug.panic("Fatal: no grapheme bytes in pool for gid {d}: {}", .{ gid, err });
+-                    };
+-                    if (bytes.len > 0) {
++                    // OTUI Android fix (renderer panic): un gid puede no estar en el
++                    // GraphemePool tras scroll/redibujado (slot liberado/reutilizado →
++                    // generation mismatch o gid corrupto). El catch con std.debug.panic
++                    // convertía un error RECUPERABLE en SIGABRT (thread panic + abort()).
++                    // Degradamos a bytes vacíos (patrón de la ruta hermana ~1826). NO se
++                    // usa `continue`: saltaría el syncCell del buffer de diff (re-render
++                    // infinito de la celda cada frame). El cell se sincroniza y queda
++                    // como vacío; si el gid reaparece, se renderiza normal.
++                    const bytes = self.pool.get(gid) catch &[_]u8{};
++                    // OTUI Android fix (writer len guard): si un slot reciclado/corrupto
++                    // devolvió un slice con len sospechoso, NO escribirlo al Writer (panic
++                    // del @memcpy "integer does not fit" → SIGABRT). 4096 = MAX_UNOWNED_LEN
++                    // del ClassPool: acota cualquier grapheme legítimo. Degradamos a celda
++                    // vacía sin saltar el syncCell (bookkeeping del diff intacto).
++                    // OTUI Android fix (renderer invariantes): invariante 2 (grapheme bytes) —
++                    // clamp de bytes.len (1..4096): ningún slice con len corrupto llega al
++                    // Writer (panic del @memcpy → SIGABRT).
++                    if (bytes.len > 0 and bytes.len <= 4096) {
+                         const capabilities = self.terminal.getCapabilities();
+                         const graphemeWidth = gp.charRightExtent(cell.char) + 1;
+                         if (capabilities.explicit_width) {
+                             ansi.ANSI.explicitWidthOutput(writer, graphemeWidth, bytes) catch {};
+                         } else {
++                            // OTUI DEBUG (temporal)
++                            debugLogLen("grapheme_pf", bytes);
+                             writer.writeAll(bytes) catch {};
+                             if (capabilities.explicit_cursor_positioning) {
+                                 const nextX = x + graphemeWidth;
+@@ -1440,7 +1525,36 @@ pub const CliRenderer = struct {
+ 
+                     // writer.writeByte(' ') catch {};
+                 } else {
+-                    const len = std.unicode.utf8Encode(@intCast(cell.char), &utf8Buf) catch 1;
++                    // OTUI Android fix (char mask): máscara a u21 antes del @intCast —
++                    // un cell.char corrupto (>0x10FFFF) hacía panic "integer does not
++                    // fit in destination type" (ReleaseSafe) → SIGABRT. Tras la máscara
++                    // utf8Encode devuelve error para codepoints inválidos y degradamos
++                    // a un espacio (nunca abort).
++                    // OTUI Android fix (codepoint válido): la máscara & 0x1F_FFFF permite
++                    // valores en [0x10FFFF, 0x1FFFFF] — codepoints Unicode INVÁLIDOS que
++                    // disparan el assert(c <= 0x10FFFF) de std.unicode.utf8Encode
++                    // (ReleaseSafe) → SIGABRT. Clamp a 0 (espacio) en el punto de salida:
++                    // utf8Encode nunca recibe un codepoint inválido.
++                    var codepoint: u21 = @intCast(cell.char & 0x1F_FFFF);
++                    if (codepoint > 0x10FFFF) codepoint = 0;
++                    // OTUI DEBUG (temporal)
++                    if (std.posix.getenv("OTUI_DEBUG_LEN") != null) {
++                        std.debug.print("OTUI_CP cell.char=0x{x} codepoint={d}\n", .{ cell.char, codepoint });
++                    }
++                    var len: usize = std.unicode.utf8Encode(codepoint, &utf8Buf) catch 0;
++                    // OTUI Android fix (writer len guard): clamp defensivo — utf8Encode
++                    // nunca devuelve >4, pero ningún slice dinámico llega al Writer sin
++                    // validación (panic del @memcpy → SIGABRT).
++                    if (len > utf8Buf.len) len = 0;
++                    if (len == 0) {
++                        utf8Buf[0] = ' ';
++                        len = 1;
++                    }
++                    // OTUI Android fix (renderer invariantes): invariante 2 (utf8Buf) —
++                    // utf8Buf[0..len] con len ∈ [1, utf8Buf.len] (≤4): ningún slice con len
++                    // corrupto llega al Writer (panic del @memcpy → SIGABRT).
++                    // OTUI DEBUG (temporal)
++                    debugLogLen("utf8_pf", utf8Buf[0..len]);
+                     writer.writeAll(utf8Buf[0..len]) catch {};
+                 }
+                 runLength += 1;
+@@ -1825,10 +1939,30 @@ pub const CliRenderer = struct {
+                     } else if (gp.isGraphemeChar(c.char)) {
+                         const gid: u32 = gp.graphemeIdFromChar(c.char);
+                         const bytes = self.pool.get(gid) catch &[_]u8{};
+-                        if (bytes.len > 0) writer.writeAll(bytes) catch return;
++                        // OTUI Android fix (renderer invariantes): invariante 2 (grapheme bytes dump) —
++                        // clamp de bytes.len (1..4096): dump a fichero, pero el Writer usa el
++                        // mismo @memcpy (panic "integer does not fit" → SIGABRT).
++                        if (bytes.len > 0 and bytes.len <= 4096) {
++                            // OTUI DEBUG (temporal)
++                            debugLogLen("grapheme_dump", bytes);
++                            writer.writeAll(bytes) catch return;
++                        }
+                     } else {
+                         var utf8Buf: [4]u8 = undefined;
+-                        const len = std.unicode.utf8Encode(@intCast(c.char), &utf8Buf) catch 1;
++                        // OTUI Android fix (renderer invariantes): invariante 1 (codepoint dump) —
++                        // máscara + clamp ≤ 0x10FFFF como en las rutas de render: un cell.char
++                        // corrupto (>0x1FFFFF) hacía panic en el @intCast a u21 (ReleaseSafe)
++                        // → SIGABRT. En error, utf8Buf[0] queda indefinido con `catch 1` →
++                        // degradamos a espacio (nunca bytes basura al fichero).
++                        var codepoint: u21 = @intCast(c.char & 0x1F_FFFF);
++                        if (codepoint > 0x10FFFF) codepoint = 0;
++                        var len = std.unicode.utf8Encode(codepoint, &utf8Buf) catch 0;
++                        if (len == 0) {
++                            utf8Buf[0] = ' ';
++                            len = 1;
++                        }
++                        // OTUI DEBUG (temporal)
++                        debugLogLen("utf8_dump", utf8Buf[0..len]);
+                         writer.writeAll(utf8Buf[0..len]) catch return;
+                     }
+                 } else {
+

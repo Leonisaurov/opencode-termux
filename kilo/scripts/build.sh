@@ -11,7 +11,7 @@
 #   1. libopentui.so se compila para @opentui/core 0.3.4 (kilo) en un src SEPARADO
 #      (build/opentui-src-kilo) — NO se reutiliza build/opentui-src (checkout 0.4.5
 #      de opencode). scripts/build-opentui.sh fija OPENTUI_SRC incondicionalmente vía
-#      env.sh, así que los pasos esenciales (zig build + patchelf NEEDED) van inline.
+#      env.sh, así que los pasos esenciales (zig build + validación ELF Android) van inline.
 #   2. Instalación de deps en el ROOT del monorepo (kilo es monorepo con workspaces).
 set -euo pipefail
 
@@ -275,7 +275,6 @@ echo "   OK ($(du -h "$ANDROID_BUN" | cut -f1))"
 
 # [2/4] System deps
 echo ":: [2/4] Dependencias del sistema..."
-command -v patchelf >/dev/null 2>&1 || pkg install -y patchelf
 command -v git >/dev/null 2>&1 || pkg install -y git
 command -v zig >/dev/null 2>&1 || pkg install -y zig
 echo "   OK"
@@ -306,7 +305,7 @@ if [ ! -f "$MARKERS/kilo-deps" ]; then
     # incondicionalmente a build/opentui-src = checkout 0.4.5 de opencode). Por eso
     # replicamos aquí sus pasos esenciales con un src SEPARADO
     # (build/opentui-src-kilo): clonar v0.3.4, zig build -Dtarget=aarch64-linux-android.24
-    # con --libc del NDK, y patchelf NEEDED libc.so/libm.so. Reutilizamos de
+    # con --libc del NDK y validación de NEEDED libc.so/libm.so. Reutilizamos de
     # build-opentui.sh: mismo binario zig, mismas flags (-Doptimize=ReleaseSafe,
     # --prefix ., --cache-dir en $TMPDIR), mismo manejo de JOBS.
     LIBOPENTUI_KILO=""
@@ -320,16 +319,36 @@ if [ ! -f "$MARKERS/kilo-deps" ]; then
             echo "   opentui-kilo source existe en $KILO_OPENTUI_SRC"
         fi
 
+        # Apply the repository-owned Android/Termux renderer port. Kilo's
+        # Android checkout must use the same source-level fixes as the locally
+        # validated port; do not replace it with a musl binary.
+        KILO_OTUI_PORT_PATCH="$REPO_ROOT/opentui/patches/opentui/android-termux-port-kilo.patch"
+        KILO_OTUI_BUILD_PATCH="$REPO_ROOT/opentui/patches/opentui/android-termux-build-kilo.patch"
+        cd "$KILO_OPENTUI_SRC"
+        if git apply --check "$KILO_OTUI_PORT_PATCH" >/dev/null 2>&1; then
+            git apply "$KILO_OTUI_PORT_PATCH"
+        elif git apply --reverse --check "$KILO_OTUI_PORT_PATCH" >/dev/null 2>&1; then
+            echo "   OpenTUI Kilo Android/Termux source port already applied"
+        else
+            echo "ERROR: OpenTUI Kilo Android/Termux source port does not apply cleanly" >&2
+            exit 1
+        fi
+        if git apply --check "$KILO_OTUI_BUILD_PATCH" >/dev/null 2>&1; then
+            git apply "$KILO_OTUI_BUILD_PATCH"
+        elif git apply --reverse --check "$KILO_OTUI_BUILD_PATCH" >/dev/null 2>&1; then
+            echo "   OpenTUI Kilo Android build patch already applied"
+        else
+            echo "ERROR: OpenTUI Kilo Android build patch does not apply cleanly" >&2
+            exit 1
+        fi
+
         # Verificar que el checkout coincida con el commit esperado (warning, no abort)
         KILO_OTUI_HEAD="$(git -C "$KILO_OPENTUI_SRC" rev-parse HEAD 2>/dev/null || true)"
         if [ -n "$KILO_OTUI_HEAD" ] && [ "$KILO_OTUI_HEAD" != "$KILO_OPENTUI_REF" ]; then
             echo "   ⚠️  opentui-kilo HEAD=$KILO_OTUI_HEAD != $KILO_OPENTUI_REF — compilando el checkout existente"
         fi
 
-        # Argumento --libc SOLO para targets android (libc bionic del NDK, patrón
-        # build-opentui.sh). Los targets musl bundlean su propia libc: pasar el libc
-        # bionic del NDK a aarch64-linux-musl sería un error. Esta función emite el
-        # flag --libc únicamente si el target contiene "android".
+        # Argumento --libc para el target Android (libc Bionic del NDK).
         zig_libc_arg() {
             local target="$1"
             case "$target" in
@@ -1872,26 +1891,8 @@ PYEOF
             --cache-dir "$ZIG_LOCAL_CACHE_DIR" \
             --global-cache-dir "$ZIG_GLOBAL_CACHE_DIR" \
             -j"$JOBS" $(zig_libc_arg "$KILO_OPENTUI_TARGET") 2>&1; then
-            # Fallback: si build.zig de 0.3.4 rechaza el target android (SUPPORTED_TARGETS
-            # más viejo), reintenta musl — la ruta canónica de build-opentui.sh — y el
-            # bloque patchelf de abajo añade NEEDED libc.so/libm.so. NO se pasa --libc:
-            # musl bundlea su propia libc (el bionic del NDK solo aplica a android).
-            #
-            # RUTA PRINCIPAL (verificada): con el guard "abi != .android" el target
-            # aarch64-linux-android.24 compila bionic de verdad (readelf: __errno@LIBC,
-            # file: "for Android 24, built by NDK") y dlopen lo carga OK (mismo camino
-            # que opencode 0.4.5). Los stubs bionic de arriba quedan como red de
-            # seguridad y este fallback musl como ÚLTIMO recurso: produce un .so musl
-            # cuyo dlopen en bionic falla por símbolos musl (__errno_location no existe
-            # en bionic) — si se llega a ese caso, el fix real es el guard de build.zig.
-            echo "   ⚠️  target $KILO_OPENTUI_TARGET falló — reintentando aarch64-linux-musl"
-            tcr "$ZIG_BIN" build \
-                -Dtarget="aarch64-linux-musl" \
-                -Doptimize=ReleaseSafe \
-                --prefix . \
-                --cache-dir "$ZIG_LOCAL_CACHE_DIR" \
-                --global-cache-dir "$ZIG_GLOBAL_CACHE_DIR" \
-                -j"$JOBS" $(zig_libc_arg "aarch64-linux-musl") 2>&1
+            echo "ERROR: the Android/Bionic OpenTUI build failed; refusing a musl fallback" >&2
+            exit 1
         fi
 
         # Restaurar build.zig.zon original (el checkout queda limpio para el
@@ -1902,36 +1903,23 @@ PYEOF
             echo "   build.zig.zon restaurado (urls originales)"
         fi
 
-        # Resolver el .so compilado (prioridad: android.24 → musl → cualquiera)
+        # Resolver exclusivamente el .so Android/Bionic compilado.
         LIBOPENTUI_KILO="$KILO_OPENTUI_SRC/packages/core/src/lib/$KILO_OPENTUI_TARGET/libopentui.so"
-        if [ ! -f "$LIBOPENTUI_KILO" ]; then
-            LIBOPENTUI_KILO="$KILO_OPENTUI_SRC/packages/core/src/lib/aarch64-linux-musl/libopentui.so"
-        fi
-        if [ ! -f "$LIBOPENTUI_KILO" ]; then
-            LIBOPENTUI_KILO=$(find "$KILO_OPENTUI_SRC" -name "libopentui.so" -type f 2>/dev/null | head -1)
-        fi
         if [ -z "$LIBOPENTUI_KILO" ] || [ ! -f "$LIBOPENTUI_KILO" ]; then
             echo "ERROR: libopentui.so 0.3.4 no encontrado tras el build zig"
             find "$KILO_OPENTUI_SRC" -name "libopentui.so" -type f 2>/dev/null || true
             exit 1
         fi
 
-        # ── patchelf al .so (NEEDED libc.so + libm.so para bionic) ──
-        # Replica el bloque de opencode_build.sh: quitar libs glibc/musl sobrantes y
-        # garantizar DT_NEEDED libc.so + libm.so (en bionic math vive en libm.so).
-        echo "   Aplicando patchelf (NEEDED libc.so/libm.so)..."
-        for LIB in libdl.so.2 libpthread.so.0 librt.so.1; do
-            if readelf -d "$LIBOPENTUI_KILO" 2>/dev/null | grep -q "NEEDED.*$LIB"; then
-                patchelf --remove-needed "$LIB" "$LIBOPENTUI_KILO"
-            fi
-        done
-        if ! readelf -d "$LIBOPENTUI_KILO" 2>/dev/null | grep -q "NEEDED.*libc.so"; then
-            patchelf --add-needed "libc.so" "$LIBOPENTUI_KILO"
-        fi
-        if ! readelf -d "$LIBOPENTUI_KILO" 2>/dev/null | grep -q "NEEDED.*libm.so"; then
-            patchelf --add-needed "libm.so" "$LIBOPENTUI_KILO"
-        fi
-        echo "   patchelf OK"
+        # The source-level Android port must produce a Bionic ELF directly.
+        readelf -d "$LIBOPENTUI_KILO" | grep -q 'NEEDED.*libc.so' || {
+            echo "ERROR: Android OpenTUI artifact lacks NEEDED libc.so" >&2
+            exit 1
+        }
+        readelf -d "$LIBOPENTUI_KILO" | grep -q 'NEEDED.*libm.so' || {
+            echo "ERROR: Android OpenTUI artifact lacks NEEDED libm.so" >&2
+            exit 1
+        }
 
         cd "$KILO_SRC"
         touch "$MARKERS/opentui-kilo-built"
@@ -1940,17 +1928,11 @@ PYEOF
         echo "   SKIP (ya compilado)"
     fi
 
-    # Buscar el .so compilado (igual que opencode: android.24 → musl → cualquiera).
+    # Buscar únicamente el .so Android/Bionic compilado.
     # Si ya se resolvió en la fase zig (LIBOPENTUI_KILO), se reutiliza.
     BUILT_SO="$LIBOPENTUI_KILO"
     if [ -z "$BUILT_SO" ] || [ ! -f "$BUILT_SO" ]; then
         BUILT_SO="${KILO_OPENTUI_SRC}/packages/core/src/lib/${KILO_OPENTUI_TARGET}/libopentui.so"
-        if [ ! -f "$BUILT_SO" ]; then
-            BUILT_SO="${KILO_OPENTUI_SRC}/packages/core/src/lib/aarch64-linux-musl/libopentui.so"
-        fi
-        if [ ! -f "$BUILT_SO" ]; then
-            BUILT_SO=$(find "$KILO_OPENTUI_SRC" -name "libopentui.so" -type f 2>/dev/null | head -1)
-        fi
     fi
 
     if [ -n "$BUILT_SO" ] && [ -f "$BUILT_SO" ]; then
@@ -2064,10 +2046,7 @@ PYEOF
     fi
     echo "   OTUI Android fix (Fix4) verificado en $OTUI_PATCHED_FILES archivo(s) del store"
 
-    # ── Aplicar patchelf al .so ──
-    # Idempotente: el .so compilado con zig ya fue parcheado arriba; este bloque
-    # replica 1:1 el de opencode_build.sh y solo actúa si alguna copia (p.ej. la del
-    # fallback .bun/) quedó sin NEEDED libc.so/libm.so.
+    # ── Validate the copied source-built Android .so ──
     SO=""
     for dir in core-linux-arm64-musl core-linux-arm64 core-linux-x64; do
         candidate="$KILO_SRC/node_modules/@opentui/$dir/libopentui.so"
@@ -2079,20 +2058,15 @@ PYEOF
 
     if [ -n "$SO" ]; then
         if ! readelf -d "$SO" 2>/dev/null | grep -q "NEEDED.*libc.so"; then
-            echo "   Aplicando patchelf (NEEDED libc.so)..."
-            patchelf --remove-needed libdl.so.2 "$SO" 2>/dev/null || true
-            patchelf --remove-needed libpthread.so.0 "$SO" 2>/dev/null || true
-            patchelf --remove-needed librt.so.1 "$SO" 2>/dev/null || true
-            patchelf --add-needed "libc.so" "$SO"
-            echo "   patchelf OK"
+            echo "ERROR: copied OpenTUI .so lacks NEEDED libc.so" >&2
+            exit 1
         else
             echo "   .so OK (NEEDED libc.so presente)"
         fi
         # Android/bionic: math functions (pow, etc.) están en libm.so, no en libc.so como musl
         if ! readelf -d "$SO" 2>/dev/null | grep -q "NEEDED.*libm.so"; then
-            echo "   Aplicando patchelf (NEEDED libm.so)..."
-            patchelf --add-needed "libm.so" "$SO"
-            echo "   patchelf OK"
+            echo "ERROR: copied OpenTUI .so lacks NEEDED libm.so" >&2
+            exit 1
         else
             echo "   .so OK (NEEDED libm.so presente)"
         fi

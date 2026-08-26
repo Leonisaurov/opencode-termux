@@ -4,7 +4,7 @@
 # Usage: ./scripts/build-opentui.sh
 #
 # Strategy:
-#   Build with Zig's aarch64-linux-android target and the pinned Android libc
+#   Build with Zig's aarch64-linux-android.24 target and the pinned Android libc
 #   source patch. The patch links the NDK libc.so stub directly, so the final
 #   ELF already has the Android DT_NEEDED contract and needs no post-link hack.
 
@@ -13,7 +13,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../../ci/scripts/env.sh"
 
-OPENTUI_TARGET="${OPENTUI_TARGET:-aarch64-linux-android}"
+OPENTUI_TARGET="${OPENTUI_TARGET:-aarch64-linux-android.24}"
 ANDROID_NDK_LIB_DIR="${ANDROID_NDK_LIB_DIR:-${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/${ANDROID_API}}"
 export OPENTUI_TARGET ANDROID_NDK_LIB_DIR
 
@@ -41,6 +41,7 @@ OPENTUI_ZIG_DIR="$OPENTUI_SRC/packages/core/src/zig"
 # Apply the repository-owned Android libc patch to the pinned upstream source.
 # Cached source may already contain it; reject a different partial application.
 OPENTUI_PATCH="$REPO_ROOT/opentui/patches/opentui/android-libc-link.patch"
+OPENTUI_PORT_PATCH="$REPO_ROOT/opentui/patches/opentui/android-termux-port.patch"
 cd "$OPENTUI_SRC"
 if git apply --check "$OPENTUI_PATCH" >/dev/null 2>&1; then
     git apply "$OPENTUI_PATCH"
@@ -48,6 +49,18 @@ elif git apply --reverse --check "$OPENTUI_PATCH" >/dev/null 2>&1; then
     echo ">>> OpenTUI Android libc patch already applied"
 else
     echo "ERROR: OpenTUI Android libc patch does not apply cleanly" >&2
+    exit 1
+fi
+
+# Apply the repository-owned Android/Termux source port after the linker patch.
+# This is the same source state validated in the local pinned checkout; CI must
+# never silently build the unpatched upstream renderer.
+if git apply --check "$OPENTUI_PORT_PATCH" >/dev/null 2>&1; then
+    git apply "$OPENTUI_PORT_PATCH"
+elif git apply --reverse --check "$OPENTUI_PORT_PATCH" >/dev/null 2>&1; then
+    echo ">>> OpenTUI Android/Termux source port already applied"
+else
+    echo "ERROR: OpenTUI Android/Termux source port does not apply cleanly" >&2
     exit 1
 fi
 

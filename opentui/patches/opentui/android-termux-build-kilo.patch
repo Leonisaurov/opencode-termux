@@ -1,0 +1,31 @@
+codex-linux-sandbox: paths write del profile: /data/data/com.termux/files/home/Develop/Patch/opencode-termux
+codex-linux-sandbox: aviso: el sandbox es aislamiento de CONVENIENCIA, no una frontera de seguridad
+codex-linux-sandbox: aviso:   contra exfiltración: el guest hereda el env del host y la red real.
+codex-linux-sandbox: aviso:   ~/.ssh, ~/.codex, ~/.aws, ~/.netrc y ~/.config/gh están ocultos con
+codex-linux-sandbox: aviso:   binds vacíos, pero NO confíes secretos de producción en el sandbox.
+codex-linux-sandbox: aviso: el aislamiento de red no está disponible sin root (sin netns); se deja la red real
+codex-linux-sandbox: special write 'slash_tmp' → bind /data/data/com.termux/files/usr/tmp:/tmp:rw
+codex-linux-sandbox: special write 'tmpdir' → $TMPDIR queda RW
+diff --git a/packages/core/src/zig/build.zig b/packages/core/src/zig/build.zig
+index 9034757..6e19d99 100644
+--- a/packages/core/src/zig/build.zig
++++ b/packages/core/src/zig/build.zig
+@@ -162,8 +162,15 @@ fn addNativeAudioDependencies(
+     switch (target.result.os.tag) {
+         .macos => addMacOSSystemLibraries(b, artifact, macos_sdk_path.?),
+         .linux => {
+-            artifact.linkSystemLibrary("dl");
+-            artifact.linkSystemLibrary("pthread");
++            // Android: dl y pthread están fusionados en libc.so (bionic) — no
++            // linkearlas como system libraries separadas (no existen como .so).
++            // Port del fix de 0.4.5 (build/opentui-src): sin este guard, zig busca
++            // libdl.so/libpthread.so dinámicas y falla con "unable to find dynamic
++            // system library 'dl'/'pthread'" para aarch64-linux-android.24.
++            if (target.result.abi != .android) {
++                artifact.linkSystemLibrary("dl");
++                artifact.linkSystemLibrary("pthread");
++            }
+         },
+         else => {},
+     }
+

@@ -45,6 +45,15 @@ Android existentes. Actualmente son Bun `1.2.13` y OpenCode `1.3.13`.
 - Cualquier actualización requiere primero verificar que todos los parches
   aplican y funcionan con la nueva versión, actualizar los pins de forma
   coordinada y contar con autorización explícita.
+
+OpenTUI Android debe compilarse como Bionic desde el código fuente portado.
+`patchelf` no es una solución válida para OpenTUI: no sustituye el port de
+fuente ni debe usarse para fabricar `RPATH`, interpreter o `DT_NEEDED` después
+del enlace. Los cambios del checkout local deben convertirse en un parche
+rastreado bajo `opentui/patches/opentui/` y aplicarse en CI antes de compilar;
+no se debe confiar en modificaciones sucias del submódulo ni en un fallback
+musl. El target fijado para los artefactos Android de OpenTUI es
+`aarch64-linux-android.24`, salvo autorización explícita para cambiarlo.
 - Los workflows, scripts, manifiestos y nombres de artifacts deben consumir los
   inputs/versiones fijados; no deben introducir defaults contradictorios.
 

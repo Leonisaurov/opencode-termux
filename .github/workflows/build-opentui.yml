@@ -1,14 +1,14 @@
 # build-opentui.yml
 #
 # Cross-compila libopentui.so para Android ARM64 (aarch64) usando Zig estándar
-# y el libc.so del NDK. El parche de fuente evita postprocesar el ELF con patchelf.
+# y el libc.so del NDK. El port de fuente produce el ELF Android directamente.
 #
 # Flujo:
 #   1. Restaura/instala el NDK y Zig 0.15.2.
 #   2. Resuelve el commit de anomalyco/opentui a compilar (branch/tag/SHA).
 #   3. Resuelve el checkout en $OPENTUI_SRC.
 #   4. opentui/scripts/build-opentui.sh aplica el parche y compila
-#      `aarch64-linux-android` con el libc.so del NDK.
+#      `aarch64-linux-android.24` con el libc.so del NDK.
 #   5. Verifica NEEDED: libc.so y sube el artifact
 #      `opentui-android-aarch64-<commit>`.
 #
@@ -53,7 +53,7 @@ concurrency:
 
 env:
   ZIG_VERSION: "0.15.2"                    # ziglang.org estándar (NO oven-sh)
-  OPENTUI_TARGET: "aarch64-linux-android"
+  OPENTUI_TARGET: "aarch64-linux-android.24"
   ANDROID_API: "24"
   ANDROID_NDK_VERSION: "28.1.13356709"
   OPENTUI_REF: "${{ inputs.opentui_ref || '9eabce704096837148d935554fcae9c19e6e21f4' }}"

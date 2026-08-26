@@ -126,7 +126,7 @@ jobs:
             exit 1
           fi
           if [ -n "$LIB" ]; then
-            DEST="$GITHUB_WORKSPACE/opentui/src/opencode/packages/core/src/lib/aarch64-linux-android"
+            DEST="$GITHUB_WORKSPACE/opentui/src/opencode/packages/core/src/lib/aarch64-linux-android.24"
             mkdir -p "$DEST"
             install -m 0755 "$LIB" "$DEST/libopentui.so"
           fi
