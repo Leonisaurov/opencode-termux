@@ -16,16 +16,6 @@ on:
         type: string
         required: false
         default: '7.4.20'
-  push:
-    branches: [main]
-    paths:
-      - 'kilo/**'
-      - 'bun/**'
-      - 'opentui/**'
-      - 'ci/**'
-      - '.kilo/**'
-      - '.github/workflows/build-kilo.yml'
-
 permissions:
   contents: read
 
@@ -60,9 +50,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install build dependencies and NDK
-        run: source ci/scripts/setup-runner.sh
-
       - name: Receive Bun artifact
         uses: actions/download-artifact@v4
         with:
@@ -76,6 +63,9 @@ jobs:
           test -n "$BUN"
           mkdir -p "$GITHUB_WORKSPACE/bun/artifacts"
           install -m 0755 "$BUN" "$GITHUB_WORKSPACE/bun/artifacts/bun-android"
+
+      - name: Install build dependencies and NDK
+        run: source ci/scripts/setup-runner.sh
 
       - name: Build Kilo
         run: ./kilo/scripts/build.sh

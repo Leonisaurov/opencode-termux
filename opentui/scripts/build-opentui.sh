@@ -4,20 +4,25 @@
 # Usage: ./scripts/build-opentui.sh
 #
 # Strategy:
-#   Build with Zig's aarch64-linux-musl target (Zig bundles musl libc natively,
-#   no libc provision issues). Then patch the .so with patchelf to add
-#   NEEDED libc.so so Android's dlopen() can resolve symbols like getauxval.
+#   Build with Zig's aarch64-linux-android target and the pinned Android libc
+#   source patch. The patch links the NDK libc.so stub directly, so the final
+#   ELF already has the Android DT_NEEDED contract and needs no post-link hack.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../../ci/scripts/env.sh"
 
+OPENTUI_TARGET="${OPENTUI_TARGET:-aarch64-linux-android}"
+ANDROID_NDK_LIB_DIR="${ANDROID_NDK_LIB_DIR:-${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/${ANDROID_API}}"
+export OPENTUI_TARGET ANDROID_NDK_LIB_DIR
+
 incremental_exec opentui \
     --input "$SCRIPT_DIR/build-opentui.sh" --input "$REPO_ROOT/ci/scripts/env.sh" \
     --input "$REPO_ROOT/opentui/patches" --input "$OPENTUI_SRC" \
     --value "ZIG_VERSION=$ZIG_VERSION" --value "ANDROID_API=$ANDROID_API" \
-    --output "$OPENTUI_SRC/packages/core/src/lib/aarch64-linux-musl/libopentui.so"
+    --value "OPENTUI_TARGET=$OPENTUI_TARGET" --value "ANDROID_NDK_LIB_DIR=$ANDROID_NDK_LIB_DIR" \
+    --output "$OPENTUI_SRC/packages/core/src/lib/$OPENTUI_TARGET/libopentui.so"
 
 ZIG_BIN="${ZIG_BIN:-zig}"
 
@@ -33,26 +38,37 @@ fi
 
 OPENTUI_ZIG_DIR="$OPENTUI_SRC/packages/core/src/zig"
 
+# Apply the repository-owned Android libc patch to the pinned upstream source.
+# Cached source may already contain it; reject a different partial application.
+OPENTUI_PATCH="$REPO_ROOT/opentui/patches/opentui/android-libc-link.patch"
+cd "$OPENTUI_SRC"
+if git apply --check "$OPENTUI_PATCH" >/dev/null 2>&1; then
+    git apply "$OPENTUI_PATCH"
+elif git apply --reverse --check "$OPENTUI_PATCH" >/dev/null 2>&1; then
+    echo ">>> OpenTUI Android libc patch already applied"
+else
+    echo "ERROR: OpenTUI Android libc patch does not apply cleanly" >&2
+    exit 1
+fi
+
 if [ ! -f "$OPENTUI_ZIG_DIR/build.zig" ]; then
     echo "ERROR: build.zig not found at $OPENTUI_ZIG_DIR"
     exit 1
 fi
 
-# Build with Zig's native musl target (Zig provides musl libc with no
-# Android/bionic provision issues). We use aarch64-linux-musl which is
-# explicitly listed in opentui's SUPPORTED_TARGETS.
-echo ">>> Building with Zig (target: aarch64-linux-musl)..."
+# Build against Android/Bionic using the NDK libc path supplied above.
+echo ">>> Building with Zig (target: $OPENTUI_TARGET)..."
 cd "$OPENTUI_ZIG_DIR"
 
 "$ZIG_BIN" build \
-    -Dtarget=aarch64-linux-musl \
+    -Dtarget="$OPENTUI_TARGET" \
     -Doptimize=ReleaseSafe \
     --prefix . 2>&1
 
 # The build.zig installs to dest_dir="../lib/{output_name}" relative to
-# the --prefix dir.  With --prefix=. (= OPENTUI_ZIG_DIR), the .so ends
-# up one directory above: packages/core/src/lib/aarch64-linux-musl/
-LIBOPENTUI="$OPENTUI_ZIG_DIR/../lib/aarch64-linux-musl/libopentui.so"
+# the --prefix dir. With --prefix=. (= OPENTUI_ZIG_DIR), the .so ends
+# up one directory above under packages/core/src/lib/$OPENTUI_TARGET/.
+LIBOPENTUI="$OPENTUI_ZIG_DIR/../lib/$OPENTUI_TARGET/libopentui.so"
 if [ ! -f "$LIBOPENTUI" ]; then
     echo "ERROR: libopentui.so not found"
     echo "  Expected at: $LIBOPENTUI"
@@ -61,34 +77,8 @@ if [ ! -f "$LIBOPENTUI" ]; then
     exit 1
 fi
 
-# Ensure patchelf is available for NEEDED patching
-echo ">>> Ensuring patchelf is available..."
-if ! command -v patchelf &>/dev/null; then
-    sudo apt-get update -qq && sudo apt-get install -y -qq patchelf
-fi
-
-# The musl build produces a .so without NEEDED libc.so (musl is statically
-# linked). Android's dlopen() requires libc.so to be a DT_NEEDED entry so it
-# can resolve symbols. Add it with patchelf.
-echo ">>> Patching DT_NEEDED for Android compatibility..."
-CURRENT_NEEDED=$(readelf -d "$LIBOPENTUI" 2>/dev/null | grep NEEDED)
-
-# Remove glibc-style libdl, libpthread, librt (musl bundles into libc)
-for lib in libdl.so.2 libpthread.so.0 librt.so.1; do
-    if echo "$CURRENT_NEEDED" | grep -q "$lib"; then
-        echo "    Removing NEEDED $lib"
-        patchelf --remove-needed "$lib" "$LIBOPENTUI"
-    fi
-done
-
-# Add NEEDED libc.so if not already present
-if ! echo "$CURRENT_NEEDED" | grep -q "libc.so"; then
-    echo "    Adding NEEDED libc.so"
-    patchelf --add-needed "libc.so" "$LIBOPENTUI"
-fi
-
 echo ""
-echo "=== libopentui.so build complete ==="
+echo "=== libopentui.so Android build complete ==="
 echo "Output: $LIBOPENTUI"
 echo "Size: $(du -h "$LIBOPENTUI" | cut -f1)"
 file "$LIBOPENTUI"

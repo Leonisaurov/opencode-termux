@@ -11,12 +11,6 @@ on:
         description: 'Versión de rusty_v8 compatible con codex-code-mode-host'
         required: false
         default: '150.4.0'
-  push:
-    paths:
-      - 'codex/**'
-      - 'ci/**'
-      - '.github/workflows/build-codex.yml'
-      - '.github/workflows/build-rusty-v8-android.yml'
   workflow_call:
     inputs:
       codex_ref:
@@ -62,12 +56,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install build dependencies and NDK
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq build-essential cmake perl pkg-config m4 zip unzip file protobuf-compiler
-          source ci/scripts/setup-runner.sh
-
       - name: Clone pinned Codex source
         env:
           CODEX_REF: ${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}
@@ -104,6 +92,12 @@ jobs:
           test -n "$ARCHIVE" && test -n "$BINDING"
           echo "RUSTY_V8_ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
           echo "RUSTY_V8_SRC_BINDING_PATH=$BINDING" >> "$GITHUB_ENV"
+
+      - name: Install build dependencies and NDK
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential cmake perl pkg-config m4 zip unzip file protobuf-compiler
+          source ci/scripts/setup-runner.sh
 
       - name: Build Codex CLI and code-mode host
         run: source ci/scripts/env.sh && ./codex/scripts/build-codex-android.sh

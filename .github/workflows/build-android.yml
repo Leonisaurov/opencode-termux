@@ -1,6 +1,17 @@
 name: Build and publish Android stack
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'bun/**'
+      - 'codex/**'
+      - 'kilo/**'
+      - 'opencode/**'
+      - 'opentui/**'
+      - 'ci/**'
+      - 'releases/**'
+      - '.github/workflows/**'
   workflow_dispatch:
     inputs:
       release:
@@ -37,7 +48,6 @@ jobs:
     uses: ./.github/workflows/build-core.yml
     secrets: inherit
   opentui:
-    needs: core
     uses: ./.github/workflows/build-opentui.yml
     with:
       opentui_ref: ${{ inputs.opentui_ref || '9eabce704096837148d935554fcae9c19e6e21f4' }}
@@ -79,7 +89,7 @@ jobs:
     secrets: inherit
   publish:
     needs: [bun, opentui, opencode, kilo, codex]
-    if: ${{ always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped') }}
+    if: ${{ github.event_name == 'workflow_dispatch' && always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped') }}
     permissions:
       contents: write
       actions: read

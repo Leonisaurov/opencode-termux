@@ -1,19 +1,20 @@
 # build-opentui.yml
 #
-# Cross-compila libopentui.so para Android ARM64 (aarch64) usando el Zig
-# ESTÁNDAR de ziglang.org 0.15.2 (NO el fork oven-sh/zig que usa Bun).
+# Cross-compila libopentui.so para Android ARM64 (aarch64) usando Zig estándar
+# y el libc.so del NDK. El parche de fuente evita postprocesar el ELF con patchelf.
 #
 # Flujo:
-#   1. Instala zig 0.15.2 (ziglang.org) + patchelf.
+#   1. Restaura/instala el NDK y Zig 0.15.2.
 #   2. Resuelve el commit de anomalyco/opentui a compilar (branch/tag/SHA).
 #   3. Resuelve el checkout en $OPENTUI_SRC.
-#   4. opentui/scripts/build-opentui.sh: `zig build -Dtarget=aarch64-linux-musl
-#      -Doptimize=ReleaseSafe` + patchelf --add-needed libc.so.
+#   4. opentui/scripts/build-opentui.sh aplica el parche y compila
+#      `aarch64-linux-android` con el libc.so del NDK.
 #   5. Verifica NEEDED: libc.so y sube el artifact
 #      `opentui-android-aarch64-<commit>`.
 #
 # El artifact es consumido por build-opencode.yml (Fase 2) para ensamblar
-# OpenCode. El .so se guarda TAMBIÉN en el cache con key `opentui-android-<commit>`
+# OpenCode. El .so se guarda TAMBIÉN en el cache con key
+# `build-v4-opentui-<commit>-<hash>`
 # (path REAL: $OPENTUI_SRC/packages/core/src/lib) para que
 # build-opencode.yml lo restaure sin recompilar. Además se cachea la fuente
 # keyed por commit para rebuilds rápidos y compartición del toolchain zig
@@ -29,7 +30,7 @@ on:
       #
       # CAMINO FÁCIL DE UPGRADE: para actualizar opentui, cambiar este pin al
       # commit nuevo. La cache key del .so es POR COMMIT
-      # (opentui-android-<commit>) → al cambiar el pin, la key cambia
+      # (build-v4-opentui-<commit>-<hash>) → al cambiar el pin, la key cambia
       # automáticamente → cache miss → se recompila. Nada más que tocar.
       opentui_ref:
         description: 'Branch, tag, o commit SHA de anomalyco/opentui a compilar (default: commit verificado 9eabce70). Para actualizar: cambiar este pin; la cache key por commit invalida automáticamente.'
@@ -52,7 +53,9 @@ concurrency:
 
 env:
   ZIG_VERSION: "0.15.2"                    # ziglang.org estándar (NO oven-sh)
-  OPENTUI_TARGET: "aarch64-linux-musl"
+  OPENTUI_TARGET: "aarch64-linux-android"
+  ANDROID_API: "24"
+  ANDROID_NDK_VERSION: "28.1.13356709"
   OPENTUI_REF: "${{ inputs.opentui_ref || '9eabce704096837148d935554fcae9c19e6e21f4' }}"
   JOBS: "2"
   PRODUCT: opentui
@@ -70,11 +73,6 @@ jobs:
 
       - name: Create work directory
         run: mkdir -p "$WORK_DIR"
-
-      - name: Install patchelf
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq patchelf
 
       # ── Resolve el commit exacto de opentui (branch/tag/SHA) ──
       - name: Resolve opentui commit
@@ -114,8 +112,47 @@ jobs:
           path: ${{ env.OPENTUI_SRC }}
           key: build-v3-opentui-src-${{ steps.resolve.outputs.commit }}
 
+      - name: Restore OpenTUI output cache
+        id: cache-opentui-output
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ env.OPENTUI_SRC }}/packages/core/src/lib
+            ${{ env.WORK_DIR }}/state/nodes/opentui.json
+          key: build-v4-opentui-${{ steps.resolve.outputs.commit }}-${{ hashFiles('opentui/scripts/build-opentui.sh', 'ci/scripts/env.sh', 'opentui/patches/**') }}
+
+      - name: Validate OpenTUI output cache
+        id: validate-opentui
+        run: |
+          set -euo pipefail
+          LIB="$OPENTUI_SRC/packages/core/src/lib/$OPENTUI_TARGET/libopentui.so"
+          if test -s "$LIB" && test -s "$WORK_DIR/state/nodes/opentui.json"; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # ── Toolchain ─────────────────────────────────────────────
+      - name: Cache Android NDK
+        id: cache-ndk
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.WORK_DIR }}/android-ndk
+          key: android-ndk-${{ env.ANDROID_NDK_VERSION }}
+
+      - name: Install Android NDK
+        if: steps.validate-opentui.outputs.ready != 'true' && steps.cache-ndk.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/android-ndk.zip"
+          curl -fsSL "https://dl.google.com/android/repository/android-ndk-r28b-linux.zip" -o "$archive"
+          rm -rf "$WORK_DIR/android-ndk" "$RUNNER_TEMP/ndk-extract"
+          mkdir -p "$RUNNER_TEMP/ndk-extract" "$WORK_DIR/android-ndk"
+          unzip -q "$archive" -d "$RUNNER_TEMP/ndk-extract"
+          cp -a "$RUNNER_TEMP/ndk-extract/android-ndk-r28b/." "$WORK_DIR/android-ndk/"
+
       - name: Install Zig ${{ env.ZIG_VERSION }} (ziglang.org)
+        if: steps.validate-opentui.outputs.ready != 'true'
         run: |
           if [ ! -x "$WORK_DIR/zig-$ZIG_VERSION/zig" ]; then
             mkdir -p "$WORK_DIR"
@@ -131,6 +168,7 @@ jobs:
 
       # ── Fuente de opentui ──────────────────────────────────────
       - name: Prepare opentui source
+        if: steps.validate-opentui.outputs.ready != 'true'
         run: |
           OPENTUI_SRC="$OPENTUI_SRC"
           OPENTUI_COMMIT="${{ steps.resolve.outputs.commit }}"
@@ -153,11 +191,14 @@ jobs:
 
       # ── Build libopentui.so ────────────────────────────────────
       - name: Build libopentui.so (state validated)
+        if: steps.validate-opentui.outputs.ready != 'true'
         # build-opentui.sh escribe el zig cache en $TMPDIR (patrón
         # Termux); en el runner apuntamos PREFIX a runner.temp para que el
         # script (set -u) no falle por variable sin definir.
         env:
           PREFIX: ${{ runner.temp }}
+          ANDROID_NDK_HOME: ${{ github.workspace }}/opentui/build/android-ndk
+          ANDROID_NDK_LIB_DIR: ${{ github.workspace }}/opentui/build/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/24
         run: |
           source ci/scripts/env.sh && ./opentui/scripts/build-opentui.sh
 
@@ -176,6 +217,7 @@ jobs:
 
       # ── Artifact ───────────────────────────────────────────────
       - name: Write build info
+        if: steps.validate-opentui.outputs.ready != 'true'
         run: |
           LIB_DIR="$OPENTUI_SRC/packages/core/src/lib/$OPENTUI_TARGET"
           {
@@ -189,8 +231,10 @@ jobs:
           cat "$LIB_DIR/build-info.txt"
 
       - name: Save libopentui.so to cache (key por commit)
+        if: steps.validate-opentui.outputs.ready != 'true'
         # build-opencode.yml restaura esta key y copia el .so a node_modules.
-        # La key incluye el commit resuelto (opentui-android-<commit>): cada
+        # La key incluye el commit resuelto y el hash del build
+        # (build-v4-opentui-<commit>-<hash>): cada
         # commit genera una entrada de cache PROPIA, así actions/cache
         # (que no sobreescribe) no choca entre runs con commits distintos.
         # Ya no se necesita continue-on-error: la key es única por commit.
@@ -202,7 +246,7 @@ jobs:
           path: |
             ${{ env.OPENTUI_SRC }}/packages/core/src/lib
             ${{ env.WORK_DIR }}/state/nodes/opentui.json
-          key: build-v3-opentui-${{ steps.resolve.outputs.commit }}-${{ hashFiles('opentui/scripts/build-opentui.sh', 'ci/scripts/env.sh', 'opentui/patches/**') }}
+          key: build-v4-opentui-${{ steps.resolve.outputs.commit }}-${{ hashFiles('opentui/scripts/build-opentui.sh', 'ci/scripts/env.sh', 'opentui/patches/**') }}
 
       - name: Upload libopentui.so artifact
         uses: actions/upload-artifact@v4

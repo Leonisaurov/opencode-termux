@@ -1,126 +1,51 @@
-name: Build OpenCode (ARM64 runner)
+name: Build OpenCode standalone
 
+# Compatibility entry point for the former ARM-runner workflow. It now uses
+# the same reproducible producer graph as the coordinator, so it cannot drift
+# to stale cache keys, a different OpenTUI ABI, or an unpinned source tree.
 on:
   workflow_dispatch:
+    inputs:
+      opentui_ref:
+        required: false
+        default: '9eabce704096837148d935554fcae9c19e6e21f4'
+      opencode_version:
+        required: false
+        default: '1.3.13'
+      bun_version:
+        required: false
+        default: '1.2.13'
 
-env:
-  OPENCODE_VERSION: "1.18.6"
-  BUN_VERSION: "1.3.14"
-  WORK_DIR: "${{ github.workspace }}/build"
+permissions:
+  contents: read
+
+concurrency:
+  group: build-opencode-standalone-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
-    runs-on: ubuntu-24.04-arm
-    steps:
-      - uses: actions/checkout@v4
+  core:
+    uses: ./.github/workflows/build-core.yml
+    secrets: inherit
 
-      - name: Create work directory
-        run: mkdir -p "$WORK_DIR"
+  opentui:
+    uses: ./.github/workflows/build-opentui.yml
+    with:
+      opentui_ref: ${{ inputs.opentui_ref || '9eabce704096837148d935554fcae9c19e6e21f4' }}
+    secrets: inherit
 
-      # ── Restore Android Bun binary ──
-      - name: Compute patch hashes
-        id: hashes
-        run: |
-          echo "bun_pr_hash=$(sha256sum bun/patches/bun/pr31198.diff 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
-          echo "android_backend_hash=$(sha256sum bun/patches/bun/android-default-backend.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
-          echo "webkit_hash=$(sha256sum bun/patches/webkit/android-support.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
-          echo "zig_patch_hash=$(sha256sum bun/patches/zig/posix-android-sigaction.patch 2>/dev/null | cut -c1-8 || echo '00000000')" >> $GITHUB_OUTPUT
+  bun:
+    needs: core
+    uses: ./.github/workflows/build-bun.yml
+    with:
+      bun_version: ${{ inputs.bun_version || '1.2.13' }}
+    secrets: inherit
 
-      - name: Restore Android Bun
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ env.WORK_DIR }}/bun-build/bun
-          key: bun-android-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_pr_hash }}-${{ steps.hashes.outputs.android_backend_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}-${{ steps.hashes.outputs.webkit_hash }}
-          restore-keys: |
-            bun-android-
-          fail-on-cache-miss: true
-
-      # ── Build libopentui.so ───────────────────────────────────
-      - name: Restore Zig cache
-        id: restore-zig
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ env.WORK_DIR }}/zig
-          key: zig-0.15.2
-
-      - name: Install Zig
-        if: steps.restore-zig.outputs.cache-hit != 'true'
-        run: |
-          curl -fsSL https://ziglang.org/download/0.15.2/zig-linux-aarch64-0.15.2.tar.xz | tar xJ -C "$WORK_DIR"
-          ln -sf "$WORK_DIR/zig-linux-aarch64-0.15.2/zig" /usr/local/bin/zig
-
-      - name: Compile libopentui.so
-        run: |
-          source ci/scripts/env.sh
-          mkdir -p "$WORK_DIR/opentui-src"
-          ./opentui/scripts/build-opentui.sh
-          # Build output goes to $WORK_DIR/opentui-src/zig-out/
-          SO_FILE="$WORK_DIR/opentui-src/zig-out/lib/libopentui.so"
-          if [ -f "$SO_FILE" ]; then
-            mkdir -p "$WORK_DIR/opentui-build"
-            cp "$SO_FILE" "$WORK_DIR/opentui-build/libopentui.so"
-            echo "OpenTUI compiled OK"
-          else
-            echo "Warning: libopentui.so not found at $SO_FILE"
-          fi
-
-      # ── Install stock Bun (for building) ──
-      - name: Install stock Bun
-        run: |
-          curl -fsSL https://bun.sh/install | bash
-          echo "$HOME/.bun/bin" >> $GITHUB_PATH
-
-      # ── Clone OpenCode ──
-      - name: Clone OpenCode
-        run: |
-          git clone https://github.com/anomalyco/opencode.git "$WORK_DIR/opencode-src" \
-            --branch v${{ env.OPENCODE_VERSION }} --depth 1
-
-      # ── Install dependencies and build ──
-      - name: Setup Android Bun
-        run: |
-          ANDROID_BUN="$WORK_DIR/bun-build/bun"
-          chmod +x "$ANDROID_BUN"
-          echo "ANDROID_BUN=$ANDROID_BUN" >> $GITHUB_ENV
-
-      - name: Swap libopentui.so (x86_64 → ARM64)
-        run: |
-          # OpenCode uses @opentui/core-linux-x64 regardless of arch
-          # Replace the x86_64 .so with the ARM64 version
-          OPENTUI_SO="$WORK_DIR/opencode-src/node_modules/@opentui/core-linux-x64/libopentui.so"
-          if [ -f "$OPENTUI_SO" ]; then
-            cp "$WORK_DIR/opentui-build/libopentui.so" "$OPENTUI_SO"
-            echo "Swapped libopentui.so with ARM64 version"
-          else
-            echo "Warning: libopentui.so not found at $OPENTUI_SO"
-          fi
-
-      - name: Install deps
-        run: |
-          cd "$WORK_DIR/opencode-src/packages/opencode"
-          bun install --ignore-scripts
-
-      - name: Cross-compile with Android Bun runtime
-        run: |
-          cd "$WORK_DIR/opencode-src/packages/opencode"
-          # On ARM64, both stock bun and Android Bun are ARM64
-          # --compile-executable-path injects module graph into Android Bun
-          # No cross-arch ELF issues since both are ARM64
-          bun build --compile \
-            --compile-executable-path="$ANDROID_BUN" \
-            --conditions browser \
-            --define "OPENCODE_VERSION='${{ env.OPENCODE_VERSION }}'" \
-            --outfile="$WORK_DIR/opencode" \
-            ./src/index.ts
-
-      # ── Verify output ──
-      - name: Verify binary
-        run: |
-          file "$WORK_DIR/opencode"
-          ls -lh "$WORK_DIR/opencode"
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: opencode-arm64-${{ env.OPENCODE_VERSION }}
-          path: ${{ env.WORK_DIR }}/opencode
+  opencode:
+    needs: [bun, opentui]
+    uses: ./.github/workflows/build-opencode.yml
+    with:
+      opentui_ref: ${{ inputs.opentui_ref || '9eabce704096837148d935554fcae9c19e6e21f4' }}
+      opencode_version: ${{ inputs.opencode_version || '1.3.13' }}
+      require_dependency_artifacts: true
+    secrets: inherit

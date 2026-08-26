@@ -57,10 +57,6 @@ jobs:
           path: ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
           key: zig-${{ env.ZIG_VERSION }}
 
-      # ── Install everything else ───────────────────────────────
-      - name: Install build dependencies
-        run: source ci/scripts/setup-runner.sh
-
       # ── Patch hashes ──────────────────────────────────────────
       - name: Compute patch hashes
         id: hashes
@@ -68,6 +64,17 @@ jobs:
           echo "bun_patch_hash=$(sha256sum bun/patches/bun/android-support.patch | cut -c1-16)" >> $GITHUB_OUTPUT
           echo "zig_patch_hash=$(sha256sum bun/patches/zig/posix-android-sigaction.patch | cut -c1-16)" >> $GITHUB_OUTPUT
           echo "webkit_patch_hash=$(sha256sum bun/patches/webkit/android-support.patch | cut -c1-16)" >> $GITHUB_OUTPUT
+
+      # Restore the final Bun output before installing packages or inspecting
+      # the reusable core state. A valid hit skips all expensive build work.
+      - name: Cache Bun binary
+        id: cache-bun
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.WORK_DIR }}/bun-build/bun
+            ${{ env.WORK_DIR }}/state/nodes/bun.json
+          key: build-v3-bun-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}-${{ hashFiles('bun/scripts/build-bun.sh', 'bun/scripts/apply-patches.sh', 'ci/scripts/env.sh') }}
 
       # ── Restore ICU (build if missing, ~5 min) ────────────────
       - name: Cache ICU build
@@ -79,9 +86,16 @@ jobs:
             ${{ env.WORK_DIR }}/state/nodes/icu.json
           key: build-v3-icu-${{ env.ICU_VERSION }}-${{ env.ANDROID_API }}-${{ hashFiles('bun/scripts/build-icu.sh', 'ci/scripts/env.sh') }}
 
-      - name: Build ICU (if needed)
+      - name: Validate ICU cache
+        id: validate-icu
         run: |
-          source ci/scripts/env.sh && ./bun/scripts/build-icu.sh
+          set -euo pipefail
+          if test -s "${WORK_DIR}/deps-android/prefix/lib/libicuuc.a" \
+             && test -s "${WORK_DIR}/state/nodes/icu.json"; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
 
       # ── Restore WebKit (required — run build-core first) ──────
       - name: Restore WebKit build
@@ -93,31 +107,62 @@ jobs:
             ${{ env.WORK_DIR }}/state/nodes/tinycc.json
           key: build-v4-webkit-${{ env.WEBKIT_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}-${{ hashFiles('bun/scripts/build-webkit.sh', 'bun/scripts/build-tinycc.sh', 'ci/scripts/env.sh', 'bun/cmake/webkit-android-toolchain.cmake') }}
 
-      - name: Build or verify TinyCC prerequisite
+      - name: Validate WebKit cache
+        id: validate-webkit
+        run: |
+          set -euo pipefail
+          if test -s "${WORK_DIR}/webkit-android/cmakeconfig.h" \
+             && test -d "${WORK_DIR}/webkit-android/include/JavaScriptCore" \
+             && find "${WORK_DIR}/webkit-android/lib" -maxdepth 1 -type f -name '*.a' -size +0c -print -quit | grep -q . \
+             && test -s "${WORK_DIR}/state/nodes/webkit.json"; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Validate TinyCC prerequisite
+        id: tinycc
         run: |
           set -euo pipefail
           source ci/scripts/env.sh
-          if ! test -s "${WORK_DIR}/webkit-android/cmakeconfig.h" \
-             || ! test -d "${WORK_DIR}/webkit-android/include/JavaScriptCore" \
-             || ! find "${WORK_DIR}/webkit-android/lib" -maxdepth 1 -type f -name '*.a' -size +0c -print -quit | grep -q .; then
+          if [ "${{ steps.validate-webkit.outputs.ready }}" != true ]; then
             echo "ERROR: Core cache is incomplete; WebKit/JSC is unavailable for Bun." >&2
             exit 1
           fi
           if ! test -s "${WORK_DIR}/webkit-android/lib/libtcc.a"; then
-            ./bun/scripts/build-tinycc.sh
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # ── Build Bun ─────────────────────────────────────────────
-      - name: Cache Bun binary
-        id: cache-bun
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ env.WORK_DIR }}/bun-build/bun
-            ${{ env.WORK_DIR }}/state/nodes/bun.json
-          key: build-v3-bun-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}-${{ hashFiles('bun/scripts/build-bun.sh', 'bun/scripts/apply-patches.sh', 'ci/scripts/env.sh') }}
+      - name: Validate Bun cache
+        id: validate-bun
+        run: |
+          set -euo pipefail
+          if test -s "${WORK_DIR}/bun-build/bun" \
+             && test -s "${WORK_DIR}/state/nodes/bun.json"; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
 
+      - name: Install build dependencies
+        if: steps.validate-icu.outputs.ready != 'true' || steps.validate-webkit.outputs.ready != 'true' || steps.tinycc.outputs.needed == 'true' || steps.validate-bun.outputs.ready != 'true'
+        run: source ci/scripts/setup-runner.sh
+
+      - name: Build TinyCC (if needed)
+        if: steps.tinycc.outputs.needed == 'true'
+        run: |
+          source ci/scripts/env.sh && ./bun/scripts/build-tinycc.sh
+
+      - name: Build ICU (if needed)
+        if: steps.validate-icu.outputs.ready != 'true'
+        run: |
+          source ci/scripts/env.sh && ./bun/scripts/build-icu.sh
+
+      # ── Build Bun ─────────────────────────────────────────────
       - name: Clone, patch, and build Bun
+        if: steps.cache-bun.outputs.cache-hit != 'true' || steps.validate-bun.outputs.ready != 'true'
         run: |
           source ci/scripts/env.sh
           ./bun/scripts/apply-patches.sh
