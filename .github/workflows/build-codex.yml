@@ -98,6 +98,9 @@ jobs:
           sudo apt-get install -y -qq build-essential cmake perl pkg-config m4 zip unzip file protobuf-compiler
           source ci/scripts/setup-runner.sh
 
+      - name: Install Rust Android target
+        run: rustup target add aarch64-linux-android
+
       - name: Build Codex CLI and code-mode host
         run: source ci/scripts/env.sh && ./codex/scripts/build-codex-android.sh
 

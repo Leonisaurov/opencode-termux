@@ -46,6 +46,10 @@ process.chdir(dir)
 const pkg = await Bun.file("./package.json").json()
 const version: string = process.env.KILO_VERSION ?? pkg.version
 const channel: string = process.env.KILO_CHANNEL ?? "latest"
+const androidBunPath = process.env.ANDROID_BUN
+if (!androidBunPath || !fs.existsSync(androidBunPath)) {
+  throw new Error(`build-kilo-android: Android Bun no encontrado en ${androidBunPath ?? "<unset>"}`)
+}
 
 // ── Datos de models.dev (replica generate.ts de Kilo, 18 líneas) ──
 // build.ts:305 `KILO_MODELS_DEV: generated.modelsData` y generate.ts usa
@@ -138,7 +142,7 @@ const LANCEDB_EXTERNAL = [
   "@lancedb/lancedb-win32-x64-msvc",
 ] as const
 
-// ── Build standalone con el runtime del Android Bun (target = host) ──
+// ── Bundle host + reemplazo por el runtime Bun Android ──
 // NOTA: el build.ts:291 setea `target: name.replace(pkg.name, "bun")` (cross-compile).
 // En Termux host y target coinciden (Android Bun embebe su propio runtime), por eso se
 // omite `target` igual que scripts/build-android.ts de opencode.
@@ -168,7 +172,7 @@ await Bun.build({
     autoloadDotenv: false,
     autoloadTsconfig: true,
     autoloadPackageJson: true,
-    outfile: process.env.KILO_OUTFILE ?? path.resolve(__dirname, "../artifacts/kilo-android"),
+    outfile: `${process.env.KILO_OUTFILE ?? path.resolve(__dirname, "../artifacts/kilo-android")}.host`,
     // build.ts:294 — execArgv: [`--user-agent=kilo/${Script.version}`, "--use-system-ca", "--"]
     execArgv: [`--user-agent=kilo/${version}`, "--use-system-ca", "--"],
     windows: {},
@@ -212,4 +216,30 @@ await Bun.build({
   },
 })
 
-console.log("✅ Build complete: kilo-android")
+const outputPath = process.env.KILO_OUTFILE ?? path.resolve(__dirname, "../artifacts/kilo-android")
+const hostPath = `${outputPath}.host`
+const hostBytes = new Uint8Array(await Bun.file(hostPath).arrayBuffer())
+const trailer = Buffer.from("\n---- Bun! ----\n")
+const trailerStart = hostBytes.length - 8 - trailer.length
+const trailerFound = Buffer.from(hostBytes).subarray(trailerStart, trailerStart + trailer.length).compare(trailer) === 0
+if (!trailerFound) throw new Error("build-kilo-android: trailer Bun no encontrado en el binario host")
+const offsetsStart = trailerStart - 32
+const graphByteCount = Number(Buffer.from(hostBytes).readBigUInt64LE(offsetsStart))
+const graphSize = graphByteCount + 32 + trailer.length
+const hostRuntimeSize = hostBytes.length - 8 - graphSize
+if (hostRuntimeSize <= 0 || hostRuntimeSize >= hostBytes.length) {
+  throw new Error(`build-kilo-android: tamaño de runtime host inválido: ${hostRuntimeSize}`)
+}
+const moduleGraph = hostBytes.slice(hostRuntimeSize, hostBytes.length - 8)
+const androidBun = new Uint8Array(await Bun.file(androidBunPath).arrayBuffer())
+const outputSize = androidBun.length + moduleGraph.length + 8
+const output = new Uint8Array(outputSize)
+output.set(androidBun, 0)
+output.set(moduleGraph, androidBun.length)
+const total = new DataView(output.buffer, outputSize - 8, 8)
+total.setUint32(0, outputSize & 0xffffffff, true)
+total.setUint32(4, Math.floor(outputSize / 0x100000000), true)
+await Bun.write(outputPath, output)
+fs.chmodSync(outputPath, 0o755)
+await Bun.write(hostPath, "")
+console.log(`✅ Build complete: kilo-android (${(outputSize / 1024 / 1024).toFixed(1)} MB, Android Bun embebido)`)

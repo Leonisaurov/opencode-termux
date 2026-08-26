@@ -28,6 +28,7 @@ export ZIG_JOBS="$JOBS"
 
 # ── Config ──
 ANDROID_BUN="${ANDROID_BUN:-${REPO_ROOT}/bun/artifacts/bun-android}"
+HOST_BUN="${HOST_BUN:-bun}"
 
 # Kilo Code CLI v7.4.20 (fork de opencode). KILO_SRC por defecto = el checkout ya
 # clonado (build/kilocode-src-latest). BUILD_DIR/WORK_DIR vienen de env.sh.
@@ -1944,8 +1945,8 @@ PYEOF
     # NOTA --ignore-scripts intencional: el postinstall del monorepo (fix-node-pty,
     # setup-git, ripgrep, tree-sitter) apunta a node/glibc; en la condition "bun" se
     # usa bun-pty (no node-pty) y ripgrep es opcional. El store .bun/ se crea aquí.
-    "$ANDROID_BUN" install --frozen-lockfile --ignore-scripts || \
-    "$ANDROID_BUN" install --ignore-scripts
+    "$HOST_BUN" install --frozen-lockfile --ignore-scripts || \
+    "$HOST_BUN" install --ignore-scripts
 
     # ── Copiar libopentui.so (FALLBACK: .bun/ cache) ──
     # Método principal: .so compilado con Zig (paso anterior).
@@ -2123,7 +2124,8 @@ fi
 cd "$REPO_ROOT"
 KILO_OUTFILE="$OUTPUT" KILO_SRC="$KILO_SRC" KILO_VERSION="$KILO_VERSION" KILO_MINIFY="${KILO_MINIFY:-1}" \
     MODELS_DEV_API_JSON="${MODELS_DEV_API_JSON:-}" \
-    "$ANDROID_BUN" run "$SCRIPT_DIR/build-kilo-android.ts" 2>&1
+    ANDROID_BUN="$ANDROID_BUN" \
+    "$HOST_BUN" run "$SCRIPT_DIR/build-kilo-android.ts" 2>&1
 
 echo ""
 echo "✅ Build completado: ${OUTPUT}"
