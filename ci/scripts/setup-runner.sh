@@ -5,6 +5,11 @@
 
 set -euo pipefail
 
+# Some product workflows do not need Zig but still source this shared setup.
+# Keep the default here so set -u cannot abort those jobs before their build.
+: "${ZIG_VERSION:=0.15.2}"
+export ZIG_VERSION
+
 : "${TMPDIR:=${RUNNER_TEMP:-${PWD}/ci-tmp}}"
 export TMPDIR
 mkdir -p "$TMPDIR"

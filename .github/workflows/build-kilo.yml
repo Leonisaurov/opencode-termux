@@ -67,6 +67,17 @@ jobs:
       - name: Install build dependencies and NDK
         run: source ci/scripts/setup-runner.sh
 
+      - name: Prepare Kilo source checkout
+        run: |
+          set -euo pipefail
+          if [ ! -d kilo/src/.git ]; then
+            rm -rf kilo/src
+            git clone --depth 1 --branch "v${{ inputs.kilo_version || '7.4.20' }}" \
+              https://github.com/Kilo-Org/kilocode.git kilo/src
+          fi
+          test -f kilo/src/packages/opencode/package.json
+          git -C kilo/src rev-parse HEAD
+
       - name: Build Kilo
         run: |
           set -euo pipefail
