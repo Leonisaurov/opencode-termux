@@ -26,6 +26,7 @@ concurrency:
 env:
   ANDROID_API: '24'
   ANDROID_NDK_VERSION: '28.1.13356709'
+  ZIG_VERSION: '0.15.2'
   WORK_DIR: '${{ github.workspace }}/kilo/build'
   ANDROID_NDK_HOME: '${{ github.workspace }}/kilo/build/android-ndk'
   JOBS: '2'

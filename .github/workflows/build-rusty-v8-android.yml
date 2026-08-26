@@ -93,10 +93,14 @@ jobs:
         working-directory: upstream-rusty-v8
         run: |
           set -euo pipefail
+          find third_party -type f -name '__mbstate_t.h' -print
           python3 - <<'PY'
           from pathlib import Path
 
-          path = Path("third_party/libc++/src/include/__mbstate_t.h")
+          paths = sorted(Path("third_party").glob("**/__mbstate_t.h"))
+          if not paths:
+              raise SystemExit("Chromium libc++ __mbstate_t.h was not found")
+          path = next((p for p in paths if "libc++/src/include" in p.as_posix()), paths[0])
           text = path.read_text(encoding="utf-8")
           android = "#elif __has_include(<bits/mbstate_t.h>)\n# include <bits/mbstate_t.h> // Android bionic\n"
           if "<bits/mbstate_t.h>" not in text:
@@ -107,8 +111,8 @@ jobs:
               path.write_text(text, encoding="utf-8")
           elif android not in text:
               raise SystemExit(f"unexpected existing Android mbstate_t branch: {path}")
+          print(f"patched/verified: {path}")
           PY
-          grep -n -A2 -B2 'bits/mbstate_t.h' third_party/libc++/src/include/__mbstate_t.h
 
       - name: Cache Chromium host sysroot
         id: cache-sysroot

@@ -176,6 +176,11 @@ jobs:
           if [ -d "$OPENTUI_SRC/.git" ]; then
             CURRENT="$(git -C "$OPENTUI_SRC" rev-parse HEAD 2>/dev/null || true)"
             if [ "$CURRENT" = "$OPENTUI_COMMIT" ]; then
+              # A source cache may contain a previously applied patch. Reset
+              # only this disposable runner checkout before applying the
+              # repository-owned patch again.
+              git -C "$OPENTUI_SRC" reset --hard -q "$OPENTUI_COMMIT"
+              git -C "$OPENTUI_SRC" clean -fdx -q
               echo ">>> Reusing cached opentui source at $OPENTUI_COMMIT"
               exit 0
             fi
