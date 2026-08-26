@@ -89,6 +89,25 @@ jobs:
           PY
           grep -n -A3 '^declare_args' build/config/android/BUILD.gn
 
+      - name: Point Chromium Android toolchain at downloaded NDK
+        working-directory: upstream-rusty-v8
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("build/config/android/config.gni")
+          text = path.read_text(encoding="utf-8")
+          old = 'android_ndk_root = "//third_party/android_toolchain/ndk"'
+          new = 'android_ndk_root = "//third_party/android_ndk"'
+          if old in text:
+              text = text.replace(old, new, 1)
+              path.write_text(text, encoding="utf-8")
+          if new not in path.read_text(encoding="utf-8"):
+              raise SystemExit("Chromium Android toolchain still points outside the downloaded NDK")
+          print(f"verified {path}: {new}")
+          PY
+
       - name: Patch Android bindgen sysroot
         working-directory: upstream-rusty-v8
         run: |

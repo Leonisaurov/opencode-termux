@@ -68,7 +68,10 @@ jobs:
         run: source ci/scripts/setup-runner.sh
 
       - name: Build Kilo
-        run: ./kilo/scripts/build.sh
+        run: |
+          set -euo pipefail
+          bash -n kilo/scripts/build.sh
+          bash kilo/scripts/build.sh
 
       - name: Upload Kilo binary
         uses: actions/upload-artifact@v4
