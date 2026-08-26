@@ -99,7 +99,14 @@ jobs:
           source ci/scripts/setup-runner.sh
 
       - name: Install Rust Android target
-        run: rustup target add aarch64-linux-android
+        working-directory: ${{ env.WORK_DIR }}/codex-src/codex-rs
+        run: |
+          set -euo pipefail
+          RUST_TOOLCHAIN="$(sed -n 's/^channel = "\([^"]*\)"/\1/p' rust-toolchain.toml | head -1)"
+          test -n "$RUST_TOOLCHAIN"
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          rustup target add --toolchain "$RUST_TOOLCHAIN" aarch64-linux-android
+          rustup target list --installed --toolchain "$RUST_TOOLCHAIN" | grep -Fx aarch64-linux-android
 
       - name: Build Codex CLI and code-mode host
         run: source ci/scripts/env.sh && ./codex/scripts/build-codex-android.sh
