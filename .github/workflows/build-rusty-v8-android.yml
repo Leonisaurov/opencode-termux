@@ -61,6 +61,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     steps:
+      # This reusable workflow also runs helpers owned by the port repository.
+      - name: Check out port repository
+        uses: actions/checkout@v4
+
       # ── Checkout de denoland/rusty_v8 al tag v<V8_VERSION> ──
       # submodules: recursive es OBLIGATORIO (V8 source es un submodule).
       - name: Check out denoland/rusty_v8
