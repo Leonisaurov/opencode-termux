@@ -9,6 +9,8 @@ set -euo pipefail
 # Keep the default here so set -u cannot abort those jobs before their build.
 : "${ZIG_VERSION:=0.15.2}"
 export ZIG_VERSION
+: "${BUN_VERSION:=1.2.13}"
+export BUN_VERSION
 
 : "${TMPDIR:=${RUNNER_TEMP:-${PWD}/ci-tmp}}"
 export TMPDIR
@@ -120,9 +122,9 @@ echo "${WORK_DIR}/zig-${ZIG_VERSION}" >> "$GITHUB_PATH"
 echo "Zig: $(${WORK_DIR}/zig-${ZIG_VERSION}/zig version 2>/dev/null)"
 
 # ── Bun host ────────────────────────────────────────────────────
-if [ ! -f "$HOME/.bun/bin/bun" ]; then
-  echo "=== Installing Bun host v1.3.2 ==="
-  curl -fsSL https://bun.sh/install | bash -s "bun-v1.3.2"
+if [ ! -x "$HOME/.bun/bin/bun" ] || [ "$("$HOME/.bun/bin/bun" --version 2>/dev/null || true)" != "$BUN_VERSION" ]; then
+  echo "=== Installing Bun host v${BUN_VERSION} ==="
+  curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}"
 fi
 echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
 export PATH="$HOME/.bun/bin:$PATH"
