@@ -72,6 +72,16 @@ def contract(root: Path, product: str, paths: list[str], values: list[str]) -> d
     return inputs
 
 
+def output_records(root: Path, outputs: list[str]) -> list[dict[str, str]]:
+    records = []
+    for output in sorted(set(outputs)):
+        path = (root / output).resolve()
+        if not path.is_file() or path.stat().st_size == 0:
+            raise ValueError(f"missing output: {output}")
+        records.append({"path": output, "sha256": sha256(path), "size": str(path.stat().st_size)})
+    return records
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["key", "write", "validate"])
@@ -92,7 +102,12 @@ def main() -> int:
     if args.command == "write":
         if not args.manifest:
             parser.error("write requires --manifest")
-        manifest = {"key": key, "contract": metadata}
+        try:
+            outputs = output_records(root, args.output)
+        except ValueError as error:
+            print(f"CACHE_CONTRACT=invalid reason={error}", file=sys.stderr)
+            return 1
+        manifest = {"key": key, "contract": metadata, "outputs": outputs}
         manifest_path = (root / args.manifest).resolve()
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
         manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -106,15 +121,20 @@ def main() -> int:
         if saved.get("key") != key:
             print("CACHE_CONTRACT=invalid reason=key-mismatch", file=sys.stderr)
             return 1
-    for output in args.output:
-        path = (root / output).resolve()
-        if not path.is_file() or path.stat().st_size == 0:
-            print(f"CACHE_CONTRACT=invalid reason=missing-output path={output}", file=sys.stderr)
-            return 1
-        if args.machine:
-            readelf = shutil.which("readelf")
-            if readelf:
-                import subprocess
+    try:
+        current_outputs = output_records(root, args.output)
+    except ValueError as error:
+        print(f"CACHE_CONTRACT=invalid reason={error}", file=sys.stderr)
+        return 1
+    if args.manifest and saved.get("outputs") != current_outputs:
+        print("CACHE_CONTRACT=invalid reason=output-mismatch", file=sys.stderr)
+        return 1
+    if args.machine:
+        readelf = shutil.which("readelf")
+        if readelf:
+            import subprocess
+            for output in args.output:
+                path = (root / output).resolve()
                 result = subprocess.run([readelf, "-h", str(path)], text=True, capture_output=True)
                 if result.returncode or args.machine not in result.stdout:
                     print(f"CACHE_CONTRACT=invalid reason=machine-mismatch path={output}", file=sys.stderr)
