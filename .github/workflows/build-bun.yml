@@ -179,6 +179,10 @@ jobs:
         if: steps.validate-icu.outputs.ready != 'true' || steps.validate-webkit.outputs.ready != 'true' || steps.tinycc.outputs.needed == 'true' || steps.validate-bun.outputs.ready != 'true'
         run: source ci/scripts/setup-runner.sh
 
+      - name: Enable zram swap
+        if: steps.validate-icu.outputs.ready != 'true' || steps.validate-webkit.outputs.ready != 'true' || steps.tinycc.outputs.needed == 'true' || steps.validate-bun.outputs.ready != 'true'
+        uses: ./ci/actions/zram
+
       - name: Build TinyCC (if needed)
         if: steps.tinycc.outputs.needed == 'true'
         run: |

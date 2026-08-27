@@ -195,7 +195,6 @@ jobs:
           args=(--root "$GITHUB_WORKSPACE" --product rusty-v8
             --path upstream-rusty-v8/git_submodule_status.txt
             --path upstream-rusty-v8/Cargo.lock --path upstream-rusty-v8/build.rs
-            --path .github/workflows/build-rusty-v8-android.yml
             --value "V8_VERSION=${{ inputs.v8_version || '150.4.0' }}")
           cache_key="$(python3 ci/scripts/cache-contract.py key "${args[@]}")"
           echo "key=$cache_key" >> "$GITHUB_OUTPUT"
@@ -251,12 +250,12 @@ jobs:
         if: steps.cache-v8.outputs.cache-hit != 'true' || steps.validate-v8.outputs.ready != 'true'
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3 curl git unzip util-linux kmod libglib2.0-dev libclang-19-dev
+          sudo apt-get install -y python3 curl git unzip util-linux kmod gpg zstd libglib2.0-dev libclang-19-dev
           echo "LIBCLANG_PATH=/usr/lib/llvm-19/lib" >> "$GITHUB_ENV"
 
       - name: Enable zram swap
         if: steps.cache-v8.outputs.cache-hit != 'true' || steps.validate-v8.outputs.ready != 'true'
-        run: source ci/scripts/enable-zram.sh
+        uses: ./ci/actions/zram
 
       # ── Toolchain Rust del crate v8 150.4.0 (rustup channel del repo) ──
       - name: Install Rust 1.91.0 + android target

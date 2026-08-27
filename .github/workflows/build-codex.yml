@@ -129,6 +129,9 @@ jobs:
           sudo apt-get install -y -qq build-essential cmake perl pkg-config m4 zip unzip file protobuf-compiler
           source ci/scripts/setup-runner.sh
 
+      - name: Enable zram swap
+        uses: ./ci/actions/zram
+
       - name: Install Rust Android target
         working-directory: ${{ env.WORK_DIR }}/codex-src/codex-rs
         run: |

@@ -74,6 +74,9 @@ jobs:
       - name: Install build dependencies and NDK
         run: source ci/scripts/setup-runner.sh
 
+      - name: Enable zram swap
+        uses: ./ci/actions/zram
+
       - name: Prepare Kilo source checkout
         id: kilo-source
         run: |

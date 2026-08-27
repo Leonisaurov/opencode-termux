@@ -126,6 +126,10 @@ jobs:
         if: steps.cache-icu.outputs.cache-hit != 'true' || steps.validate-icu.outputs.ready != 'true' || steps.cache-webkit.outputs.cache-hit != 'true' || steps.validate-webkit.outputs.ready != 'true' || steps.validate-tinycc.outputs.ready != 'true'
         run: source ci/scripts/setup-runner.sh
 
+      - name: Enable zram swap
+        if: steps.cache-icu.outputs.cache-hit != 'true' || steps.validate-icu.outputs.ready != 'true' || steps.cache-webkit.outputs.cache-hit != 'true' || steps.validate-webkit.outputs.ready != 'true' || steps.validate-tinycc.outputs.ready != 'true'
+        uses: ./ci/actions/zram
+
       - name: Build ICU
         if: steps.cache-icu.outputs.cache-hit != 'true' || steps.validate-icu.outputs.ready != 'true'
         run: |

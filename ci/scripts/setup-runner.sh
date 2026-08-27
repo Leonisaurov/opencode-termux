@@ -28,11 +28,7 @@ echo "=== Installing system packages ==="
 sudo apt-get update -qq
 sudo apt-get install -y -qq ninja-build python3 ruby perl git curl wget unzip \
   xz-utils zip build-essential ccache pkg-config libxml2-dev libxslt1-dev \
-  golang-go autoconf automake libtool util-linux kmod 2>&1 | tail -5
-
-# Rust/C++/Zig builds are memory-bound on the hosted runner. Configure zram
-# before any compiler is invoked; the helper is idempotent per runner.
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/enable-zram.sh"
+  golang-go autoconf automake libtool util-linux kmod gpg zstd 2>&1 | tail -5
 
 # ── CMake 3.28+ ─────────────────────────────────────────────────
 if ! cmake --version 2>/dev/null | grep -q "3\.2[89]\|3\.[3-9]"; then

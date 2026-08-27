@@ -242,7 +242,7 @@ jobs:
 
       - name: Enable zram swap
         if: steps.validate-opentui.outputs.ready != 'true'
-        run: source ci/scripts/enable-zram.sh
+        uses: ./ci/actions/zram
 
       # ── Build libopentui.so ────────────────────────────────────
       - name: Build libopentui.so (state validated)

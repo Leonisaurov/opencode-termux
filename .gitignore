@@ -38,6 +38,7 @@ Thumbs.db
 
 # Python test/runtime bytecode
 __pycache__/
+ci/zram.ko.zst
 *.py[cod]
 
 # Temporary files
