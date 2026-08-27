@@ -67,10 +67,28 @@ jobs:
       - name: Create work directory
         run: mkdir -p "$WORK_DIR"
 
+      - name: Resolve OpenTUI commit for validated fallback
+        id: resolve-opentui
+        run: |
+          set -euo pipefail
+          resolved="$(git ls-remote https://github.com/anomalyco/opentui.git \
+            "refs/heads/$OPENTUI_REF" "refs/tags/$OPENTUI_REF" "refs/tags/$OPENTUI_REF^{}" \
+            2>/dev/null | head -1 | awk '{print $1}')"
+          if [ -z "$resolved" ]; then
+            probe="$RUNNER_TEMP/opentui-contract-probe"
+            rm -rf "$probe"
+            git init -q "$probe"
+            git -C "$probe" remote add origin https://github.com/anomalyco/opentui.git
+            git -C "$probe" fetch -q --depth 1 origin "$OPENTUI_REF"
+            resolved="$(git -C "$probe" rev-parse FETCH_HEAD)"
+          fi
+          test -n "$resolved"
+          echo "commit=$resolved" >> "$GITHUB_OUTPUT"
+
       - name: Compute OpenCode cache contract
         id: contract
         env:
-          UPSTREAM_COMMIT: ${{ inputs.opentui_ref || '9eabce704096837148d935554fcae9c19e6e21f4' }}
+          UPSTREAM_COMMIT: ${{ steps.resolve-opentui.outputs.commit }}
         run: |
           set -euo pipefail
           export ANDROID_TRIPLE_API="aarch64-linux-android${ANDROID_API}"
@@ -87,6 +105,12 @@ jobs:
             --value "BUN_VERSION=$BUN_VERSION" --value "WEBKIT_COMMIT=$WEBKIT_COMMIT")
           bun_key="$(python3 ci/scripts/cache-contract.py key "${bun_args[@]}")"
           echo "bun=$bun_key" >> "$GITHUB_OUTPUT"
+          opentui_args=(--root "$GITHUB_WORKSPACE" --product opentui
+            --path opentui/scripts/build-opentui.sh --path ci/scripts/env.sh
+            --path opentui/patches --value "OPENTUI_REF=$OPENTUI_REF"
+            --value "OPENTUI_TARGET=aarch64-linux-android.24")
+          opentui_key="$(UPSTREAM_COMMIT="$UPSTREAM_COMMIT" python3 ci/scripts/cache-contract.py key "${opentui_args[@]}")"
+          echo "opentui=$opentui_key" >> "$GITHUB_OUTPUT"
 
       # ── Restore cached toolchain ──────────────────────────────
       - name: Cache Android NDK
@@ -174,7 +198,7 @@ jobs:
           path: |
             ${{ github.workspace }}/opentui/src/opencode/packages/core/src/lib
             ${{ github.workspace }}/opentui/build/state/nodes/opentui.json
-          key: ci-cache-v1-opentui-direct-${{ env.OPENTUI_REF }}-${{ hashFiles('opentui/scripts/build-opentui.sh', 'ci/scripts/env.sh', 'opentui/patches/**') }}
+          key: ${{ steps.contract.outputs.opentui }}-artifact
 
       - name: Build libopentui.so
         if: ${{ !inputs.require_dependency_artifacts }}
