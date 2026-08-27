@@ -11,7 +11,6 @@ codex/{src,build,test,scripts,artifacts,more}
 bun/{src,build,test,scripts,patches,artifacts,cmake}
 opentui/{src/{opencode,kilo},build,test,scripts,patches,artifacts}
 ci/{scripts,docker}
-tooling/termux-packages
 ```
 
 `opencode/deps/` and `kilo/deps/` point to the shared Bun and product-specific

@@ -14,7 +14,6 @@ product directory that owns the change:
 - `opentui/`: OpenTUI checkouts for OpenCode and Kilo plus its port tests.
 - `ci/`: shared build-state helpers, runner setup, Docker assets, and pipeline
   orchestration; `.github/workflows/` contains CI entry points.
-- `tooling/termux-packages/`: Termux packaging repository.
 
 Dependencies are exposed through product-local `deps/` links. Do not create
 duplicate source checkouts, root-level build outputs, or ad-hoc test trees.

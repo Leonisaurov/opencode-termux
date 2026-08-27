@@ -37,7 +37,7 @@ runs:
       uses: actions/cache/restore@v4
       with:
         path: ci/zram.ko.zst
-        key: zram-${{ steps.kernel.outputs.full }}-${{ hashFiles('tooling/termux-packages/scripts/linux-kernel-signing-keys.gpg') }}-${{ hashFiles('ci/actions/zram/action.yml') }}
+        key: zram-${{ steps.kernel.outputs.full }}-${{ hashFiles('ci/actions/zram/linux-kernel-signing-keys.gpg') }}-${{ hashFiles('ci/actions/zram/action.yml') }}
 
     - name: Build zram kernel module
       if: steps.cache.outputs.cache-hit != 'true'
@@ -54,7 +54,7 @@ runs:
         cd "$build_dir"
         curl -fsSLO "https://cdn.kernel.org/pub/linux/kernel/v${KERNEL_VERSION%%.*}.x/linux-${TAR_KERNEL_VERSION}.tar.xz"
         curl -fsSLO "https://cdn.kernel.org/pub/linux/kernel/v${KERNEL_VERSION%%.*}.x/linux-${TAR_KERNEL_VERSION}.tar.sign"
-        gpg --import "$GITHUB_WORKSPACE/tooling/termux-packages/scripts/linux-kernel-signing-keys.gpg"
+        gpg --import "$GITHUB_WORKSPACE/ci/actions/zram/linux-kernel-signing-keys.gpg"
         unxz "linux-${TAR_KERNEL_VERSION}.tar.xz"
         gpg --verify "linux-${TAR_KERNEL_VERSION}.tar.sign"
         tar -xf "linux-${TAR_KERNEL_VERSION}.tar"
@@ -89,4 +89,4 @@ runs:
       uses: actions/cache/save@v4
       with:
         path: ci/zram.ko.zst
-        key: zram-${{ steps.kernel.outputs.full }}-${{ hashFiles('tooling/termux-packages/scripts/linux-kernel-signing-keys.gpg') }}-${{ hashFiles('ci/actions/zram/action.yml') }}
+        key: zram-${{ steps.kernel.outputs.full }}-${{ hashFiles('ci/actions/zram/linux-kernel-signing-keys.gpg') }}-${{ hashFiles('ci/actions/zram/action.yml') }}

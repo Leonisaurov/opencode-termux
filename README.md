@@ -87,7 +87,6 @@ codex/{src,build,test,scripts,artifacts}/
 bun/{src,build,test,scripts,patches,artifacts,cmake}/
 opentui/{src/{opencode,kilo},build,test,scripts,patches,artifacts}/
 ci/{scripts,docker}/              # shared state, runner, and CI helpers
-tooling/termux-packages/          # packaging repository
   .github/workflows/
     build-*.yml                    # dependency-aware GitHub Actions workflows
 ```
