@@ -51,6 +51,29 @@ export AR_aarch64_linux_android="$ANDROID_AR"
 export RANLIB_aarch64_linux_android="$ANDROID_RANLIB"
 export RUSTY_V8_ARCHIVE RUSTY_V8_SRC_BINDING_PATH
 
+# V8's Android arm64 CPU code calls compiler-rt's __clear_cache. The NDK
+# linker does not add that archive when Cargo invokes the target clang, so
+# append it through a linker wrapper. Using target-specific RUSTFLAGS would
+# replace the upstream .cargo/config.toml flags; the wrapper preserves them
+# and appends the archive after all objects and libraries. This checkout is
+# cloned externally in CI, so the fix belongs in this port script.
+CLANG_RT_BUILTINS="$(find "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/lib/clang" \
+    -type f -name 'libclang_rt.builtins-aarch64-android.a' -print -quit)"
+if [ -z "$CLANG_RT_BUILTINS" ] || [ ! -s "$CLANG_RT_BUILTINS" ]; then
+    echo "ERROR: Android compiler runtime not found under ${ANDROID_NDK_HOME}" >&2
+    exit 1
+fi
+LINKER_WRAPPER="$CODEX_TARGET_DIR/android-linker"
+mkdir -p "$CODEX_TARGET_DIR"
+cat > "$LINKER_WRAPPER" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+exec "$ANDROID_CC" "\$@" "$CLANG_RT_BUILTINS"
+EOF
+chmod 0755 "$LINKER_WRAPPER"
+export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$LINKER_WRAPPER"
+echo "Android compiler runtime: $CLANG_RT_BUILTINS"
+
 cd "$CODEX_SRC/codex-rs"
 CORE_MANIFEST="$CODEX_SRC/codex-rs/core/Cargo.toml"
 if ! grep -qF '[target.aarch64-linux-android.dependencies]' "$CORE_MANIFEST"; then
