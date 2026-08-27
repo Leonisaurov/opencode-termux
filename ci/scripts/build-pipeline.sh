@@ -5,6 +5,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/env.sh"
 
+BUILD_CHANGED_PRODUCTS="$(python3 "$REPO_ROOT/ci/scripts/changed-products.py" \
+  --root "$REPO_ROOT" --base "${BUILD_BASE_REF:-HEAD^}" --head "${BUILD_HEAD_REF:-HEAD}")"
+export BUILD_CHANGED_PRODUCTS
+echo "Changed products: $BUILD_CHANGED_PRODUCTS"
+
 BUILD_KILO="${BUILD_KILO:-0}"
 BUILD_CODEX="${BUILD_CODEX:-0}"
 
