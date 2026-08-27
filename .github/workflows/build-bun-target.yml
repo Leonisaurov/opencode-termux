@@ -52,7 +52,8 @@ jobs:
             --path ci/scripts/env.sh --path bun/patches/bun/android-support.patch
             --path bun/patches/zig/posix-android-sigaction.patch
             --value "BUN_VERSION=$BUN_VERSION")
-          echo "key=$(python3 ci/scripts/cache-contract.py key "${args[@]}")" >> "$GITHUB_OUTPUT"
+          cache_key="$(python3 ci/scripts/cache-contract.py key "${args[@]}")"
+          echo "key=$cache_key" >> "$GITHUB_OUTPUT"
 
       # ── Restore Bun binary ────────────────────────────────────
       - name: Restore Bun binary

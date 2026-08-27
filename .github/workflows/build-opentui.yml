@@ -107,7 +107,8 @@ jobs:
             --path opentui/scripts/build-opentui.sh --path ci/scripts/env.sh
             --path opentui/patches --value "OPENTUI_REF=$OPENTUI_REF"
             --value "OPENTUI_TARGET=$OPENTUI_TARGET")
-          echo "key=$(python3 ci/scripts/cache-contract.py key "${args[@]}")" >> "$GITHUB_OUTPUT"
+          cache_key="$(python3 ci/scripts/cache-contract.py key "${args[@]}")"
+          echo "key=$cache_key" >> "$GITHUB_OUTPUT"
 
       # ── Cachés ────────────────────────────────────────────────
       - name: Cache Zig toolchain

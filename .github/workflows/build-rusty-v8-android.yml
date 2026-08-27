@@ -193,7 +193,8 @@ jobs:
             --path upstream-rusty-v8/Cargo.lock --path upstream-rusty-v8/build.rs
             --path .github/workflows/build-rusty-v8-android.yml
             --value "V8_VERSION=${{ inputs.v8_version || '150.4.0' }}")
-          echo "key=$(python3 ci/scripts/cache-contract.py key "${args[@]}")" >> "$GITHUB_OUTPUT"
+          cache_key="$(python3 ci/scripts/cache-contract.py key "${args[@]}")"
+          echo "key=$cache_key" >> "$GITHUB_OUTPUT"
 
       # ── Cache del build desde fuente ──
       # third_party = NDK r26c + clang que el build.rs descarga; gn_out = salida

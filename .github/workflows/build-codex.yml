@@ -82,7 +82,8 @@ jobs:
             --path codex/scripts/build-codex-android.sh --path ci/scripts/env.sh
             --path codex/src/codex-rs/Cargo.lock
             --value "CODEX_REF=$CODEX_RESOLVED_COMMIT" --value "V8_VERSION=${{ inputs.v8_version || '150.4.0' }}")
-          echo "key=$(python3 ci/scripts/cache-contract.py key "${args[@]}")" >> "$GITHUB_OUTPUT"
+          cache_key="$(python3 ci/scripts/cache-contract.py key "${args[@]}")"
+          echo "key=$cache_key" >> "$GITHUB_OUTPUT"
 
       - name: Cache Codex Cargo dependencies
         id: cache-codex-dependencies

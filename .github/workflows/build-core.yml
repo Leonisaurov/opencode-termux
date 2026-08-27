@@ -61,7 +61,8 @@ jobs:
             --path bun/cmake/webkit-android-toolchain.cmake
             --value "ICU_VERSION=$ICU_VERSION" --value "WEBKIT_COMMIT=$WEBKIT_COMMIT"
             --value "TINYCC_COMMIT=$TINYCC_COMMIT")
-          echo "key=$(python3 ci/scripts/cache-contract.py key "${key_args[@]}")" >> "$GITHUB_OUTPUT"
+          cache_key="$(python3 ci/scripts/cache-contract.py key "${key_args[@]}")"
+          echo "key=$cache_key" >> "$GITHUB_OUTPUT"
 
       # ── ICU ───────────────────────────────────────────────────
       - name: Cache ICU build
