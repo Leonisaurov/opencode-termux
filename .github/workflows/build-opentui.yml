@@ -274,7 +274,7 @@ jobs:
           cat "$LIB_DIR/build-info.txt"
 
       - name: Save libopentui.so to cache (key por commit)
-        if: steps.validate-opentui.outputs.ready != 'true'
+        if: steps.validate-opentui.outputs.ready != 'true' && steps.cache-opentui-output.outputs.cache-hit != 'true'
         # build-opencode.yml restaura esta key y copia el .so a node_modules.
         # La key incluye el commit resuelto y el hash del build
         # (build-v4-opentui-<commit>-<hash>): cada

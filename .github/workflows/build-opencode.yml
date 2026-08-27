@@ -69,6 +69,7 @@ jobs:
 
       - name: Resolve OpenTUI commit for validated fallback
         id: resolve-opentui
+        if: ${{ !inputs.require_dependency_artifacts }}
         run: |
           set -euo pipefail
           resolved="$(git ls-remote https://github.com/anomalyco/opentui.git \

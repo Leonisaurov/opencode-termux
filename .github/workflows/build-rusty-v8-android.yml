@@ -366,7 +366,7 @@ jobs:
           if-no-files-found: error
 
       - name: Save validated Rusty V8 artifact cache
-        if: success() && steps.validate-v8.outputs.ready != 'true'
+        if: success() && steps.validate-v8.outputs.ready != 'true' && steps.cache-v8-artifact.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: dist
