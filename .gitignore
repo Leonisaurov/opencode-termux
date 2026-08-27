@@ -43,6 +43,9 @@ __pycache__/
 # Temporary files
 tmp/
 
+# Session-local planning notes
+tasks/
+
 # Local Bun test fixtures
 bun/test/*/node_modules/
 bun/test/*/dist*/
