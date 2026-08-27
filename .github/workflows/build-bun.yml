@@ -79,7 +79,10 @@ jobs:
           echo "core=$(python3 ci/scripts/cache-contract.py key --root "$GITHUB_WORKSPACE" --product bun-core
             --path bun/scripts/build-icu.sh --path bun/scripts/build-webkit.sh
             --path bun/scripts/build-tinycc.sh --path ci/scripts/env.sh
-            --value "ICU_VERSION=$ICU_VERSION" --value "WEBKIT_COMMIT=$WEBKIT_COMMIT")" >> "$GITHUB_OUTPUT"
+            --path bun/patches/webkit/android-support.patch
+            --path bun/cmake/webkit-android-toolchain.cmake
+            --value "ICU_VERSION=$ICU_VERSION" --value "WEBKIT_COMMIT=$WEBKIT_COMMIT"
+            --value "TINYCC_COMMIT=$TINYCC_COMMIT")" >> "$GITHUB_OUTPUT"
 
       # Restore the final Bun output before installing packages or inspecting
       # the reusable core state. A valid hit skips all expensive build work.
