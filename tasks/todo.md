@@ -21,8 +21,8 @@
 - [x] Integrar `ccache` para CMake/Bun y conservar `sccache` para Rusty V8,
       con rutas persistentes y validación.
 - [x] Persistir y validar caches de Zig por target y toolchain.
-- [x] Mejorar cache de Bun: cache global separada y lock/script inputs; no usar
-      `node_modules` como contrato.
+- [x] Mejorar cache de Bun: cache global `~/.bun/install/cache` separada y
+      lock/script inputs; no usar `node_modules` como contrato.
 - [x] Corregir la clave de Codex para incluir el commit real del checkout
       externo, toolchain, lockfile y script de manifest.
 - [x] Separar instalación, bundling y ensamblado de OpenCode; Kilo conserva su

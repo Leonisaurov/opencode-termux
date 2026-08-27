@@ -42,6 +42,13 @@ jobs:
       - name: Create work directory
         run: mkdir -p "$WORK_DIR"
 
+      - name: Cache Bun package downloads
+        id: cache-bun-dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ci-cache-v1-bun-dependencies-${{ runner.os }}-${{ runner.arch }}-${{ env.BUN_VERSION }}-${{ hashFiles('bun/src/bun.lock', 'bun/src/package.json', 'ci/scripts/env.sh') }}
+
       # ── Restore cached toolchain ──────────────────────────────
       - name: Cache Android NDK
         id: cache-ndk
@@ -207,7 +214,7 @@ jobs:
       - name: Write CI summary
         if: always()
         env:
-          CACHE_DEPENDENCIES: ${{ steps.cache-icu.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
+          CACHE_DEPENDENCIES: ${{ steps.cache-bun-dependencies.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
           CACHE_INTERMEDIATES: ${{ steps.cache-bun.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
         run: source ci/scripts/ci-summary.sh && ci_summary
 
