@@ -134,7 +134,7 @@ jobs:
             ${{ env.WORK_DIR }}/webkit-android
             ${{ env.WORK_DIR }}/state/nodes/webkit.json
             ${{ env.WORK_DIR }}/state/nodes/tinycc.json
-          key: ${{ steps.contract.outputs.core }}-webkit-${{ env.TINYCC_COMMIT }}
+          key: ${{ steps.contract.outputs.core }}-webkit
 
       - name: Validate WebKit cache
         id: validate-webkit

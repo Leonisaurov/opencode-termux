@@ -251,8 +251,12 @@ jobs:
         if: steps.cache-v8.outputs.cache-hit != 'true' || steps.validate-v8.outputs.ready != 'true'
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3 curl git unzip libglib2.0-dev libclang-19-dev
+          sudo apt-get install -y python3 curl git unzip util-linux kmod libglib2.0-dev libclang-19-dev
           echo "LIBCLANG_PATH=/usr/lib/llvm-19/lib" >> "$GITHUB_ENV"
+
+      - name: Enable zram swap
+        if: steps.cache-v8.outputs.cache-hit != 'true' || steps.validate-v8.outputs.ready != 'true'
+        run: source ci/scripts/enable-zram.sh
 
       # ── Toolchain Rust del crate v8 150.4.0 (rustup channel del repo) ──
       - name: Install Rust 1.91.0 + android target
