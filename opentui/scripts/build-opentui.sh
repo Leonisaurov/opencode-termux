@@ -30,6 +30,10 @@ gcc_dir=
 EOF
 fi
 
+export ZIG_LOCAL_CACHE_DIR="${ZIG_LOCAL_CACHE_DIR:-${WORK_DIR}/cache/zig-opentui}"
+export ZIG_GLOBAL_CACHE_DIR="${ZIG_GLOBAL_CACHE_DIR:-${WORK_DIR}/cache/zig-global}"
+mkdir -p "$ZIG_LOCAL_CACHE_DIR" "$ZIG_GLOBAL_CACHE_DIR"
+
 incremental_exec opentui \
     --input "$SCRIPT_DIR/build-opentui.sh" --input "$REPO_ROOT/ci/scripts/env.sh" \
     --input "$REPO_ROOT/opentui/patches" --input "$OPENTUI_SRC" \
@@ -95,6 +99,8 @@ fi
 "$ZIG_BIN" build \
     -Dtarget="$OPENTUI_TARGET" \
     -Doptimize=ReleaseSafe \
+    --cache-dir "$ZIG_LOCAL_CACHE_DIR" \
+    --global-cache-dir "$ZIG_GLOBAL_CACHE_DIR" \
     --prefix . "${LIBC_ARGS[@]}" 2>&1
 
 # The build.zig installs to dest_dir="../lib/{output_name}" relative to

@@ -48,14 +48,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.ANDROID_NDK_HOME }}
-          key: android-ndk-${{ env.ANDROID_NDK_VERSION }}
+          key: ci-cache-v1-toolchain-${{ runner.os }}-${{ runner.arch }}-ndk-${{ env.ANDROID_NDK_VERSION }}-api-${{ env.ANDROID_API }}
 
       - name: Cache Zig
         id: cache-zig
         uses: actions/cache@v4
         with:
           path: ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
-          key: zig-${{ env.ZIG_VERSION }}
+          key: ci-cache-v1-toolchain-${{ runner.os }}-${{ runner.arch }}-zig-${{ env.ZIG_VERSION }}-api-${{ env.ANDROID_API }}
 
       # ── Patch hashes ──────────────────────────────────────────
       - name: Compute patch hashes
@@ -64,6 +64,22 @@ jobs:
           echo "bun_patch_hash=$(sha256sum bun/patches/bun/android-support.patch | cut -c1-16)" >> $GITHUB_OUTPUT
           echo "zig_patch_hash=$(sha256sum bun/patches/zig/posix-android-sigaction.patch | cut -c1-16)" >> $GITHUB_OUTPUT
           echo "webkit_patch_hash=$(sha256sum bun/patches/webkit/android-support.patch | cut -c1-16)" >> $GITHUB_OUTPUT
+
+      - name: Compute cache contract keys
+        id: contract
+        run: |
+          set -euo pipefail
+          export ANDROID_TRIPLE_API="aarch64-linux-android${ANDROID_API}"
+          key_args=(--root "$GITHUB_WORKSPACE" --product bun
+            --path bun/scripts/build-bun.sh --path bun/scripts/apply-patches.sh
+            --path ci/scripts/env.sh --path bun/patches/bun/android-support.patch
+            --path bun/patches/zig/posix-android-sigaction.patch
+            --value "BUN_VERSION=$BUN_VERSION" --value "WEBKIT_COMMIT=$WEBKIT_COMMIT")
+          echo "bun=$(python3 ci/scripts/cache-contract.py key "${key_args[@]}")" >> "$GITHUB_OUTPUT"
+          echo "core=$(python3 ci/scripts/cache-contract.py key --root "$GITHUB_WORKSPACE" --product bun-core
+            --path bun/scripts/build-icu.sh --path bun/scripts/build-webkit.sh
+            --path bun/scripts/build-tinycc.sh --path ci/scripts/env.sh
+            --value "ICU_VERSION=$ICU_VERSION" --value "WEBKIT_COMMIT=$WEBKIT_COMMIT")" >> "$GITHUB_OUTPUT"
 
       # Restore the final Bun output before installing packages or inspecting
       # the reusable core state. A valid hit skips all expensive build work.
@@ -74,7 +90,7 @@ jobs:
           path: |
             ${{ env.WORK_DIR }}/bun-build/bun
             ${{ env.WORK_DIR }}/state/nodes/bun.json
-          key: build-v3-bun-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}-${{ hashFiles('bun/scripts/build-bun.sh', 'bun/scripts/apply-patches.sh', 'ci/scripts/env.sh') }}
+          key: ${{ steps.contract.outputs.bun }}
 
       # ── Restore ICU (build if missing, ~5 min) ────────────────
       - name: Cache ICU build
@@ -84,7 +100,7 @@ jobs:
           path: |
             ${{ env.WORK_DIR }}/deps-android/prefix
             ${{ env.WORK_DIR }}/state/nodes/icu.json
-          key: build-v3-icu-${{ env.ICU_VERSION }}-${{ env.ANDROID_API }}-${{ hashFiles('bun/scripts/build-icu.sh', 'ci/scripts/env.sh') }}
+          key: ${{ steps.contract.outputs.core }}-icu
 
       - name: Validate ICU cache
         id: validate-icu
@@ -105,7 +121,7 @@ jobs:
             ${{ env.WORK_DIR }}/webkit-android
             ${{ env.WORK_DIR }}/state/nodes/webkit.json
             ${{ env.WORK_DIR }}/state/nodes/tinycc.json
-          key: build-v5-webkit-${{ env.WEBKIT_COMMIT }}-${{ env.TINYCC_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}-${{ hashFiles('bun/scripts/build-webkit.sh', 'bun/scripts/build-tinycc.sh', 'ci/scripts/env.sh', 'bun/cmake/webkit-android-toolchain.cmake') }}
+          key: ${{ steps.contract.outputs.core }}-webkit-${{ env.TINYCC_COMMIT }}
 
       - name: Validate WebKit cache
         id: validate-webkit
@@ -181,6 +197,13 @@ jobs:
           name: bun-android-aarch64-${{ env.BUN_VERSION }}
           path: ${{ env.WORK_DIR }}/bun-build/bun
           if-no-files-found: error
+
+      - name: Write CI summary
+        if: always()
+        env:
+          CACHE_DEPENDENCIES: ${{ steps.cache-icu.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
+          CACHE_INTERMEDIATES: ${{ steps.cache-bun.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
+        run: source ci/scripts/ci-summary.sh && ci_summary
 
       - name: Cleanup intermediate files
         if: always()

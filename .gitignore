@@ -36,6 +36,10 @@ Thumbs.db
 # Logs
 *.log
 
+# Python test/runtime bytecode
+__pycache__/
+*.py[cod]
+
 # Temporary files
 tmp/
 

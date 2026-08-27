@@ -67,6 +67,12 @@ jobs:
       - name: Install build dependencies and NDK
         run: source ci/scripts/setup-runner.sh
 
+      - name: Cache Kilo Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ci-cache-v1-kilo-dependencies-${{ runner.os }}-${{ runner.arch }}-api${{ env.ANDROID_API }}-ndk${{ env.ANDROID_NDK_VERSION }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('kilo/scripts/build.sh', 'kilo/scripts/build-kilo-android.ts') }}
+
       - name: Prepare Kilo source checkout
         run: |
           set -euo pipefail
@@ -90,3 +96,7 @@ jobs:
           name: kilo-android-aarch64-${{ inputs.kilo_version || '7.4.20' }}
           path: kilo/artifacts/kilo-android
           if-no-files-found: error
+
+      - name: Write CI summary
+        if: always()
+        run: source ci/scripts/ci-summary.sh && ci_summary

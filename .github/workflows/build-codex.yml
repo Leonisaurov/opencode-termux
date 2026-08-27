@@ -66,16 +66,39 @@ jobs:
           git -C "$CODEX_SRC" fetch --depth 1 origin "$CODEX_REF"
           git -C "$CODEX_SRC" checkout --detach FETCH_HEAD
           echo "CODEX_SRC=$CODEX_SRC" >> "$GITHUB_ENV"
+          echo "CODEX_RESOLVED_COMMIT=$(git -C "$CODEX_SRC" rev-parse HEAD)" >> "$GITHUB_ENV"
           git -C "$CODEX_SRC" log -1 --oneline
 
-      - name: Cache Codex Cargo target and registry
+      - name: Resolve Codex Rust toolchain and cache contract
+        id: contract
+        run: |
+          set -euo pipefail
+          RUST_TOOLCHAIN="$(sed -n 's/^channel = "\([^"]*\)"/\1/p' "$CODEX_SRC/codex-rs/rust-toolchain.toml" | head -1)"
+          test -n "$RUST_TOOLCHAIN"
+          echo "RUST_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
+          export UPSTREAM_COMMIT="$CODEX_RESOLVED_COMMIT" RUST_TOOLCHAIN
+          export ANDROID_TRIPLE_API="aarch64-linux-android${ANDROID_API}"
+          args=(--root "$GITHUB_WORKSPACE" --product codex
+            --path codex/scripts/build-codex-android.sh --path ci/scripts/env.sh
+            --path codex/src/codex-rs/Cargo.lock
+            --value "CODEX_REF=$CODEX_RESOLVED_COMMIT" --value "V8_VERSION=${{ inputs.v8_version || '150.4.0' }}")
+          echo "key=$(python3 ci/scripts/cache-contract.py key "${args[@]}")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Codex Cargo dependencies
+        id: cache-codex-dependencies
         uses: actions/cache@v4
         with:
           path: |
-            ${{ env.WORK_DIR }}/codex-target
             ~/.cargo/registry
             ~/.cargo/git
-          key: codex-android-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}-${{ hashFiles('codex/src/codex-rs/Cargo.lock', 'codex/scripts/build-codex-android.sh', 'ci/scripts/env.sh') }}
+          key: ${{ steps.contract.outputs.key }}-dependencies
+
+      - name: Cache Codex Cargo intermediates
+        id: cache-codex-intermediates
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.WORK_DIR }}/codex-target
+          key: ${{ steps.contract.outputs.key }}-intermediates
 
       - name: Download verified Rusty V8 artifact
         uses: actions/download-artifact@v4
@@ -120,3 +143,10 @@ jobs:
             codex/artifacts/codex-code-mode-host
             codex/artifacts/codex-linux-sandbox
           if-no-files-found: error
+
+      - name: Write CI summary
+        if: always()
+        env:
+          CACHE_DEPENDENCIES: ${{ steps.cache-codex-dependencies.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
+          CACHE_INTERMEDIATES: ${{ steps.cache-codex-intermediates.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
+        run: source ci/scripts/ci-summary.sh && ci_summary

@@ -25,7 +25,7 @@ df -h .
 echo "=== Installing system packages ==="
 sudo apt-get update -qq
 sudo apt-get install -y -qq ninja-build python3 ruby perl git curl wget unzip \
-  xz-utils zip build-essential pkg-config libxml2-dev libxslt1-dev \
+  xz-utils zip build-essential ccache pkg-config libxml2-dev libxslt1-dev \
   golang-go autoconf automake libtool 2>&1 | tail -5
 
 # ── CMake 3.28+ ─────────────────────────────────────────────────

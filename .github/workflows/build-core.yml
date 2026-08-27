@@ -35,19 +35,33 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.ANDROID_NDK_HOME }}
-          key: android-ndk-${{ env.ANDROID_NDK_VERSION }}
+          key: ci-cache-v1-toolchain-${{ runner.os }}-${{ runner.arch }}-ndk-${{ env.ANDROID_NDK_VERSION }}-api-${{ env.ANDROID_API }}
 
       - name: Cache Zig
         id: cache-zig
         uses: actions/cache@v4
         with:
           path: ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
-          key: zig-${{ env.ZIG_VERSION }}
+          key: ci-cache-v1-toolchain-${{ runner.os }}-${{ runner.arch }}-zig-${{ env.ZIG_VERSION }}-api-${{ env.ANDROID_API }}
 
       # ── Patch hashes ──────────────────────────────────────────
       - name: Compute patch hashes
         id: hashes
         run: echo "webkit_patch_hash=$(sha256sum bun/patches/webkit/android-support.patch | cut -c1-16)" >> $GITHUB_OUTPUT
+
+      - name: Compute cache contract key
+        id: contract
+        run: |
+          set -euo pipefail
+          export ANDROID_TRIPLE_API="aarch64-linux-android${ANDROID_API}"
+          key_args=(--root "$GITHUB_WORKSPACE" --product bun-core
+            --path bun/scripts/build-icu.sh --path bun/scripts/build-webkit.sh
+            --path bun/scripts/build-tinycc.sh --path ci/scripts/env.sh
+            --path bun/patches/webkit/android-support.patch
+            --path bun/cmake/webkit-android-toolchain.cmake
+            --value "ICU_VERSION=$ICU_VERSION" --value "WEBKIT_COMMIT=$WEBKIT_COMMIT"
+            --value "TINYCC_COMMIT=$TINYCC_COMMIT")
+          echo "key=$(python3 ci/scripts/cache-contract.py key "${key_args[@]}")" >> "$GITHUB_OUTPUT"
 
       # ── ICU ───────────────────────────────────────────────────
       - name: Cache ICU build
@@ -57,7 +71,7 @@ jobs:
           path: |
             ${{ env.WORK_DIR }}/deps-android/prefix
             ${{ env.WORK_DIR }}/state/nodes/icu.json
-          key: build-v3-icu-${{ env.ICU_VERSION }}-${{ env.ANDROID_API }}-${{ hashFiles('bun/scripts/build-icu.sh', 'ci/scripts/env.sh') }}
+          key: ${{ steps.contract.outputs.key }}-icu
 
       - name: Validate ICU cache
         id: validate-icu
@@ -79,7 +93,7 @@ jobs:
             ${{ env.WORK_DIR }}/webkit-android
             ${{ env.WORK_DIR }}/state/nodes/webkit.json
             ${{ env.WORK_DIR }}/state/nodes/tinycc.json
-          key: build-v5-webkit-${{ env.WEBKIT_COMMIT }}-${{ env.TINYCC_COMMIT }}-${{ steps.hashes.outputs.webkit_patch_hash }}-${{ hashFiles('bun/scripts/build-webkit.sh', 'bun/scripts/build-tinycc.sh', 'ci/scripts/env.sh', 'bun/cmake/webkit-android-toolchain.cmake') }}
+          key: ${{ steps.contract.outputs.key }}-webkit
 
       - name: Validate WebKit cache
         id: validate-webkit
@@ -129,6 +143,13 @@ jobs:
         if: steps.cache-webkit.outputs.cache-hit != 'true' || steps.validate-tinycc.outputs.ready != 'true'
         run: |
           source ci/scripts/env.sh && ./bun/scripts/build-tinycc.sh
+
+      - name: Write CI summary
+        if: always()
+        env:
+          CACHE_DEPENDENCIES: ${{ steps.cache-icu.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
+          CACHE_INTERMEDIATES: ${{ steps.cache-webkit.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
+        run: source ci/scripts/ci-summary.sh && ci_summary
 
       - name: Cleanup intermediate files
         if: always()

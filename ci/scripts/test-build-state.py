@@ -6,10 +6,12 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
+import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE = ROOT / "scripts" / "build-state.py"
+CACHE_CONTRACT = ROOT / "scripts" / "cache-contract.py"
 
 
 def run(*args: str) -> subprocess.CompletedProcess[str]:
@@ -17,6 +19,7 @@ def run(*args: str) -> subprocess.CompletedProcess[str]:
 
 
 def main() -> None:
+    os.environ.setdefault("TMPDIR", "/data/data/com.termux/files/usr/tmp")
     with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as directory:
         root = Path(directory)
         source = root / "source.txt"
@@ -48,6 +51,20 @@ def main() -> None:
         assert "BUILD_STATE=miss" in child_second.stdout, child_second.stderr
         status = subprocess.run(["python3", str(STATE), "status", "--root", str(root), "--state-dir", "state"], cwd=root, text=True, capture_output=True)
         assert "demo: valid" in status.stdout and "child: valid" in status.stdout, status.stderr
+    with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as directory:
+        root = Path(directory)
+        source = root / "input.txt"
+        source.write_text("contract\n", encoding="utf-8")
+        base = ["--root", str(root), "--product", "demo", "--path", "input.txt", "--value", "ANDROID_API=24"]
+        key = subprocess.run([sys.executable, str(CACHE_CONTRACT), "key", *base], text=True, capture_output=True, check=True)
+        assert key.stdout.startswith("ci-cache-v1-demo-")
+        manifest = "state/cache.json"
+        subprocess.run([sys.executable, str(CACHE_CONTRACT), "write", *base, "--manifest", manifest], check=True)
+        valid = subprocess.run([sys.executable, str(CACHE_CONTRACT), "validate", *base, "--manifest", manifest], text=True, capture_output=True)
+        assert valid.returncode == 0 and "CACHE_CONTRACT=valid" in valid.stdout
+        source.write_text("changed\n", encoding="utf-8")
+        invalid = subprocess.run([sys.executable, str(CACHE_CONTRACT), "validate", *base, "--manifest", manifest], text=True, capture_output=True)
+        assert invalid.returncode != 0 and "key-mismatch" in invalid.stderr
     print("build-state tests: OK")
 
 

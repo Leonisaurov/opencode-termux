@@ -180,6 +180,21 @@ jobs:
         working-directory: upstream-rusty-v8
         run: git submodule status --recursive > git_submodule_status.txt
 
+      - name: Compute Rusty V8 cache contract
+        id: contract
+        env:
+          RUST_TOOLCHAIN: '1.91.0'
+        run: |
+          set -euo pipefail
+          export UPSTREAM_COMMIT="$(git -C upstream-rusty-v8 rev-parse HEAD)"
+          export ANDROID_API=24 ANDROID_NDK_VERSION=r26c ANDROID_TRIPLE_API=aarch64-linux-android24 ZIG_VERSION=none
+          args=(--root "$GITHUB_WORKSPACE" --product rusty-v8
+            --path upstream-rusty-v8/git_submodule_status.txt
+            --path upstream-rusty-v8/Cargo.lock --path upstream-rusty-v8/build.rs
+            --path .github/workflows/build-rusty-v8-android.yml
+            --value "V8_VERSION=${{ inputs.v8_version || '150.4.0' }}")
+          echo "key=$(python3 ci/scripts/cache-contract.py key "${args[@]}")" >> "$GITHUB_OUTPUT"
+
       # ── Cache del build desde fuente ──
       # third_party = NDK r26c + clang que el build.rs descarga; gn_out = salida
       # de la compilación de V8; build = clang de Chromium descargado por el
@@ -195,8 +210,14 @@ jobs:
             upstream-rusty-v8/target/aarch64-linux-android/release/gn_out
             upstream-rusty-v8/target/aarch64-linux-android/release/build
             upstream-rusty-v8/target/sccache
-            dist
-          key: rusty-v8-android-${{ inputs.v8_version }}-${{ hashFiles('upstream-rusty-v8/git_submodule_status.txt', 'upstream-rusty-v8/Cargo.lock', 'upstream-rusty-v8/build.rs', '.github/workflows/build-rusty-v8-android.yml') }}
+          key: ${{ steps.contract.outputs.key }}-intermediates
+
+      - name: Restore validated Rusty V8 artifact
+        id: cache-v8-artifact
+        uses: actions/cache/restore@v4
+        with:
+          path: dist
+          key: ${{ steps.contract.outputs.key }}-artifact
 
       - name: Validate Rusty V8 cache
         id: validate-v8
@@ -342,3 +363,17 @@ jobs:
           name: rusty-v8-${{ inputs.v8_version }}-ptrcomp-sandbox-aarch64-linux-android
           path: dist/*
           if-no-files-found: error
+
+      - name: Save validated Rusty V8 artifact cache
+        if: success() && steps.validate-v8.outputs.ready != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: dist
+          key: ${{ steps.contract.outputs.key }}-artifact
+
+      - name: Write CI summary
+        if: always()
+        env:
+          CACHE_DEPENDENCIES: ${{ steps.cache-sysroot.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
+          CACHE_INTERMEDIATES: ${{ steps.cache-v8.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
+        run: source ci/scripts/ci-summary.sh && ci_summary

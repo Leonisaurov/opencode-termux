@@ -56,7 +56,6 @@ fi
 # Fix: Symlink .zig-cache -> the explicit cache dir so both paths resolve to
 # the same physical location. Clear both first to avoid stale entries.
 echo ">>> Setting up Zig cache directories..."
-rm -rf "$BUN_BUILD/cache/zig" "$BUN_SRC/.zig-cache"
 mkdir -p "$BUN_BUILD/cache/zig/local"
 mkdir -p "$BUN_BUILD/cache/zig/global"
 ln -sfn "$BUN_BUILD/cache/zig/local" "$BUN_SRC/.zig-cache"
@@ -79,6 +78,8 @@ cd "$BUN_BUILD"
 
 cmake \
     -G Ninja \
+    -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+    -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
     -DCMAKE_TOOLCHAIN_FILE="$BUN_TOOLCHAIN" \
     -DANDROID_NDK_HOME="$ANDROID_NDK_HOME" \
     -DCMAKE_BUILD_TYPE=Release \

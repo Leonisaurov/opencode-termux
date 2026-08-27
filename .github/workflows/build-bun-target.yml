@@ -19,6 +19,7 @@ env:
   BUN_VERSION: "${{ github.event.inputs.bun_version || '1.2.13' }}"
   ANDROID_API: "24"
   ANDROID_NDK_VERSION: "28.1.13356709"
+  WEBKIT_COMMIT: "017930ebf915121f8f593bef61cbbca82d78132d"
   PRODUCT: bun
   WORK_DIR: "${{ github.workspace }}/bun/build"
   ANDROID_NDK_HOME: "${{ github.workspace }}/bun/build/android-ndk"
@@ -41,6 +42,18 @@ jobs:
           echo "zig_patch_hash=$(sha256sum bun/patches/zig/posix-android-sigaction.patch | cut -c1-16)" >> "$GITHUB_OUTPUT"
           echo "TARGET_NAME=bun-linux-arm64-android-v${BUN_VERSION}" >> $GITHUB_ENV
 
+      - name: Compute Bun cache contract
+        id: contract
+        run: |
+          set -euo pipefail
+          export ANDROID_TRIPLE_API="aarch64-linux-android${ANDROID_API}" ZIG_VERSION=0.15.2
+          args=(--root "$GITHUB_WORKSPACE" --product bun
+            --path bun/scripts/build-bun.sh --path bun/scripts/apply-patches.sh
+            --path ci/scripts/env.sh --path bun/patches/bun/android-support.patch
+            --path bun/patches/zig/posix-android-sigaction.patch
+            --value "BUN_VERSION=$BUN_VERSION")
+          echo "key=$(python3 ci/scripts/cache-contract.py key "${args[@]}")" >> "$GITHUB_OUTPUT"
+
       # ── Restore Bun binary ────────────────────────────────────
       - name: Restore Bun binary
         uses: actions/cache/restore@v4
@@ -48,7 +61,7 @@ jobs:
           path: |
             ${{ env.WORK_DIR }}/bun-build/bun
             ${{ env.WORK_DIR }}/state/nodes/bun.json
-          key: build-v3-bun-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}-${{ hashFiles('bun/scripts/build-bun.sh', 'bun/scripts/apply-patches.sh', 'ci/scripts/env.sh') }}
+          key: ${{ steps.contract.outputs.key }}
           fail-on-cache-miss: true
 
       # ── Verify Bun binary ─────────────────────────────────────
@@ -92,7 +105,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.WORK_DIR }}/${{ env.TARGET_NAME }}.tgz
-          key: bun-target-${{ env.BUN_VERSION }}-${{ steps.hashes.outputs.bun_patch_hash }}-${{ steps.hashes.outputs.zig_patch_hash }}-${{ hashFiles('bun/scripts/build-bun.sh', 'bun/scripts/apply-patches.sh', 'ci/scripts/env.sh') }}
+          key: ${{ steps.contract.outputs.key }}-target
 
       # ── Upload tarball as artifact ────────────────────────────
       - name: Upload target runtime artifact

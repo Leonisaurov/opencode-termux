@@ -43,6 +43,7 @@ env:
   OPENCODE_VERSION: "${{ inputs.opencode_version || '1.3.13' }}"
   ANDROID_API: "24"
   ANDROID_NDK_VERSION: "28.1.13356709"
+  WEBKIT_COMMIT: "017930ebf915121f8f593bef61cbbca82d78132d"
   ZIG_VERSION: "0.15.2"
   WORK_DIR: "${{ github.workspace }}/opencode/build"
   ANDROID_NDK_HOME: "${{ github.workspace }}/opencode/build/android-ndk"
@@ -66,27 +67,46 @@ jobs:
       - name: Create work directory
         run: mkdir -p "$WORK_DIR"
 
+      - name: Compute OpenCode cache contract
+        id: contract
+        env:
+          UPSTREAM_COMMIT: ${{ inputs.opentui_ref || '9eabce704096837148d935554fcae9c19e6e21f4' }}
+        run: |
+          set -euo pipefail
+          export ANDROID_TRIPLE_API="aarch64-linux-android${ANDROID_API}"
+          args=(--root "$GITHUB_WORKSPACE" --product opencode
+            --path opencode/scripts/build-opencode.sh --path opencode/scripts/make-packages.sh
+            --path ci/scripts/env.sh --path opencode/patches
+            --value "OPENCODE_VERSION=$OPENCODE_VERSION" --value "BUN_VERSION=$BUN_VERSION")
+          echo "key=$(python3 ci/scripts/cache-contract.py key "${args[@]}")" >> "$GITHUB_OUTPUT"
+          bun_args=(--root "$GITHUB_WORKSPACE" --product bun
+            --path bun/scripts/build-bun.sh --path bun/scripts/apply-patches.sh
+            --path ci/scripts/env.sh --path bun/patches/bun/android-support.patch
+            --path bun/patches/zig/posix-android-sigaction.patch
+            --value "BUN_VERSION=$BUN_VERSION" --value "WEBKIT_COMMIT=$WEBKIT_COMMIT")
+          echo "bun=$(python3 ci/scripts/cache-contract.py key "${bun_args[@]}")" >> "$GITHUB_OUTPUT"
+
       # ── Restore cached toolchain ──────────────────────────────
       - name: Cache Android NDK
         id: cache-ndk
         uses: actions/cache@v4
         with:
           path: ${{ env.ANDROID_NDK_HOME }}
-          key: android-ndk-${{ env.ANDROID_NDK_VERSION }}
+          key: ci-cache-v1-toolchain-${{ runner.os }}-${{ runner.arch }}-ndk-${{ env.ANDROID_NDK_VERSION }}-api-${{ env.ANDROID_API }}
 
       - name: Cache Zig
         id: cache-zig
         uses: actions/cache@v4
         with:
           path: ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
-          key: zig-${{ env.ZIG_VERSION }}
+          key: ci-cache-v1-toolchain-${{ runner.os }}-${{ runner.arch }}-zig-${{ env.ZIG_VERSION }}-api-${{ env.ANDROID_API }}
 
       - name: Cache Bun host
         id: cache-bun-host
         uses: actions/cache@v4
         with:
           path: ~/.bun
-          key: bun-host-1.3.2
+          key: ${{ steps.contract.outputs.key }}-bun-host
 
       - name: Receive Bun artifact
         uses: actions/download-artifact@v4
@@ -137,9 +157,7 @@ jobs:
           path: |
             ${{ github.workspace }}/bun/build/bun-build/bun
             ${{ github.workspace }}/bun/build/state/nodes/bun.json
-          key: build-v3-bun-${{ env.BUN_VERSION }}-restore
-          restore-keys: |
-            build-v3-bun-${{ env.BUN_VERSION }}-
+          key: ${{ steps.contract.outputs.bun }}
 
       # Restore all caches/artifacts before paying for runner setup.
       - name: Install build dependencies
@@ -154,9 +172,7 @@ jobs:
           path: |
             ${{ github.workspace }}/opentui/src/opencode/packages/core/src/lib
             ${{ github.workspace }}/opentui/build/state/nodes/opentui.json
-          key: build-v3-opentui-restore
-          restore-keys: |
-            build-v3-opentui-
+          key: ci-cache-v1-opentui-direct-${{ env.OPENTUI_REF }}-${{ hashFiles('opentui/scripts/build-opentui.sh', 'ci/scripts/env.sh', 'opentui/patches/**') }}
 
       - name: Build libopentui.so
         if: ${{ !inputs.require_dependency_artifacts }}
@@ -198,6 +214,13 @@ jobs:
           name: opencode-android-aarch64-${{ env.OPENCODE_VERSION }}
           path: ${{ env.WORK_DIR }}/dist/opencode
           if-no-files-found: error
+
+      - name: Write CI summary
+        if: always()
+        env:
+          CACHE_DEPENDENCIES: ${{ steps.cache-bun-host.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
+          CACHE_INTERMEDIATES: ${{ steps.cache-opentui.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
+        run: source ci/scripts/ci-summary.sh && ci_summary
 
       - name: Cleanup intermediate files
         if: always()
