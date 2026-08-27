@@ -374,11 +374,8 @@ if [ ! -f "$MARKERS/kilo-deps" ]; then
 
         # Caches zig en $TMPDIR para evitar AccessDenied en .zig-cache (Termux),
         # exactamente igual que build-opentui.sh.
-        KILO_TMP_ROOT="$(mktemp -d "$TMPDIR/opencode-termux-kilo.XXXXXX")"
-        export ZIG_LOCAL_CACHE_DIR="$KILO_TMP_ROOT/zig-local"
-        export ZIG_GLOBAL_CACHE_DIR="$KILO_TMP_ROOT/zig-global"
-        trap 'rm -rf "$KILO_TMP_ROOT"' EXIT
-        rm -rf "$ZIG_LOCAL_CACHE_DIR" "$ZIG_GLOBAL_CACHE_DIR"
+        export ZIG_LOCAL_CACHE_DIR="${WORK_DIR}/cache/zig-kilo"
+        export ZIG_GLOBAL_CACHE_DIR="${WORK_DIR}/cache/zig-global"
         mkdir -p "$ZIG_LOCAL_CACHE_DIR" "$ZIG_GLOBAL_CACHE_DIR"
 
         # La compilación Zig usa todos los CPUs del job mediante -j$JOBS.
