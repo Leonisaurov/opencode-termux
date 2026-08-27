@@ -90,8 +90,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/registry
-            ~/.cargo/git
+            ${{ env.WORK_DIR }}/cache/cargo/registry
+            ${{ env.WORK_DIR }}/cache/cargo/git
           key: ${{ steps.contract.outputs.key }}-dependencies
 
       - name: Cache Codex Cargo intermediates

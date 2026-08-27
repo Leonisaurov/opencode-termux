@@ -196,6 +196,15 @@ jobs:
           cache_key="$(python3 ci/scripts/cache-contract.py key "${args[@]}")"
           echo "key=$cache_key" >> "$GITHUB_OUTPUT"
 
+      - name: Cache Rusty V8 Cargo dependencies
+        id: cache-v8-dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ steps.contract.outputs.key }}-dependencies
+
       # ── Cache del build desde fuente ──
       # third_party = NDK r26c + clang que el build.rs descarga; gn_out = salida
       # de la compilación de V8; build = clang de Chromium descargado por el
@@ -375,6 +384,6 @@ jobs:
       - name: Write CI summary
         if: always()
         env:
-          CACHE_DEPENDENCIES: ${{ steps.cache-sysroot.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
+          CACHE_DEPENDENCIES: ${{ steps.cache-v8-dependencies.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
           CACHE_INTERMEDIATES: ${{ steps.cache-v8.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
         run: source ci/scripts/ci-summary.sh && ci_summary

@@ -64,16 +64,18 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/bun/artifacts"
           install -m 0755 "$BUN" "$GITHUB_WORKSPACE/bun/artifacts/bun-android"
 
+      - name: Cache Kilo NDK
+        id: cache-ndk
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.ANDROID_NDK_HOME }}
+          key: ci-cache-v1-toolchain-${{ runner.os }}-${{ runner.arch }}-ndk-${{ env.ANDROID_NDK_VERSION }}-api-${{ env.ANDROID_API }}
+
       - name: Install build dependencies and NDK
         run: source ci/scripts/setup-runner.sh
 
-      - name: Cache Kilo Bun dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: ci-cache-v1-kilo-dependencies-${{ runner.os }}-${{ runner.arch }}-api${{ env.ANDROID_API }}-ndk${{ env.ANDROID_NDK_VERSION }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('kilo/scripts/build.sh', 'kilo/scripts/build-kilo-android.ts') }}
-
       - name: Prepare Kilo source checkout
+        id: kilo-source
         run: |
           set -euo pipefail
           if [ ! -d kilo/src/.git ]; then
@@ -82,7 +84,43 @@ jobs:
               https://github.com/Kilo-Org/kilocode.git kilo/src
           fi
           test -f kilo/src/packages/opencode/package.json
-          git -C kilo/src rev-parse HEAD
+          echo "commit=$(git -C kilo/src rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Compute Kilo cache contract
+        id: kilo-contract
+        env:
+          UPSTREAM_COMMIT: ${{ steps.kilo-source.outputs.commit }}
+          ANDROID_TRIPLE_API: aarch64-linux-android24
+        run: |
+          set -euo pipefail
+          args=(--root "$GITHUB_WORKSPACE" --product kilo
+            --path kilo/scripts/build.sh --path kilo/scripts/build-kilo-android.ts
+            --path ci/scripts/env.sh
+            --path opentui/patches/opentui/android-termux-port-kilo.patch
+            --path opentui/patches/opentui/android-termux-build-kilo.patch
+            --path kilo/src/bun.lock --path kilo/src/package.json
+            --path kilo/src/packages/opencode/package.json
+            --value "KILO_VERSION=${{ inputs.kilo_version || '7.4.20' }}"
+            --value "KILO_OPENTUI_REF=9b216a58d974704ae638b3043aece2eb70b5ff19")
+          key="$(python3 ci/scripts/cache-contract.py key "${args[@]}")"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Kilo Bun dependencies
+        id: cache-kilo-dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ steps.kilo-contract.outputs.key }}-dependencies
+
+      - name: Cache Kilo Zig intermediates
+        id: cache-kilo-zig
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.WORK_DIR }}/cache/zig-kilo
+            ${{ env.WORK_DIR }}/cache/zig-global
+            ${{ env.WORK_DIR }}/opentui-zig-deps
+          key: ${{ steps.kilo-contract.outputs.key }}-intermediates
 
       - name: Build Kilo
         run: |
@@ -99,4 +137,7 @@ jobs:
 
       - name: Write CI summary
         if: always()
+        env:
+          CACHE_DEPENDENCIES: ${{ steps.cache-kilo-dependencies.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
+          CACHE_INTERMEDIATES: ${{ steps.cache-kilo-zig.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
         run: source ci/scripts/ci-summary.sh && ci_summary

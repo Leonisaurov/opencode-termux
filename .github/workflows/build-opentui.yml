@@ -118,6 +118,15 @@ jobs:
           path: ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
           key: ${{ steps.contract.outputs.key }}-zig
 
+      - name: Cache OpenTUI Zig intermediates
+        id: cache-zig-intermediates
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.WORK_DIR }}/cache/zig-opentui
+            ${{ env.WORK_DIR }}/cache/zig-global
+          key: ${{ steps.contract.outputs.key }}-zig-intermediates
+
       - name: Cache opentui source
         id: cache-opentui
         uses: actions/cache@v4

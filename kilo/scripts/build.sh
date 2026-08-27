@@ -125,8 +125,8 @@ compute_fingerprint() {
         "$SCRIPT_DIR/build.sh" \
         "$REPO_ROOT/opentui/scripts/build-opentui.sh"; do
         h="missing"
-        if [ -f "$SCRIPT_DIR/$script" ]; then
-            h="$(sha256sum "$SCRIPT_DIR/$script" 2>/dev/null | cut -c1-16)"
+        if [ -f "$script" ]; then
+            h="$(sha256sum "$script" 2>/dev/null | cut -c1-16)"
         fi
         fp+="sha_${script//[^a-zA-Z0-9]/_}=${h}\n"
     done

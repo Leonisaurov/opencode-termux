@@ -81,6 +81,21 @@ do
 done
 
 BACKUP_FILE=""
+BUILD_SCRIPT_LOCAL=""
+
+restore_x64_opentui() {
+    # If bundling aborts after the swap, never leave the cached dependency
+    # polluted with the Android library. This also makes a retry deterministic.
+    if [ -n "$BACKUP_FILE" ] && [ -f "$BACKUP_FILE" ]; then
+        rm -f "$OPENTUI_NODE_MODULE"
+        mv "$BACKUP_FILE" "$OPENTUI_NODE_MODULE"
+    fi
+    if [ -n "$BUILD_SCRIPT_LOCAL" ]; then
+        rm -f "$BUILD_SCRIPT_LOCAL"
+    fi
+}
+trap restore_x64_opentui EXIT
+
 if [ -n "$OPENTUI_NODE_MODULE" ]; then
     echo ">>> Swapping x86_64 libopentui.so with ARM64 version..."
     BACKUP_FILE="${OPENTUI_NODE_MODULE}.x64.bak"
