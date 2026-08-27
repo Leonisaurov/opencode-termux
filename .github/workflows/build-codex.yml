@@ -87,7 +87,7 @@ jobs:
 
       - name: Cache Codex Cargo dependencies
         id: cache-codex-dependencies
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             ${{ env.WORK_DIR }}/cache/cargo/registry
@@ -96,14 +96,14 @@ jobs:
 
       - name: Cache Codex Cargo intermediates
         id: cache-codex-intermediates
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ env.WORK_DIR }}/codex-target
           key: ${{ steps.contract.outputs.key }}-intermediates
 
       - name: Cache Codex compiler objects
         id: cache-codex-compiler
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ env.WORK_DIR }}/sccache
           key: ${{ steps.contract.outputs.key }}-compiler
@@ -152,6 +152,33 @@ jobs:
 
       - name: Build Codex CLI and code-mode host
         run: source ci/scripts/env.sh && ./codex/scripts/build-codex-android.sh
+
+      # Preserve useful Cargo/sccache work when the final linker fails.
+      - name: Save Codex Cargo dependencies (best effort)
+        if: always() && steps.cache-codex-dependencies.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.WORK_DIR }}/cache/cargo/registry
+            ${{ env.WORK_DIR }}/cache/cargo/git
+          key: ${{ steps.contract.outputs.key }}-dependencies
+
+      - name: Save Codex Cargo intermediates (best effort)
+        if: always() && steps.cache-codex-intermediates.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.WORK_DIR }}/codex-target
+          key: ${{ steps.contract.outputs.key }}-intermediates
+
+      - name: Save Codex compiler objects (best effort)
+        if: always() && steps.cache-codex-compiler.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.WORK_DIR }}/sccache
+          key: ${{ steps.contract.outputs.key }}-compiler
 
       - name: Upload Codex binaries
         uses: actions/upload-artifact@v4
