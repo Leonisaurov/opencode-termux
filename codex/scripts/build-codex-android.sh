@@ -8,9 +8,11 @@ source "$SCRIPT_DIR/../../ci/scripts/env.sh"
 
 CODEX_SRC="${CODEX_SRC:-$REPO_ROOT/codex/src}"
 CODEX_TARGET_DIR="${CODEX_TARGET_DIR:-$WORK_DIR/codex-target}"
-CODEX_OUT="${CODEX_OUT:-$ARTIFACT_DIR/codex-android}"
-CODEX_HOST_OUT="${CODEX_HOST_OUT:-$ARTIFACT_DIR/codex-code-mode-host}"
-CODEX_SANDBOX_OUT="${CODEX_SANDBOX_OUT:-$ARTIFACT_DIR/codex-linux-sandbox}"
+CODEX_ARTIFACT_DIR="${CODEX_ARTIFACT_DIR:-$REPO_ROOT/codex/artifacts}"
+CODEX_OUT="${CODEX_OUT:-$CODEX_ARTIFACT_DIR/codex-android}"
+CODEX_HOST_OUT="${CODEX_HOST_OUT:-$CODEX_ARTIFACT_DIR/codex-code-mode-host}"
+CODEX_SANDBOX_OUT="${CODEX_SANDBOX_OUT:-$CODEX_ARTIFACT_DIR/codex-linux-sandbox}"
+mkdir -p "$CODEX_ARTIFACT_DIR"
 
 incremental_exec codex \
     --input "$SCRIPT_DIR/build-codex-android.sh" --input "$REPO_ROOT/ci/scripts/env.sh" \
