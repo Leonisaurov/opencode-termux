@@ -11,7 +11,7 @@ set -euo pipefail
 export ZIG_VERSION
 : "${BUN_VERSION:=1.2.13}"
 export BUN_VERSION
-: "${HOST_BUN_VERSION:=1.3.2}"
+: "${HOST_BUN_VERSION:=1.3.14}"
 export HOST_BUN_VERSION
 
 : "${TMPDIR:=${RUNNER_TEMP:-${PWD}/ci-tmp}}"
