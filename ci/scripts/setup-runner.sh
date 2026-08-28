@@ -11,6 +11,8 @@ set -euo pipefail
 export ZIG_VERSION
 : "${BUN_VERSION:=1.2.13}"
 export BUN_VERSION
+: "${HOST_BUN_VERSION:=1.3.2}"
+export HOST_BUN_VERSION
 
 : "${TMPDIR:=${RUNNER_TEMP:-${PWD}/ci-tmp}}"
 export TMPDIR
@@ -122,12 +124,13 @@ echo "${WORK_DIR}/zig-${ZIG_VERSION}" >> "$GITHUB_PATH"
 echo "Zig: $(${WORK_DIR}/zig-${ZIG_VERSION}/zig version 2>/dev/null)"
 
 # ── Bun host ────────────────────────────────────────────────────
-if [ ! -x "$HOME/.bun/bin/bun" ] || [ "$("$HOME/.bun/bin/bun" --version 2>/dev/null || true)" != "$BUN_VERSION" ]; then
-  echo "=== Installing Bun host v${BUN_VERSION} ==="
-  curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}"
+if [ ! -x "$HOME/.bun/bin/bun" ] || [ "$("$HOME/.bun/bin/bun" --version 2>/dev/null || true)" != "$HOST_BUN_VERSION" ]; then
+  echo "=== Installing Bun host v${HOST_BUN_VERSION} ==="
+  curl -fsSL https://bun.sh/install | bash -s "bun-v${HOST_BUN_VERSION}"
 fi
 echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
 export PATH="$HOME/.bun/bin:$PATH"
+test "$(bun --version 2>/dev/null || true)" = "$HOST_BUN_VERSION"
 echo "Bun host: $(bun --version 2>/dev/null || echo 'not found')"
 
 echo "=== Setup complete ==="

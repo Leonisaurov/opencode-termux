@@ -39,6 +39,7 @@ permissions:
 env:
   PRODUCT: opencode
   BUN_VERSION: "1.2.13"
+  HOST_BUN_VERSION: "1.3.2"
   OPENTUI_REF: "${{ inputs.opentui_ref || '9eabce704096837148d935554fcae9c19e6e21f4' }}"
   OPENCODE_VERSION: "${{ inputs.opencode_version || '1.3.13' }}"
   ANDROID_API: "24"
@@ -96,7 +97,8 @@ jobs:
           args=(--root "$GITHUB_WORKSPACE" --product opencode
             --path opencode/scripts/build-opencode.sh --path opencode/scripts/make-packages.sh
             --path ci/scripts/env.sh --path opencode/patches
-            --value "OPENCODE_VERSION=$OPENCODE_VERSION" --value "BUN_VERSION=$BUN_VERSION")
+            --value "OPENCODE_VERSION=$OPENCODE_VERSION" --value "BUN_VERSION=$BUN_VERSION"
+            --value "HOST_BUN_VERSION=$HOST_BUN_VERSION")
           opencode_key="$(python3 ci/scripts/cache-contract.py key "${args[@]}")"
           echo "key=$opencode_key" >> "$GITHUB_OUTPUT"
           bun_args=(--root "$GITHUB_WORKSPACE" --product bun
