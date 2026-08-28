@@ -132,7 +132,7 @@ jobs:
 
       - name: Cache Bun host
         id: cache-bun-host
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/.bun
           key: ${{ steps.contract.outputs.key }}-bun-host
@@ -212,6 +212,24 @@ jobs:
       - name: Build OpenCode standalone binary
         run: |
           source ci/scripts/env.sh && ./opencode/scripts/build-opencode.sh
+
+      - name: Save OpenCode host/dependency cache
+        if: always() && steps.cache-bun-host.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.bun
+          key: ${{ steps.contract.outputs.key }}-bun-host
+
+      - name: Save OpenCode product state
+        if: always()
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.WORK_DIR }}/dist/opencode
+            ${{ env.WORK_DIR }}/state/nodes/opencode.json
+          key: ${{ steps.contract.outputs.key }}-artifact
 
       - name: Verify OpenCode binary
         run: |

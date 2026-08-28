@@ -113,14 +113,14 @@ jobs:
 
       - name: Cache Kilo Bun dependencies
         id: cache-kilo-dependencies
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/.bun/install/cache
           key: ${{ steps.kilo-contract.outputs.key }}-dependencies
 
       - name: Cache Kilo Zig intermediates
         id: cache-kilo-zig
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             ${{ env.WORK_DIR }}/cache/zig-kilo
@@ -128,11 +128,49 @@ jobs:
             ${{ env.WORK_DIR }}/opentui-zig-deps
           key: ${{ steps.kilo-contract.outputs.key }}-intermediates
 
+      - name: Restore Kilo product state
+        id: cache-kilo-product
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            kilo/artifacts/kilo-android
+            kilo/build/state/nodes/kilo.json
+          key: ${{ steps.kilo-contract.outputs.key }}-artifact
+
       - name: Build Kilo
         run: |
           set -euo pipefail
           bash -n kilo/scripts/build.sh
           bash kilo/scripts/build.sh
+
+      - name: Save Kilo dependency cache
+        if: always() && steps.cache-kilo-dependencies.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ steps.kilo-contract.outputs.key }}-dependencies
+
+      - name: Save Kilo Zig intermediates
+        if: always() && steps.cache-kilo-zig.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.WORK_DIR }}/cache/zig-kilo
+            ${{ env.WORK_DIR }}/cache/zig-global
+            ${{ env.WORK_DIR }}/opentui-zig-deps
+          key: ${{ steps.kilo-contract.outputs.key }}-intermediates
+
+      - name: Save Kilo product state
+        if: always() && steps.cache-kilo-product.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            kilo/artifacts/kilo-android
+            kilo/build/state/nodes/kilo.json
+          key: ${{ steps.kilo-contract.outputs.key }}-artifact
 
       - name: Upload Kilo binary
         uses: actions/upload-artifact@v4
