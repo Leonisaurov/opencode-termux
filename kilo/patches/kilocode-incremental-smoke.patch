@@ -1,0 +1,12 @@
+diff --git a/packages/opencode/src/kilocode/cli/port-warning.ts b/packages/opencode/src/kilocode/cli/port-warning.ts
+--- a/packages/opencode/src/kilocode/cli/port-warning.ts
++++ b/packages/opencode/src/kilocode/cli/port-warning.ts
+@@ -7,6 +7,6 @@ export function warnPort(port: number) {
+   if (port < Daemon.PortRange.start || port > Daemon.PortRange.end) {
+     console.warn(
+       `\x1B[33mPort ${port} is outside the recommended daemon discovery range (${Daemon.PortRange.start}-${Daemon.PortRange.end}). ` +
+-        `The console will work, but auto-discovery may not find this server.\x1B[0m`,
++        `Kilo will work, but auto-discovery may not find this server.\x1B[0m`,
+     )
+   }
+ }

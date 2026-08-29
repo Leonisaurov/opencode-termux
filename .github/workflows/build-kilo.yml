@@ -101,6 +101,7 @@ jobs:
           args=(--root "$GITHUB_WORKSPACE" --product kilo
             --path kilo/scripts/build.sh --path kilo/scripts/build-kilo-android.ts
             --path ci/scripts/env.sh
+            --path kilo/patches/kilocode-incremental-smoke.patch
             --path opentui/patches/opentui/android-termux-port-kilo.patch
             --path opentui/patches/opentui/android-termux-build-kilo.patch
             --path kilo/src/bun.lock --path kilo/src/package.json

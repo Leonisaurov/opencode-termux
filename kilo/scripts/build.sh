@@ -296,6 +296,20 @@ else
     fi
 fi
 
+# Apply the repository-owned Kilo source smoke patch. It changes one CLI string
+# so a small source edit exercises the Kilo bundle and publish DAG without
+# changing dependencies or the Android toolchain.
+KILO_SOURCE_PATCH="$REPO_ROOT/kilo/patches/kilocode-incremental-smoke.patch"
+cd "$KILO_SRC"
+if git apply --check "$KILO_SOURCE_PATCH" >/dev/null 2>&1; then
+    git apply "$KILO_SOURCE_PATCH"
+elif git apply --reverse --check "$KILO_SOURCE_PATCH" >/dev/null 2>&1; then
+    echo "   Kilo source smoke patch already applied"
+else
+    echo "ERROR: Kilo source smoke patch does not apply cleanly" >&2
+    exit 1
+fi
+
 if [ ! -f "$MARKERS/kilo-deps" ]; then
     cd "$KILO_SRC"
 
