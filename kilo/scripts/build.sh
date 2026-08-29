@@ -1942,7 +1942,9 @@ PYEOF
     # NOTA --ignore-scripts intencional: el postinstall del monorepo (fix-node-pty,
     # setup-git, ripgrep, tree-sitter) apunta a node/glibc; en la condition "bun" se
     # usa bun-pty (no node-pty) y ripgrep es opcional. El store .bun/ se crea aquí.
-    "$HOST_BUN" install --frozen-lockfile --ignore-scripts || +    "$HOST_BUN" install --ignore-scripts
+    if ! "$HOST_BUN" install --frozen-lockfile --ignore-scripts; then
+        "$HOST_BUN" install --ignore-scripts
+    fi
 
     # ── Copiar libopentui.so (FALLBACK: .bun/ cache) ──
     # Método principal: .so compilado con Zig (paso anterior).
