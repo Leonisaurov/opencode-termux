@@ -30,7 +30,7 @@ on:
         default: false
 
 concurrency:
-  group: build-opencode-${{ github.ref }}
+  group: build-opencode-${{ github.ref }}-${{ github.run_id }}
   cancel-in-progress: true
 
 permissions:

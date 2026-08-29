@@ -14,7 +14,7 @@ on:
         default: '1.2.13'
 
 concurrency:
-  group: build-bun-${{ github.ref }}
+  group: build-bun-${{ github.ref }}-${{ github.run_id }}
   cancel-in-progress: true
 
 env:

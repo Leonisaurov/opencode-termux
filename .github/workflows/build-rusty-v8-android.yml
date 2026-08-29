@@ -53,7 +53,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-rusty-v8-${{ inputs.v8_version }}
+  group: build-rusty-v8-${{ inputs.v8_version }}-${{ github.run_id }}
   cancel-in-progress: true
 
 jobs:
