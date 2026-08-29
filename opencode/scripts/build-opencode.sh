@@ -44,7 +44,7 @@ OPENCODE_PKG="$OPENCODE_SRC/packages/opencode"
 # Install OpenCode dependencies
 echo ">>> Installing OpenCode dependencies..."
 cd "$OPENCODE_SRC"
-"$HOST_BUN" install --frozen-lockfile
+"$HOST_BUN" install
 
 # Find the Android bun binary
 ANDROID_BUN="$BUN_BUILD/bun"
