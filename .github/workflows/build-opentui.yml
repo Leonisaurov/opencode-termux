@@ -5,8 +5,8 @@
 #
 # Flujo:
 #   1. Restaura/instala el NDK y Zig 0.15.2.
-#   2. Usa el checkout de OpenTUI versionado en el gitlink.
-#   3. opentui/scripts/build-opentui.sh valida el checkout y compila
+#   2. Usa el árbol de OpenTUI vendorizado en el checkout raíz.
+#   3. opentui/scripts/build-opentui.sh valida el árbol y compila
 #      `aarch64-linux-android.24` con el libc.so del NDK.
 #   5. Verifica NEEDED: libc.so y sube el artifact
 #      `opentui-android-aarch64-<commit>`.
@@ -218,11 +218,13 @@ jobs:
       - name: Prepare opentui source
         if: steps.validate-opentui.outputs.ready != 'true'
         run: |
+          set -euo pipefail
           test -f "$OPENTUI_SRC/packages/core/src/zig/build.zig"
-          CURRENT="$(git -C "$OPENTUI_SRC" rev-parse HEAD)"
-          test "$CURRENT" = "$OPENTUI_REF"
-          test -z "$(git -C "$OPENTUI_SRC" status --porcelain --untracked-files=all)"
-          echo ">>> OpenTUI source ready at $CURRENT"
+          test ! -e "$OPENTUI_SRC/.git"
+          git ls-files --error-unmatch \
+            opentui/src/opencode/packages/core/src/zig/build.zig \
+            opentui/src/opencode/packages/core/src/zig/renderer.zig >/dev/null
+          echo ">>> Vendored OpenTUI source ready at origin revision $OPENTUI_REF"
 
       - name: Enable zram swap
         if: steps.validate-opentui.outputs.ready != 'true'
