@@ -13,7 +13,7 @@ def verify(path: pathlib.Path, name: str) -> None:
 
 def main():
     p=argparse.ArgumentParser(); p.add_argument("--root", type=pathlib.Path, required=True); p.add_argument("--out", type=pathlib.Path, required=True); p.add_argument("--release", required=True); p.add_argument("--stack-version", required=True); p.add_argument("--bun", required=True); p.add_argument("--opentui", required=True); p.add_argument("--opencode", required=True); p.add_argument("--kilo", required=True); p.add_argument("--codex", required=True); a=p.parse_args(); a.out.mkdir(parents=True, exist_ok=True)
-    specs={"bun":(["bun"],"tar.gz",[]),"opentui":(["libopentui.so"],"tar.gz",[]),"opencode":(["opencode"],"tar.gz",["bun","opentui"]),"kilo":(["kilo"],"tar.gz",["bun"]),"codex":(["codex-android","codex-code-mode-host","codex-linux-sandbox"],"tar.gz",[])}
+    specs={"bun":(["bun"],"tar.gz",[]),"opentui":(["libopentui.so"],"tar.gz",[]),"opencode":(["opencode"],"tar.gz",[]),"kilo":(["kilo"],"tar.gz",[]),"codex":(["codex-android","codex-code-mode-host","codex-linux-sandbox"],"tar.gz",[])}
     versions={"bun":a.bun,"opentui":a.opentui,"opencode":a.opencode,"kilo":a.kilo,"codex":a.codex}; comps={}
     prefixes={"bun":"bun-android-aarch64-","opentui":"opentui-android-aarch64-","opencode":"opencode-android-aarch64-","kilo":"kilo-android-aarch64-","codex":"codex-android-aarch64-"}
     source_names={"kilo":"kilo-android"}

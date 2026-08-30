@@ -23,7 +23,7 @@ class InstallerTests(unittest.TestCase):
             archive = self.assets / (component + ".tar.gz")
             with tarfile.open(archive, "w:gz") as tar:
                 for name in files: tar.add(self.assets / name, arcname=name)
-            components[component] = {"version":"1.0.0", "tag":"test", "asset":"assets/" + archive.name, "sha256":hashlib.sha256(archive.read_bytes()).hexdigest(), "size":archive.stat().st_size, "archive":"tar.gz", "depends": {"opencode":["bun","opentui"],"kilo":["bun"]}.get(component,[]), "files":files}
+            components[component] = {"version":"1.0.0", "tag":"test", "asset":"assets/" + archive.name, "sha256":hashlib.sha256(archive.read_bytes()).hexdigest(), "size":archive.stat().st_size, "archive":"tar.gz", "depends":[], "files":files}
         self.manifest.write_text(json.dumps({"schema":"opencode-termux.stack/v1", "stack_version":"1", "release":"v1.18.11", "stability":"stable", "android":{"arch":"aarch64","abi":"arm64-v8a","api":24}, "components":components}))
     def tearDown(self):
         import shutil; shutil.rmtree(self.tmp, ignore_errors=True)
@@ -36,8 +36,10 @@ class InstallerTests(unittest.TestCase):
         r = self.run_installer(); self.assertEqual(r.returncode, 0, r.stderr)
         for name in ("bun", "opencode", "kilo", "codex-android", "codex-code-mode-host", "codex-linux-sandbox"):
             self.assertTrue((self.prefix / "bin" / name).is_file(), name)
-    def test_just_rejects_missing_dependency(self):
-        r = self.run_installer("--just", "opencode"); self.assertNotEqual(r.returncode, 0); self.assertIn("requiere", r.stderr)
+    def test_just_installs_standalones(self):
+        for component in ("opencode", "kilo", "codex"):
+            r = self.run_installer("--just", component)
+            self.assertEqual(r.returncode, 0, f"{component}: {r.stderr}")
     def test_bad_checksum_keeps_prefix_untouched(self):
         data=json.loads(self.manifest.read_text()); data["components"]["bun"]["sha256"]="0"*64; self.manifest.write_text(json.dumps(data))
         r=self.run_installer("--just", "bun"); self.assertNotEqual(r.returncode, 0); self.assertFalse((self.prefix / "bin").exists())

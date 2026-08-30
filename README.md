@@ -1,60 +1,42 @@
-# OpenCode for Termux (Android aarch64)
-
-<!-- Patch smoke test: harmless documentation-only change. -->
+# OpenCode Termux Stack — Android aarch64
 
 > **Mapa para agentes y colaboradores:** lee primero [AGENTS.md](AGENTS.md).
 > Si el trabajo es de Codex, entra en `codex/` y sigue allí sus instrucciones;
 > para OpenCode, Kilo, Bun o el port usa el directorio indicado en ese mapa.
 
-Build system for cross-compiling [OpenCode](https://github.com/anomalyco/opencode) to run natively on Android devices via [Termux](https://termux.dev/).
+This repository builds and distributes a native Android/Termux stack for
+OpenCode, Kilo, and Codex. It is the maintained port and build ecosystem for
+the forked products, not a wrapper around a host installation: OpenCode and
+Kilo are standalone `aarch64` binaries with the Android Bun runtime and ARM64
+OpenTUI runtime incorporated into their bundle. Codex is distributed with its
+Android CLI, code-mode host, and sandbox helper.
 
-OpenCode is an AI-powered coding assistant for the terminal. It uses [Bun](https://bun.sh/) as its JavaScript runtime and compiles to a standalone binary via `bun build --compile`. Since Bun has no official Android support ([marked "not planned"](https://github.com/oven-sh/bun/issues/9)), this project cross-compiles Bun itself from source for Android/aarch64, including the full WebKit/JavaScriptCore engine.
+Bun `1.2.13`, OpenCode `1.3.13`, Android API 24, and the `aarch64` target are
+deliberately pinned for compatibility with the Android source ports.
 
 ## Install (Termux)
 
-### Option 1: Standalone binary (easiest)
-
-> **Note:** The zip now contains a wrapper script (`opencode`), the main binary
-> (`opencode.bin`), and native libraries (`.so` files). All files must be
-> installed to their proper locations.
+The installer downloads the signed-by-checksum manifest and installs the full
+stable stack transactionally. It is safe to run from a checkout or through a
+pipe:
 
 ```bash
-# Download the latest "opencode-*-android-aarch64.zip" from
-#   https://github.com/guysoft/opencode-termux/releases/latest
-# Then install:
-
-mkdir -p $PREFIX/libexec/opencode $PREFIX/lib
-unzip opencode-*-android-aarch64.zip
-mv opencode $PREFIX/bin/opencode
-chmod +x $PREFIX/bin/opencode
-mv opencode.bin $PREFIX/libexec/opencode/opencode.bin
-chmod +x $PREFIX/libexec/opencode/opencode.bin
-mv libtagfix.so libc++_shared.so libopentui.so $PREFIX/lib/
-
-# Install required dependency
-pkg install ripgrep
-
-# Run
-opencode
+curl -fsSL https://raw.githubusercontent.com/Leonisaurov/opencode-termux/main/install.sh | sh
 ```
 
-### Option 2: Pacman package (recommended if using pacman)
+That installs Bun, OpenTUI, OpenCode, Kilo, and Codex. The standalone products
+can also be installed independently because their runtime is self-contained:
 
 ```bash
-curl -LO https://github.com/guysoft/opencode-termux/releases/latest/download/opencode-aarch64.pkg.tar.xz
-pacman -U opencode-*-aarch64.pkg.tar.xz
-opencode
+curl -fsSL https://raw.githubusercontent.com/Leonisaurov/opencode-termux/main/install.sh | sh -s -- --just opencode
+curl -fsSL https://raw.githubusercontent.com/Leonisaurov/opencode-termux/main/install.sh | sh -s -- --just kilo
+curl -fsSL https://raw.githubusercontent.com/Leonisaurov/opencode-termux/main/install.sh | sh -s -- --just codex
 ```
 
-### Option 3: Deb package
-
-```bash
-curl -LO https://github.com/guysoft/opencode-termux/releases/latest/download/opencode-aarch64.deb
-dpkg -i opencode-*-aarch64.deb
-opencode
-```
-
-The pacman and deb packages automatically install `ripgrep` as a dependency.
+Codex installs `codex-android`, `codex-code-mode-host`, and
+`codex-linux-sandbox` together. To pin a release, append `1.18.11 --yes` (or
+use `--release 1.18.11 --yes`). Use `--dry-run` to validate without changing
+the Termux prefix.
 
 ### After install
 
@@ -71,7 +53,7 @@ export OPENAI_API_KEY="sk-..."
 opencode
 ```
 
-See the [OpenCode docs](https://github.com/anomalyco/opencode) for full configuration options.
+See the upstream product documentation for provider configuration and usage.
 
 ## What This Repo Contains
 

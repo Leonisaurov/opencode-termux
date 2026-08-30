@@ -1,7 +1,19 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
-# Keep argument handling and transaction logic in a testable Python module.  This
-# wrapper intentionally has no temporary path of its own.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec python3 "$SCRIPT_DIR/ci/scripts/installer.py" "$@"
+# Run from a checkout when available; also support `curl .../install.sh | sh`.
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd)
+if [ -f "$SCRIPT_DIR/ci/scripts/installer.py" ]; then
+    exec python3 "$SCRIPT_DIR/ci/scripts/installer.py" "$@"
+fi
+
+: "${TMPDIR:=/data/data/com.termux/files/usr/tmp}"
+export TMPDIR
+mkdir -p "$TMPDIR"
+test -d "$TMPDIR" && test -w "$TMPDIR"
+INSTALLER=$(mktemp "$TMPDIR/opencode-termux-installer.XXXXXX")
+trap 'rm -f "$INSTALLER"' EXIT HUP INT TERM
+REPO=${CODEX_INSTALL_REPO:-Leonisaurov/opencode-termux}
+REF=${CODEX_INSTALL_REF:-main}
+curl -fsSL "https://raw.githubusercontent.com/$REPO/$REF/ci/scripts/installer.py" -o "$INSTALLER"
+exec python3 "$INSTALLER" "$@"
