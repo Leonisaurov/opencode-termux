@@ -5,9 +5,8 @@
 #
 # Flujo:
 #   1. Restaura/instala el NDK y Zig 0.15.2.
-#   2. Resuelve el commit de anomalyco/opentui a compilar (branch/tag/SHA).
-#   3. Resuelve el checkout en $OPENTUI_SRC.
-#   4. opentui/scripts/build-opentui.sh aplica el parche y compila
+#   2. Usa el checkout de OpenTUI versionado en el gitlink.
+#   3. opentui/scripts/build-opentui.sh valida el checkout y compila
 #      `aarch64-linux-android.24` con el libc.so del NDK.
 #   5. Verifica NEEDED: libc.so y sube el artifact
 #      `opentui-android-aarch64-<commit>`.
@@ -33,16 +32,16 @@ on:
       # (build-v4-opentui-<commit>-<hash>) → al cambiar el pin, la key cambia
       # automáticamente → cache miss → se recompila. Nada más que tocar.
       opentui_ref:
-        description: 'Branch, tag, o commit SHA de anomalyco/opentui a compilar (default: commit verificado 9eabce70). Para actualizar: cambiar este pin; la cache key por commit invalida automáticamente.'
+        description: 'Commit exacto de OpenTUI versionado en este repositorio.'
         required: false
-        default: '9eabce704096837148d935554fcae9c19e6e21f4'
+        default: '658db4cbe0da0adfeb5edac0273ee68911b29c3e'
   workflow_call:
     inputs:
       opentui_ref:
         description: 'Commit, tag o branch de OpenTUI'
         required: false
         type: string
-        default: '9eabce704096837148d935554fcae9c19e6e21f4'
+        default: '658db4cbe0da0adfeb5edac0273ee68911b29c3e'
 
 permissions:
   contents: read
@@ -56,7 +55,7 @@ env:
   OPENTUI_TARGET: "aarch64-linux-android.24"
   ANDROID_API: "24"
   ANDROID_NDK_VERSION: "28.1.13356709"
-  OPENTUI_REF: "${{ inputs.opentui_ref || '9eabce704096837148d935554fcae9c19e6e21f4' }}"
+  OPENTUI_REF: "${{ inputs.opentui_ref || '658db4cbe0da0adfeb5edac0273ee68911b29c3e' }}"
   PRODUCT: opentui
   WORK_DIR: "${{ github.workspace }}/opentui/build"
   OPENTUI_SRC: "${{ github.workspace }}/opentui/src/opencode"
@@ -73,52 +72,20 @@ jobs:
       - name: Create work directory
         run: mkdir -p "$WORK_DIR"
 
-      # ── Resolve el commit exacto de opentui (branch/tag/SHA) ──
-      - name: Resolve opentui commit
-        id: resolve
-        run: |
-          # Ramas y tags resuelven vía ls-remote; los SHAs crudos (o refs
-          # no convencionales) caen al fetch de validación.
-          RESOLVED="$(git ls-remote https://github.com/anomalyco/opentui.git \
-            "refs/heads/$OPENTUI_REF" "refs/tags/$OPENTUI_REF" "refs/tags/$OPENTUI_REF^{}" \
-            2>/dev/null | head -1 | awk '{print $1}')"
-          if [ -z "$RESOLVED" ]; then
-            rm -rf "$RUNNER_TEMP/opentui-resolve"
-            git init -q "$RUNNER_TEMP/opentui-resolve"
-            git -C "$RUNNER_TEMP/opentui-resolve" remote add origin https://github.com/anomalyco/opentui.git
-            git -C "$RUNNER_TEMP/opentui-resolve" fetch -q --depth 1 origin "$OPENTUI_REF"
-            RESOLVED="$(git -C "$RUNNER_TEMP/opentui-resolve" rev-parse FETCH_HEAD)"
-          fi
-          if [ -z "$RESOLVED" ]; then
-            echo "ERROR: no se pudo resolver opentui_ref='$OPENTUI_REF'"
-            exit 1
-          fi
-          echo "commit=$RESOLVED" >> "$GITHUB_OUTPUT"
-          echo ">>> opentui_ref=$OPENTUI_REF -> commit $RESOLVED"
-
       - name: Compute OpenTUI cache contract
         id: contract
         env:
-          UPSTREAM_COMMIT: ${{ steps.resolve.outputs.commit }}
+          UPSTREAM_COMMIT: ${{ env.OPENTUI_REF }}
         run: |
           set -euo pipefail
           export ANDROID_TRIPLE_API="aarch64-linux-android${ANDROID_API}"
           args=(--root "$GITHUB_WORKSPACE" --product opentui
             --path opentui/scripts/build-opentui.sh --path ci/scripts/env.sh
             --path .github/workflows/build-opentui.yml
-            --path opentui/patches --value "OPENTUI_REF=$OPENTUI_REF"
+            --path ci/source-manifest.json --value "OPENTUI_REF=$OPENTUI_REF"
             --value "OPENTUI_TARGET=$OPENTUI_TARGET")
           cache_key="$(python3 ci/scripts/cache-contract.py key "${args[@]}")"
           echo "key=$cache_key" >> "$GITHUB_OUTPUT"
-
-      - name: Compute OpenTUI patch hash
-        id: hashes
-        run: |
-          set -euo pipefail
-          patch_hash="$(sha256sum \
-            opentui/patches/opentui/android-libc-link.patch \
-            opentui/patches/opentui/android-termux-port.patch | sha256sum | cut -c1-16)"
-          echo "patch_hash=$patch_hash" >> "$GITHUB_OUTPUT"
 
       # ── Cachés ────────────────────────────────────────────────
       - name: Cache Zig toolchain
@@ -170,8 +137,8 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: restore-intermediate
-          key: ci-cache-v2-opentui-intermediates-${{ runner.os }}-${{ runner.arch }}-commit-${{ steps.resolve.outputs.commit }}-target-${{ env.OPENTUI_TARGET }}-zig-${{ env.ZIG_VERSION }}-ndk-${{ env.ANDROID_NDK_VERSION }}-${{ steps.contract.outputs.key }}
-          restore-prefix: ci-cache-v2-opentui-intermediates-${{ runner.os }}-${{ runner.arch }}-commit-${{ steps.resolve.outputs.commit }}-target-${{ env.OPENTUI_TARGET }}-zig-${{ env.ZIG_VERSION }}-ndk-${{ env.ANDROID_NDK_VERSION }}-
+          key: ci-cache-v2-opentui-intermediates-${{ runner.os }}-${{ runner.arch }}-commit-${{ env.OPENTUI_REF }}-target-${{ env.OPENTUI_TARGET }}-zig-${{ env.ZIG_VERSION }}-ndk-${{ env.ANDROID_NDK_VERSION }}-${{ steps.contract.outputs.key }}
+          restore-prefix: ci-cache-v2-opentui-intermediates-${{ runner.os }}-${{ runner.arch }}-commit-${{ env.OPENTUI_REF }}-target-${{ env.OPENTUI_TARGET }}-zig-${{ env.ZIG_VERSION }}-ndk-${{ env.ANDROID_NDK_VERSION }}-
           path: |
             ${{ env.WORK_DIR }}/cache/zig-opentui
             ${{ env.WORK_DIR }}/cache/zig-global
@@ -181,7 +148,7 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: restore-checkpoint
-          checkpoint-prefix: ci-cache-v2-recovery-opentui-${{ runner.os }}-${{ runner.arch }}-commit-${{ steps.resolve.outputs.commit }}-target-${{ env.OPENTUI_TARGET }}-zig-${{ env.ZIG_VERSION }}-ndk-${{ env.ANDROID_NDK_VERSION }}-patch-${{ steps.hashes.outputs.patch_hash }}-
+          checkpoint-prefix: ci-cache-v2-recovery-opentui-${{ runner.os }}-${{ runner.arch }}-commit-${{ env.OPENTUI_REF }}-target-${{ env.OPENTUI_TARGET }}-zig-${{ env.ZIG_VERSION }}-ndk-${{ env.ANDROID_NDK_VERSION }}-
           checkpoint-path: |
             ${{ env.OPENTUI_SRC }}
             ${{ env.WORK_DIR }}/cache
@@ -247,33 +214,15 @@ jobs:
           echo "ZIG_LIBC_FILE=$ZIG_LIBC_FILE" >> "$GITHUB_ENV"
           cat "$ZIG_LIBC_FILE"
 
-      # ── Fuente de opentui ──────────────────────────────────────
+      # ── Fuente versionada de OpenTUI ──────────────────────────
       - name: Prepare opentui source
         if: steps.validate-opentui.outputs.ready != 'true'
         run: |
-          OPENTUI_SRC="$OPENTUI_SRC"
-          OPENTUI_COMMIT="${{ steps.resolve.outputs.commit }}"
-          # Reutilizar fuente cacheada solo si está en el commit correcto.
-          if [ -d "$OPENTUI_SRC/.git" ]; then
-            CURRENT="$(git -C "$OPENTUI_SRC" rev-parse HEAD 2>/dev/null || true)"
-            if [ "$CURRENT" = "$OPENTUI_COMMIT" ]; then
-              # A source cache may contain a previously applied patch. Reset
-              # only this disposable runner checkout before applying the
-              # repository-owned patch again.
-              git -C "$OPENTUI_SRC" reset --hard -q "$OPENTUI_COMMIT"
-              git -C "$OPENTUI_SRC" clean -fdx -q
-              echo ">>> Reusing cached opentui source at $OPENTUI_COMMIT"
-              exit 0
-            fi
-          fi
-          # Fetch shallow del ref solicitado (branch, tag o SHA alcanzable).
-          rm -rf "$OPENTUI_SRC"
-          mkdir -p "$(dirname "$OPENTUI_SRC")"
-          git init -q "$OPENTUI_SRC"
-          git -C "$OPENTUI_SRC" remote add origin https://github.com/anomalyco/opentui.git
-          git -C "$OPENTUI_SRC" fetch -q --depth 1 origin "$OPENTUI_REF"
-          git -C "$OPENTUI_SRC" checkout -q FETCH_HEAD
-          echo ">>> opentui source ready at $(git -C "$OPENTUI_SRC" rev-parse --short HEAD)"
+          test -f "$OPENTUI_SRC/packages/core/src/zig/build.zig"
+          CURRENT="$(git -C "$OPENTUI_SRC" rev-parse HEAD)"
+          test "$CURRENT" = "$OPENTUI_REF"
+          test -z "$(git -C "$OPENTUI_SRC" status --porcelain --untracked-files=all)"
+          echo ">>> OpenTUI source ready at $CURRENT"
 
       - name: Enable zram swap
         if: steps.validate-opentui.outputs.ready != 'true'
@@ -314,7 +263,7 @@ jobs:
           {
             echo "workflow=$GITHUB_WORKFLOW"
             echo "opentui_ref=$OPENTUI_REF"
-            echo "opentui_commit=${{ steps.resolve.outputs.commit }}"
+            echo "opentui_commit=$OPENTUI_REF"
             echo "zig_version=$ZIG_VERSION"
             echo "target=$OPENTUI_TARGET"
             echo "job_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
@@ -381,7 +330,7 @@ jobs:
           path: |
             ${{ env.WORK_DIR }}/cache/zig-opentui
             ${{ env.WORK_DIR }}/cache/zig-global
-          key: ci-cache-v2-opentui-intermediates-${{ runner.os }}-${{ runner.arch }}-commit-${{ steps.resolve.outputs.commit }}-target-${{ env.OPENTUI_TARGET }}-zig-${{ env.ZIG_VERSION }}-ndk-${{ env.ANDROID_NDK_VERSION }}-${{ steps.contract.outputs.key }}
+          key: ci-cache-v2-opentui-intermediates-${{ runner.os }}-${{ runner.arch }}-commit-${{ env.OPENTUI_REF }}-target-${{ env.OPENTUI_TARGET }}-zig-${{ env.ZIG_VERSION }}-ndk-${{ env.ANDROID_NDK_VERSION }}-${{ steps.contract.outputs.key }}
 
       - name: Save OpenTUI Zig toolchain cache
         if: success() && steps.validate-opentui.outputs.ready != 'true' && steps.cache-zig.outputs.cache-hit != 'true'
@@ -404,7 +353,7 @@ jobs:
       - name: Upload libopentui.so artifact
         uses: actions/upload-artifact@v4
         with:
-          name: opentui-android-aarch64-${{ steps.resolve.outputs.commit }}
+          name: opentui-android-aarch64-${{ env.OPENTUI_REF }}
           path: ${{ env.OPENTUI_SRC }}/packages/core/src/lib/${{ env.OPENTUI_TARGET }}/
           if-no-files-found: error
 
@@ -414,7 +363,7 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: save-checkpoint
-          checkpoint-prefix: ci-cache-v2-recovery-opentui-${{ runner.os }}-${{ runner.arch }}-commit-${{ steps.resolve.outputs.commit }}-target-${{ env.OPENTUI_TARGET }}-zig-${{ env.ZIG_VERSION }}-ndk-${{ env.ANDROID_NDK_VERSION }}-patch-${{ steps.hashes.outputs.patch_hash }}-
+          checkpoint-prefix: ci-cache-v2-recovery-opentui-${{ runner.os }}-${{ runner.arch }}-commit-${{ env.OPENTUI_REF }}-target-${{ env.OPENTUI_TARGET }}-zig-${{ env.ZIG_VERSION }}-ndk-${{ env.ANDROID_NDK_VERSION }}-
           checkpoint-path: |
             ${{ env.OPENTUI_SRC }}
             ${{ env.WORK_DIR }}/cache

@@ -26,9 +26,10 @@ incremental_exec codex \
 
 if [ ! -f "$CODEX_SRC/codex-rs/Cargo.toml" ]; then
     echo "ERROR: Codex checkout not found at $CODEX_SRC"
-    echo "       Work on Codex only inside the ./codex directory."
+    echo "       The vendored codex/src tree is incomplete."
     exit 1
 fi
+validate_source_checkout "$CODEX_SRC" "$CODEX_SOURCE_COMMIT" "Codex"
 
 if [ ! -x "$ANDROID_CC" ]; then
     echo "ERROR: Android compiler not found: $ANDROID_CC"
@@ -56,9 +57,8 @@ export RUSTY_V8_ARCHIVE RUSTY_V8_SRC_BINDING_PATH
 # V8's Android arm64 CPU code calls compiler-rt's __clear_cache. The NDK
 # linker does not add that archive when Cargo invokes the target clang, so
 # append it through a linker wrapper. Using target-specific RUSTFLAGS would
-# replace the upstream .cargo/config.toml flags; the wrapper preserves them
-# and appends the archive after all objects and libraries. This checkout is
-# cloned externally in CI, so the fix belongs in this port script.
+# replace the source checkout's flags; the wrapper preserves them and appends
+# the archive after all objects and libraries.
 CLANG_RT_BUILTINS="$(find "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/lib/clang" \
     -type f -name 'libclang_rt.builtins-aarch64-android.a' -print -quit)"
 if [ -z "$CLANG_RT_BUILTINS" ] || [ ! -s "$CLANG_RT_BUILTINS" ]; then
@@ -78,14 +78,10 @@ echo "Android compiler runtime: $CLANG_RT_BUILTINS"
 
 cd "$CODEX_SRC/codex-rs"
 CORE_MANIFEST="$CODEX_SRC/codex-rs/core/Cargo.toml"
-if ! grep -qF '[target.aarch64-linux-android.dependencies]' "$CORE_MANIFEST"; then
-    cat >> "$CORE_MANIFEST" <<'EOF'
-
-# Build OpenSSL from source for Android cross-compilation.
-[target.aarch64-linux-android.dependencies]
-openssl-sys = { workspace = true, features = ["vendored"] }
-EOF
-fi
+grep -qF '[target.aarch64-linux-android.dependencies]' "$CORE_MANIFEST" || {
+    echo "ERROR: Codex source commit is missing its Android dependency configuration" >&2
+    exit 1
+}
 
 cargo build --locked --release --target "$ANDROID_TRIPLE" \
     --package codex-cli --package codex-code-mode-host

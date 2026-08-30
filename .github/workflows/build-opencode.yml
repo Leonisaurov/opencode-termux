@@ -10,7 +10,7 @@ on:
       opentui_ref:
         description: 'Commit, tag o branch de OpenTUI'
         required: false
-        default: '9eabce704096837148d935554fcae9c19e6e21f4'
+        default: '658db4cbe0da0adfeb5edac0273ee68911b29c3e'
       opencode_version:
         description: 'OpenCode version to build'
         required: false
@@ -26,7 +26,7 @@ on:
         description: 'Commit, tag o branch de OpenTUI'
         required: false
         type: string
-        default: '9eabce704096837148d935554fcae9c19e6e21f4'
+        default: '658db4cbe0da0adfeb5edac0273ee68911b29c3e'
       opencode_version:
         description: 'Versión de OpenCode'
         required: false
@@ -49,7 +49,7 @@ env:
   PRODUCT: opencode
   BUN_VERSION: "${{ inputs.bun_version || '1.2.13' }}"
   HOST_BUN_VERSION: "1.3.2"
-  OPENTUI_REF: "${{ inputs.opentui_ref || '9eabce704096837148d935554fcae9c19e6e21f4' }}"
+  OPENTUI_REF: "${{ inputs.opentui_ref || '658db4cbe0da0adfeb5edac0273ee68911b29c3e' }}"
   OPENCODE_VERSION: "${{ inputs.opencode_version || '1.3.13' }}"
   ANDROID_API: "24"
   ANDROID_NDK_VERSION: "28.1.13356709"
@@ -75,28 +75,10 @@ jobs:
       - name: Create work directory
         run: mkdir -p "$WORK_DIR"
 
-      - name: Resolve OpenTUI commit for the cache contract
-        id: resolve-opentui
-        run: |
-          set -euo pipefail
-          resolved="$(git ls-remote https://github.com/anomalyco/opentui.git \
-            "refs/heads/$OPENTUI_REF" "refs/tags/$OPENTUI_REF" "refs/tags/$OPENTUI_REF^{}" \
-            2>/dev/null | head -1 | awk '{print $1}')"
-          if [ -z "$resolved" ]; then
-            probe="$RUNNER_TEMP/opentui-contract-probe"
-            rm -rf "$probe"
-            git init -q "$probe"
-            git -C "$probe" remote add origin https://github.com/anomalyco/opentui.git
-            git -C "$probe" fetch -q --depth 1 origin "$OPENTUI_REF"
-            resolved="$(git -C "$probe" rev-parse FETCH_HEAD)"
-          fi
-          test -n "$resolved"
-          echo "commit=$resolved" >> "$GITHUB_OUTPUT"
-
       - name: Compute OpenCode cache contract
         id: contract
         env:
-          OPENTUI_COMMIT: ${{ steps.resolve-opentui.outputs.commit }}
+          OPENTUI_COMMIT: ${{ env.OPENTUI_REF }}
         run: |
           set -euo pipefail
           bun_source_commit="$(git ls-tree HEAD bun/src | awk '{print $3}')"
@@ -107,17 +89,15 @@ jobs:
             --path bun/scripts/build-icu.sh --path bun/scripts/build-webkit.sh
             --path bun/scripts/build-tinycc.sh --path ci/scripts/env.sh
             --path .github/workflows/build-core.yml
-            --path bun/patches/webkit/android-support.patch
+            --path ci/external-sources.lock
             --path bun/cmake/webkit-android-toolchain.cmake
             --value "ICU_VERSION=$ICU_VERSION" --value "WEBKIT_COMMIT=$WEBKIT_COMMIT"
             --value "TINYCC_COMMIT=$TINYCC_COMMIT")
           core_key="$(env -u OPENTUI_COMMIT python3 ci/scripts/cache-contract.py key "${core_args[@]}")"
           bun_args=(--root "$GITHUB_WORKSPACE" --product bun
-            --path bun/scripts/build-bun.sh --path bun/scripts/apply-patches.sh
+            --path bun/scripts/build-bun.sh
             --path ci/scripts/env.sh --path .github/workflows/build-bun.yml
-            --path bun/patches/bun/android-support.patch
-            --path bun/patches/bun/android-heap-tagging.patch
-            --path bun/patches/zig/posix-android-sigaction.patch
+            --path ci/source-manifest.json
             --value "BUN_VERSION=$BUN_VERSION" --value "WEBKIT_COMMIT=$WEBKIT_COMMIT"
             --value "ICU_VERSION=$ICU_VERSION" --value "TINYCC_COMMIT=$TINYCC_COMMIT"
             --value "BUN_SOURCE_COMMIT=$bun_source_commit"
@@ -127,14 +107,14 @@ jobs:
           opentui_args=(--root "$GITHUB_WORKSPACE" --product opentui
             --path opentui/scripts/build-opentui.sh --path ci/scripts/env.sh
             --path .github/workflows/build-opentui.yml
-            --path opentui/patches --value "OPENTUI_REF=$OPENTUI_REF"
+            --path ci/source-manifest.json --value "OPENTUI_REF=$OPENTUI_REF"
             --value "OPENTUI_TARGET=aarch64-linux-android.24")
           opentui_key="$(UPSTREAM_COMMIT="$OPENTUI_COMMIT" python3 ci/scripts/cache-contract.py key "${opentui_args[@]}")"
           echo "opentui=$opentui_key" >> "$GITHUB_OUTPUT"
           args=(--root "$GITHUB_WORKSPACE" --product opencode
             --path opencode/scripts/build-opencode.sh --path opencode/scripts/make-packages.sh
             --path ci/scripts/env.sh --path .github/workflows/build-opencode.yml
-            --path opencode/patches
+            --path ci/source-manifest.json
             --value "OPENCODE_VERSION=$OPENCODE_VERSION" --value "BUN_VERSION=$BUN_VERSION"
             --value "HOST_BUN_VERSION=$HOST_BUN_VERSION"
             --value "OPENTUI_REF=$OPENTUI_REF" --value "WEBKIT_COMMIT=$WEBKIT_COMMIT"
@@ -186,8 +166,8 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: restore-intermediate
-          key: ci-cache-v2-opentui-intermediates-${{ runner.os }}-${{ runner.arch }}-commit-${{ steps.resolve-opentui.outputs.commit }}-target-aarch64-linux-android.24-zig-${{ env.ZIG_VERSION }}-ndk-${{ env.ANDROID_NDK_VERSION }}-${{ steps.contract.outputs.opentui }}
-          restore-prefix: ci-cache-v2-opentui-intermediates-${{ runner.os }}-${{ runner.arch }}-commit-${{ steps.resolve-opentui.outputs.commit }}-target-aarch64-linux-android.24-zig-${{ env.ZIG_VERSION }}-ndk-${{ env.ANDROID_NDK_VERSION }}-
+          key: ci-cache-v2-opentui-intermediates-${{ runner.os }}-${{ runner.arch }}-commit-${{ env.OPENTUI_REF }}-target-aarch64-linux-android.24-zig-${{ env.ZIG_VERSION }}-ndk-${{ env.ANDROID_NDK_VERSION }}-${{ steps.contract.outputs.opentui }}
+          restore-prefix: ci-cache-v2-opentui-intermediates-${{ runner.os }}-${{ runner.arch }}-commit-${{ env.OPENTUI_REF }}-target-aarch64-linux-android.24-zig-${{ env.ZIG_VERSION }}-ndk-${{ env.ANDROID_NDK_VERSION }}-
           path: |
             ${{ github.workspace }}/opentui/build/cache/zig-opentui
             ${{ github.workspace }}/opentui/build/cache/zig-global
@@ -207,7 +187,7 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: restore-checkpoint
-          checkpoint-prefix: ci-cache-v2-recovery-opencode-${{ runner.os }}-${{ runner.arch }}-version-${{ env.OPENCODE_VERSION }}-bun-${{ env.BUN_VERSION }}-opentui-${{ env.OPENTUI_REF }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-patch-${{ hashFiles('opencode/patches/**', 'opentui/patches/opentui/android-libc-link.patch', 'opentui/patches/opentui/android-termux-port.patch') }}-
+          checkpoint-prefix: ci-cache-v2-recovery-opencode-${{ runner.os }}-${{ runner.arch }}-version-${{ env.OPENCODE_VERSION }}-bun-${{ env.BUN_VERSION }}-opentui-${{ env.OPENTUI_REF }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-source-${{ hashFiles('ci/source-manifest.json', 'opencode/src/package.json', 'opencode/src/bun.lock') }}-
           checkpoint-path: |
             ${{ github.workspace }}/opencode/src
             ${{ env.WORK_DIR }}
@@ -274,7 +254,7 @@ jobs:
         if: steps.validate-opencode.outputs.ready != 'true'
         run: |
           set -euo pipefail
-          EXPECTED_COMMIT="${{ steps.resolve-opentui.outputs.commit }}"
+          EXPECTED_COMMIT="${{ env.OPENTUI_REF }}"
           LIB="$(find "$WORK_DIR/artifact-opentui" -type f -name libopentui.so -print -quit 2>/dev/null || true)"
           INFO="$(find "$WORK_DIR/artifact-opentui" -type f -name build-info.txt -print -quit 2>/dev/null || true)"
           valid=false
@@ -437,7 +417,7 @@ jobs:
           path: |
             ${{ github.workspace }}/opentui/build/cache/zig-opentui
             ${{ github.workspace }}/opentui/build/cache/zig-global
-          key: ci-cache-v2-opentui-intermediates-${{ runner.os }}-${{ runner.arch }}-commit-${{ steps.resolve-opentui.outputs.commit }}-target-aarch64-linux-android.24-zig-${{ env.ZIG_VERSION }}-ndk-${{ env.ANDROID_NDK_VERSION }}-${{ steps.contract.outputs.opentui }}
+          key: ci-cache-v2-opentui-intermediates-${{ runner.os }}-${{ runner.arch }}-commit-${{ env.OPENTUI_REF }}-target-aarch64-linux-android.24-zig-${{ env.ZIG_VERSION }}-ndk-${{ env.ANDROID_NDK_VERSION }}-${{ steps.contract.outputs.opentui }}
 
       - name: Save OpenCode durable cache
         if: success() && steps.final-opencode.outputs.ready == 'true' && steps.cache-opencode-product.outputs.cache-hit != 'true'
@@ -500,7 +480,7 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: save-checkpoint
-          checkpoint-prefix: ci-cache-v2-recovery-opencode-${{ runner.os }}-${{ runner.arch }}-version-${{ env.OPENCODE_VERSION }}-bun-${{ env.BUN_VERSION }}-opentui-${{ env.OPENTUI_REF }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-patch-${{ hashFiles('opencode/patches/**', 'opentui/patches/opentui/android-libc-link.patch', 'opentui/patches/opentui/android-termux-port.patch') }}-
+          checkpoint-prefix: ci-cache-v2-recovery-opencode-${{ runner.os }}-${{ runner.arch }}-version-${{ env.OPENCODE_VERSION }}-bun-${{ env.BUN_VERSION }}-opentui-${{ env.OPENTUI_REF }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-source-${{ hashFiles('ci/source-manifest.json', 'opencode/src/package.json', 'opencode/src/bun.lock') }}-
           checkpoint-path: |
             ${{ github.workspace }}/opencode/src
             ${{ env.WORK_DIR }}

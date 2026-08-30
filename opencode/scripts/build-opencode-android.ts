@@ -230,8 +230,8 @@ const moduleGraphBytes = hostBytes.slice(hostBunSize, hostBytes.length - 8)
 console.log(`Module graph extracted: ${moduleGraphBytes.length} bytes`)
 console.log(`Trailer verified: OK`)
 
-// Step 5: Patch the module graph for Android
-console.log("\n=== Step 5: Patching module graph for Android ===")
+// Step 5: Preserve the module graph emitted by the pinned host Bun
+console.log("\n=== Step 5: Preserving the versioned module graph ===")
 
 // The module graph format (from StandaloneModuleGraph.zig):
 //   [string data: all file names, contents, sourcemaps, bytecodes concatenated]
@@ -248,13 +248,9 @@ console.log("\n=== Step 5: Patching module graph for Android ===")
 //   compile_exec_argv.length:u32  (4 bytes)
 //   flags:                   u32  (4 bytes)
 //
-// NOTE: CompiledModuleGraphFile layout varies between Bun versions:
-//   - Bun 1.2.x: 36 bytes (4 StringPointers + 3 u8 + 1 padding)
-//   - Bun 1.3.x: 52 bytes (6 StringPointers + 4 u8)
-// We avoid parsing individual modules. The undici patch is a same-size
-// in-place byte replacement in the raw string data, so we don't need to
-// know the module struct layout at all. The module list and offsets are
-// passed through unchanged.
+// NOTE: CompiledModuleGraphFile layout varies between Bun versions. The
+// versioned OpenCode source and the pinned host Bun are the authority for the
+// graph; this assembly step must not rewrite its bytes or offsets.
 
 const mgTrailer = "\n---- Bun! ----\n"
 const mgTrailerBuf = Buffer.from(mgTrailer)
@@ -279,40 +275,7 @@ console.log(`Module graph: trailer at ${trailerPosInMg}, offsets at ${mgOffsetsS
 console.log(`byte_count=${byteCount}, modules_ptr=(${modOff},${modLen}), entry_id=${entryId}`)
 console.log(`String data region: [0, ${modOff}), Module list: [${modOff}, ${modOff + modLen})`)
 
-// ---- Patch 1: Fix undici reference ----
-// The host bun bundler compiles `import "undici"` as a bare global reference `undici`.
-// Android bun v1.2.13 doesn't expose globalThis.undici, but it does expose `Undici`
-// (capital U, the moduleExports object). `__reExport` skips the "default" key anyway,
-// so the result is identical.
-//
-// This is a same-byte-count replacement: we search the entire string data region
-// for the pattern and replace in-place. No module struct parsing required.
-const UNDICI_SEARCH  = Buffer.from('__reExport(exports_Undici, undici)')
-const UNDICI_REPLACE = Buffer.from('__reExport(exports_Undici, Undici)')
-console.log(`\nPatch 1: Replacing undici->Undici in string data (same size, no offset changes)`)
-
-let undiciPatchCount = 0
-let searchPos = 0
-// Search only within the string data region [0, modOff)
-const strDataRegion = mgBuf.slice(0, modOff)
-while (true) {
-  const pos = strDataRegion.indexOf(UNDICI_SEARCH, searchPos)
-  if (pos < 0) break
-  console.log(`  Found at string data offset ${pos}, replacing...`)
-  UNDICI_REPLACE.copy(mgBuf, pos)
-  undiciPatchCount++
-  searchPos = pos + UNDICI_SEARCH.length
-}
-if (undiciPatchCount === 0) {
-  console.error("WARNING: __reExport(exports_Undici, undici) not found — skipping Patch 1")
-} else {
-  console.log(`  Patched ${undiciPatchCount} occurrence(s)`)
-}
-
-// Since all patches are same-size in-place edits, the module graph is unchanged
-// in structure. We just pass through the entire mgBuf (with our in-place edits)
-// as the final module graph.
-var finalModuleGraph = mgBuf.slice(0, trailerPosInMg + mgTrailerBuf.length)
+const finalModuleGraph = mgBuf.slice(0, trailerPosInMg + mgTrailerBuf.length)
 console.log(`Module graph size: ${finalModuleGraph.length} bytes (unchanged)`)
 
 // Step 6: Create Android standalone binary
@@ -332,7 +295,7 @@ const output = new Uint8Array(outputSize)
 // Copy Android bun binary
 output.set(androidBunBytes, 0)
 
-// Copy patched module graph
+// Copy the module graph emitted by the pinned host Bun
 output.set(new Uint8Array(finalModuleGraph.buffer, finalModuleGraph.byteOffset, finalModuleGraph.length), androidBunSize)
 
 // Write new total_byte_count as u64 LE

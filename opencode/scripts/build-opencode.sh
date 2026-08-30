@@ -3,11 +3,8 @@
 #
 # Usage: ./scripts/build-opencode.sh
 #
-# This script:
-# 1. Clones OpenCode if needed
-# 2. Swaps x86_64 libopentui.so with ARM64 version
-# 3. Runs the TypeScript build script to create the standalone binary
-# 4. Restores original libopentui.so
+# This script consumes the versioned OpenCode checkout, swaps the x86_64
+# OpenTUI runtime for the Android build, and creates the standalone binary.
 #
 # Requires:
 # - Android Bun binary built (scripts/build-bun.sh)
@@ -31,13 +28,8 @@ HOST_BUN="${HOST_BUN:-bun}"
 
 echo "=== Building OpenCode v${OPENCODE_VERSION} for Android aarch64 ==="
 
-# Clone OpenCode if needed
-if [ ! -d "$OPENCODE_SRC/.git" ]; then
-    echo ">>> Cloning OpenCode..."
-    git clone --depth 1 --branch "v${OPENCODE_VERSION}" https://github.com/anomalyco/opencode.git "$OPENCODE_SRC"
-else
-    echo ">>> OpenCode source exists at $OPENCODE_SRC"
-fi
+validate_source_checkout "$OPENCODE_SRC" "$OPENCODE_SOURCE_COMMIT" "OpenCode"
+echo ">>> OpenCode source exists at $OPENCODE_SRC"
 
 OPENCODE_PKG="$OPENCODE_SRC/packages/opencode"
 

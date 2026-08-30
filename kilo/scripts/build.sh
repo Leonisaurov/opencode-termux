@@ -4,7 +4,7 @@
 # ADAPTACIÓN 1:1 de opencode_build.sh (mismo proyecto) sustituyendo opencode→kilocode:
 #   - Fingerprint incremental con markers prefijados "kilo" (build-fingerprint-kilo)
 #   - Fases [1/4]..[4/4]: Android Bun, deps de sistema, source+deps+parches, compile
-#   - Parches sed "OTUI Android fix" (doble loop node_modules + store .bun/)
+#   - OpenTUI Android fixes are carried by the pinned OpenTUI source commit.
 #   - Cache models.dev con refresh >10080 min
 #   - Invocación directa del Android Bun, usando todos los CPUs disponibles
 # Diferencias deliberadas (documentadas inline):
@@ -45,7 +45,7 @@ KILO_VERSION="${KILO_VERSION:-7.4.20}"
 # la tag v0.3.4 de anomalyco/opentui apunta al commit 9b216a58d974704ae638b3043aece2eb70b5ff19,
 # confirmado con git ls-remote). OJO: NO reutilizamos build/opentui-src (el checkout
 # 0.4.5 de opencode) → src separado build/opentui-src-kilo para no colisionar.
-KILO_OPENTUI_REF="${KILO_OPENTUI_REF:-9b216a58d974704ae638b3043aece2eb70b5ff19}"
+KILO_OPENTUI_REF="${KILO_OPENTUI_REF:-5b3d520550e118fd436f682bd67242b95a05318b}"
 KILO_OPENTUI_TAG="${KILO_OPENTUI_TAG:-v0.3.4}"
 KILO_OPENTUI_SRC="${KILO_OPENTUI_SRC:-${REPO_ROOT}/opentui/src/kilo}"
 KILO_OPENTUI_TARGET="aarch64-linux-android.24"
@@ -70,9 +70,7 @@ mkdir -p "$MARKERS"
 incremental_exec kilo \
     --input "$SCRIPT_DIR/build.sh" --input "$REPO_ROOT/ci/scripts/env.sh" \
     --input "$SCRIPT_DIR/build-kilo-android.ts" --input "$KILO_SRC" \
-    --input "$REPO_ROOT/kilo/patches/kilocode-incremental-smoke.patch" \
-    --input "$REPO_ROOT/opentui/patches/opentui/android-termux-port-kilo.patch" \
-    --input "$REPO_ROOT/opentui/patches/opentui/android-termux-build-kilo.patch" \
+    --input "$REPO_ROOT/ci/source-manifest.json" \
     --input "$KILO_OPENTUI_SRC/packages/core/src/lib/$KILO_OPENTUI_TARGET/libopentui.so" \
     --input "$MODELS_CACHE" --input "$ANDROID_BUN" \
     --value "KILO_VERSION=$KILO_VERSION" \
@@ -135,22 +133,8 @@ compute_fingerprint() {
         fp+="sha_${script//[^a-zA-Z0-9]/_}=${h}\n"
     done
 
-    # Repository-owned patches and the Android OpenTUI output are part of the
-    # effective input, even though the generic directory digest skips generated
-    # dependency trees. A patch edit must invalidate the corresponding marker;
-    # otherwise the legacy fingerprint could skip a stale native library.
-    local patch_sha="missing"
-    [ -f "$REPO_ROOT/kilo/patches/kilocode-incremental-smoke.patch" ] \
-        && patch_sha="$(sha256sum "$REPO_ROOT/kilo/patches/kilocode-incremental-smoke.patch" | cut -c1-16)"
-    fp+="kilo_source_patch_sha=${patch_sha}\n"
-    patch_sha="missing"
-    [ -f "$REPO_ROOT/opentui/patches/opentui/android-termux-port-kilo.patch" ] \
-        && patch_sha="$(sha256sum "$REPO_ROOT/opentui/patches/opentui/android-termux-port-kilo.patch" | cut -c1-16)"
-    fp+="kilo_opentui_port_patch_sha=${patch_sha}\n"
-    patch_sha="missing"
-    [ -f "$REPO_ROOT/opentui/patches/opentui/android-termux-build-kilo.patch" ] \
-        && patch_sha="$(sha256sum "$REPO_ROOT/opentui/patches/opentui/android-termux-build-kilo.patch" | cut -c1-16)"
-    fp+="kilo_opentui_build_patch_sha=${patch_sha}\n"
+    # Source commits and the Android OpenTUI output are part of the dependency
+    # tree. A source edit therefore invalidates the marker automatically.
     local opentui_so_sha="missing"
     [ -f "$KILO_OPENTUI_SRC/packages/core/src/lib/$KILO_OPENTUI_TARGET/libopentui.so" ] \
         && opentui_so_sha="$(sha256sum "$KILO_OPENTUI_SRC/packages/core/src/lib/$KILO_OPENTUI_TARGET/libopentui.so" | cut -c1-16)"
@@ -226,9 +210,9 @@ else
         if [ "$val_old" != "$val_now" ]; then
             printf '   - %s: %s → %s\n' "$key" "${val_old:-<ausente>}" "$val_now"
             case "$key" in
-                kilo_root_bun_lock|kilo_root_package_json|kilo_pkg_bun_lock|kilo_pkg_package_json|otui_fix_present|fingerprint_version|sha_kilocode_build_sh|kilo_source_patch_sha|kilo_version)
+                kilo_root_bun_lock|kilo_root_package_json|kilo_pkg_bun_lock|kilo_pkg_package_json|otui_fix_present|fingerprint_version|sha_kilocode_build_sh|kilo_version)
                     invalidate_deps=1 ;;
-                sha_scripts_build_opentui_sh|kilo_opentui_port_patch_sha|kilo_opentui_build_patch_sha|kilo_opentui_so_sha|zig_libc_file|zig_version|kilo_opentui_tag)
+                sha_scripts_build_opentui_sh|kilo_opentui_so_sha|zig_libc_file|zig_version|kilo_opentui_tag)
                     invalidate_deps=1
                     invalidate_opentui=1 ;;
                 kilo_opentui_ref)
@@ -305,36 +289,10 @@ command -v git >/dev/null 2>&1 || pkg install -y git
 command -v zig >/dev/null 2>&1 || pkg install -y zig
 echo "   OK"
 
-# [3/4] Kilo Code source + deps + parches
+# [3/4] Kilo Code source + deps
 echo ":: [3/4] Preparando Kilo Code..."
-if [ ! -d "$KILO_SRC/.git" ]; then
-    echo "   Clonando kilocode ${KILO_BRANCH}..."
-    git clone --depth 1 --branch "$KILO_BRANCH" "$KILO_REPO" "$KILO_SRC"
-else
-    # Checkout existente: si el HEAD no coincide con la branch esperada, advierte
-    # pero usa el existente (igual que opencode). El fingerprint ya detecta el
-    # cambio de HEAD y disparará rebuild si hace falta.
-    KILO_HEAD="$(git -C "$KILO_SRC" rev-parse HEAD 2>/dev/null || true)"
-    KILO_EXPECTED="$(git -C "$KILO_SRC" rev-parse "$KILO_BRANCH" 2>/dev/null || true)"
-    if [ -n "$KILO_EXPECTED" ] && [ "$KILO_EXPECTED" != "$KILO_HEAD" ]; then
-        echo "   ⚠️  checkout existente HEAD=$KILO_HEAD != $KILO_BRANCH ($KILO_EXPECTED) — usando el existente"
-        echo "      (el fingerprint detecta el cambio y forzará rebuild)"
-    fi
-fi
-
-# Apply the repository-owned Kilo source smoke patch. It changes one CLI string
-# so a small source edit exercises the Kilo bundle and publish DAG without
-# changing dependencies or the Android toolchain.
-KILO_SOURCE_PATCH="$REPO_ROOT/kilo/patches/kilocode-incremental-smoke.patch"
-cd "$KILO_SRC"
-if git apply --check "$KILO_SOURCE_PATCH" >/dev/null 2>&1; then
-    git apply "$KILO_SOURCE_PATCH"
-elif git apply --reverse --check "$KILO_SOURCE_PATCH" >/dev/null 2>&1; then
-    echo "   Kilo source smoke patch already applied"
-else
-    echo "ERROR: Kilo source smoke patch does not apply cleanly" >&2
-    exit 1
-fi
+validate_source_checkout "$KILO_SRC" "$KILO_SOURCE_COMMIT" "Kilo"
+echo "   Kilo source exists at $KILO_SRC"
 
 if [ ! -f "$MARKERS/kilo-deps" ]; then
     cd "$KILO_SRC"
@@ -351,42 +309,8 @@ if [ ! -f "$MARKERS/kilo-deps" ]; then
     LIBOPENTUI_KILO=""
     echo "   Compilando libopentui.so 0.3.4 (Zig 0.15.2, target $KILO_OPENTUI_TARGET)..."
     if [ ! -f "$MARKERS/opentui-kilo-built" ]; then
-        if [ ! -d "$KILO_OPENTUI_SRC/.git" ]; then
-            echo "   Clonando opentui ${KILO_OPENTUI_TAG} (gitHead $KILO_OPENTUI_REF)..."
-            git clone --depth 1 --branch "$KILO_OPENTUI_TAG" \
-                https://github.com/anomalyco/opentui.git "$KILO_OPENTUI_SRC"
-        else
-            echo "   opentui-kilo source existe en $KILO_OPENTUI_SRC"
-        fi
-
-        # Apply the repository-owned Android/Termux renderer port. Kilo's
-        # Android checkout must use the same source-level fixes as the locally
-        # validated port; do not replace it with a musl binary.
-        KILO_OTUI_PORT_PATCH="$REPO_ROOT/opentui/patches/opentui/android-termux-port-kilo.patch"
-        KILO_OTUI_BUILD_PATCH="$REPO_ROOT/opentui/patches/opentui/android-termux-build-kilo.patch"
-        cd "$KILO_OPENTUI_SRC"
-        if git apply --check "$KILO_OTUI_PORT_PATCH" >/dev/null 2>&1; then
-            git apply "$KILO_OTUI_PORT_PATCH"
-        elif git apply --reverse --check "$KILO_OTUI_PORT_PATCH" >/dev/null 2>&1; then
-            echo "   OpenTUI Kilo Android/Termux source port already applied"
-        else
-            echo "ERROR: OpenTUI Kilo Android/Termux source port does not apply cleanly" >&2
-            exit 1
-        fi
-        if git apply --check "$KILO_OTUI_BUILD_PATCH" >/dev/null 2>&1; then
-            git apply "$KILO_OTUI_BUILD_PATCH"
-        elif git apply --reverse --check "$KILO_OTUI_BUILD_PATCH" >/dev/null 2>&1; then
-            echo "   OpenTUI Kilo Android build patch already applied"
-        else
-            echo "ERROR: OpenTUI Kilo Android build patch does not apply cleanly" >&2
-            exit 1
-        fi
-
-        # Verificar que el checkout coincida con el commit esperado (warning, no abort)
-        KILO_OTUI_HEAD="$(git -C "$KILO_OPENTUI_SRC" rev-parse HEAD 2>/dev/null || true)"
-        if [ -n "$KILO_OTUI_HEAD" ] && [ "$KILO_OTUI_HEAD" != "$KILO_OPENTUI_REF" ]; then
-            echo "   ⚠️  opentui-kilo HEAD=$KILO_OTUI_HEAD != $KILO_OPENTUI_REF — compilando el checkout existente"
-        fi
+        validate_source_checkout "$KILO_OPENTUI_SRC" "$OPENTUI_KILO_SOURCE_COMMIT" "OpenTUI/Kilo"
+        echo "   OpenTUI/Kilo source exists at $KILO_OPENTUI_SRC"
 
         # Argumento --libc para el target Android (libc Bionic del NDK).
         zig_libc_arg() {
@@ -446,6 +370,24 @@ if [ ! -f "$MARKERS/kilo-deps" ]; then
             fi
         fi
 
+        # The pinned OpenTUI tree is authoritative. Keep the old transform
+        # block unreachable as a migration guard until it can be deleted in a
+        # follow-up that drops support for pre-manifest source trees.
+        for REQUIRED_MARKER in \
+            "abi != .android" \
+            "OTUI Android fix (renderer panic)" \
+            "OTUI Android fix (ClassPool.get len guard)" \
+            "OTUI Android fix (link refcount simétrico)"; do
+            if ! grep -Rqs "$REQUIRED_MARKER" "$KILO_OPENTUI_SRC/packages/core/src/zig"; then
+                echo "ERROR: versioned OpenTUI source is missing required marker: $REQUIRED_MARKER" >&2
+                exit 1
+            fi
+        done
+
+        if false; then
+        # ── Legacy source transform block (never run) ────────────
+        # Historical checkouts were mutated here. Versioned source checkouts
+        # must never enter this branch.
         # ── Guard dl/pthread en build.zig (port del fix de 0.4.5) ──
         # El target aarch64-linux-android.24 cae en el branch ".linux" de
         # addNativeAudioDependencies (zig modela android con os.tag=linux, abi=android)
@@ -1920,6 +1862,8 @@ PYEOF
             }
         fi
 
+        fi
+
         if ! "$ZIG_BIN" build \
             -Dtarget="$KILO_OPENTUI_TARGET" \
             -Doptimize=ReleaseSafe \
@@ -2024,64 +1968,6 @@ PYEOF
             echo "   store .bun/ actualizado: $(basename $(dirname $(dirname $(dirname "$BSO"))))"
         done
     fi
-
-    # ── Parchear bundle de @opentui/core 0.3.4 para mapear android → linux-musl ──
-    # @opentui/core detecta process.platform y busca @opentui/core-android-arm64
-    # que no existe. Parcheamos resolveNativeLibraryPath() (Fix2: linux → linux|android),
-    # el chequeo OPENTUI_LIBC === "musl" (Fix3: android || musl) y la materialización
-    # del .so del bunfs a disco real antes del dlopen (Fix4).
-    # OJO 0.3.4: NO tiene chunks chunk-bun-*.js (eso es de 0.4.5). El bundle con el
-    # resolver nativo es index-54s7pk0d.js (además de index.js + 3 hashed chunks más).
-    echo "   Parcheando @opentui/core para android..."
-    OTUI_PATCHED=0
-    for CHUNK in $(find "$KILO_SRC/node_modules/@opentui/core" -name "index-*.js" -type f ! -name "*.js.map" 2>/dev/null); do
-        # Idempotencia: saltar chunks ya parcheados COMPLETOS (con Fix4). No basta el
-        # marcador "OTUI Android fix" (Fix2/Fix3 de un build anterior): Fix4 es nuevo y
-        # debe aplicarse aunque Fix2/Fix3 ya estén. Fix2/Fix3 son naturalmente idempotentes
-        # (sus patrones fuente dejan de existir tras aplicarse).
-        grep -q "OTUI Android fix (Fix4)" "$CHUNK" && continue
-        # Fix 2: resolveNativeLibraryPath() acepta android como linux.
-        # NOTA: usa \n en el reemplazo de sed — requiere GNU sed (funciona en Termux).
-        # El patrón con "{" respeta la 2ª ocurrencia de "process.platform === \"linux\""
-        # (config.useThread = false) que NO tiene "{" y no debe tocarse.
-        sed -i 's/if (process\.platform === "linux") {/\/\/ OTUI Android fix\n  if (process.platform === "linux" || process.platform === "android") {/g' "$CHUNK"
-        # Fix 3: el chequeo OPENTUI_LIBC === "musl" también aplica en android
-        sed -i 's/if (process\.env\.OPENTUI_LIBC === "musl") {/if (process.platform === "android" || process.env.OPENTUI_LIBC === "musl") {/g' "$CHUNK"
-        # Fix 4: materializa libopentui.so del bunfs a $TMPDIR antes del dlopen.
-        # Port del comportamiento de #opentui/runtime-assets de 0.4.5: bun.dlopen no
-        # puede abrir paths virtuales $bunfs; el .so embebido ($bunfs/root/libopentui-<hash>.so)
-        # se extrae a disco real con Bun.file()+writeFileSync y dlopen usa ESE path.
-        # Usa importaciones REALES del bundle: writeFileSync/existsSync2 (import de "fs"),
-        # join/basename (import de "path"), Bun.file (globalThis.Bun). Está en contexto
-        # async (await resolveNativePackage() arriba) → await válido.
-        sed -i 's~if (!existsSync2(targetLibPath)) {~// OTUI Android fix (Fix4): materializar libopentui.so del bunfs a $TMPDIR antes del dlopen\n// Port de #opentui/runtime-assets de 0.4.5: bun.dlopen no puede abrir paths virtuales $bunfs\nif (isBunfsPath(targetLibPath)) {\n  if (!process.env.TMPDIR) throw new Error("TMPDIR must be configured before materializing OpenTUI runtime assets");\n  var _otuiRealDir = process.env.TMPDIR;\n  var _otuiRealPath = join(_otuiRealDir, basename(targetLibPath));\n  if (!existsSync2(_otuiRealPath)) {\n    writeFileSync(_otuiRealPath, new Uint8Array(await Bun.file(targetLibPath).arrayBuffer()));\n  }\n  targetLibPath = _otuiRealPath;\n}\nif (!existsSync2(targetLibPath)) {~' "$CHUNK"
-        OTUI_PATCHED=$((OTUI_PATCHED+1))
-        echo "   bundle parcheado: $(basename "$CHUNK")"
-    done
-    # También buscar en .bun/ cache por si no está en node_modules directo
-    # OJO: el dir del store es @opentui+core@0.3.4+<hash>/node_modules/@opentui/core/.
-    # El bug del patrón viejo: el segmento del scoped package comienza con '@' y
-    # '*/opentui+core*' nunca matchea (de ahí "@opentui+core*"). Glob index-*.js y NO
-    # chunk-bun-*: 0.3.4 no tiene esos chunks (verificado contra el tarball npm).
-    for CHUNK in $(find "$KILO_SRC/node_modules/.bun" -path "*/@opentui+core*/index-*.js" -type f ! -name "*.js.map" 2>/dev/null); do
-        # Idempotencia: ver Fix4 (no "OTUI Android fix" solo) en el comentario del loop 1.
-        grep -q "OTUI Android fix (Fix4)" "$CHUNK" && continue
-        sed -i 's/if (process\.platform === "linux") {/\/\/ OTUI Android fix\n  if (process.platform === "linux" || process.platform === "android") {/g' "$CHUNK"
-        sed -i 's/if (process\.env\.OPENTUI_LIBC === "musl") {/if (process.platform === "android" || process.env.OPENTUI_LIBC === "musl") {/g' "$CHUNK"
-        # Fix 4: materializa libopentui.so del bunfs a $TMPDIR antes del dlopen (mismo que loop 1)
-        sed -i 's~if (!existsSync2(targetLibPath)) {~// OTUI Android fix (Fix4): materializar libopentui.so del bunfs a $TMPDIR antes del dlopen\n// Port de #opentui/runtime-assets de 0.4.5: bun.dlopen no puede abrir paths virtuales $bunfs\nif (isBunfsPath(targetLibPath)) {\n  if (!process.env.TMPDIR) throw new Error("TMPDIR must be configured before materializing OpenTUI runtime assets");\n  var _otuiRealDir = process.env.TMPDIR;\n  var _otuiRealPath = join(_otuiRealDir, basename(targetLibPath));\n  if (!existsSync2(_otuiRealPath)) {\n    writeFileSync(_otuiRealPath, new Uint8Array(await Bun.file(targetLibPath).arrayBuffer()));\n  }\n  targetLibPath = _otuiRealPath;\n}\nif (!existsSync2(targetLibPath)) {~' "$CHUNK"
-        OTUI_PATCHED=$((OTUI_PATCHED+1))
-        echo "   bundle parcheado (.bun): $(basename "$CHUNK")"
-    done
-
-    # Verificación fail-fast: el marcador Fix4 real debe existir en el store.
-    # (El contador mide archivos procesados, no sustituciones — no es fiable.)
-    OTUI_PATCHED_FILES=$(grep -rl "OTUI Android fix (Fix4)" "$KILO_SRC/node_modules/.bun" 2>/dev/null | wc -l)
-    if [ "$OTUI_PATCHED_FILES" -eq 0 ]; then
-        echo "ERROR: OTUI Android fix (Fix4) no se aplicó a ningún bundle — abortando (dlopen no puede abrir $bunfs)"
-        exit 1
-    fi
-    echo "   OTUI Android fix (Fix4) verificado en $OTUI_PATCHED_FILES archivo(s) del store"
 
     # ── Validate the copied source-built Android .so ──
     SO=""

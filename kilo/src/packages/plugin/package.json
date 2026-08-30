@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@kilocode/plugin",
+  "version": "7.4.20",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "build": "tsc"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./tool": "./src/tool.ts",
+    "./tui": "./src/tui.ts"
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@kilocode/sdk": "workspace:*",
+    "effect": "catalog:",
+    "zod": "catalog:"
+  },
+  "peerDependencies": {
+    "@opentui/core": ">=0.3.4",
+    "@opentui/solid": ">=0.3.4",
+    "@opentui/keymap": ">=0.3.4"
+  },
+  "peerDependenciesMeta": {
+    "@opentui/core": {
+      "optional": true
+    },
+    "@opentui/keymap": {
+      "optional": true
+    },
+    "@opentui/solid": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@opentui/core": "catalog:",
+    "@opentui/solid": "catalog:",
+    "@tsconfig/node22": "catalog:",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "@typescript/native-preview": "catalog:",
+    "@opentui/keymap": "catalog:"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Kilo-Org/kilocode",
+    "directory": "packages/plugin"
+  }
+}

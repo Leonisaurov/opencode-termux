@@ -31,7 +31,8 @@ with the repository's CI tooling, and inspect state inputs with:
 python3 ci/scripts/test-build-state.py
 ```
 
-Use `opentui/test/test-renderer-invariants.sh` for OpenTUI patch idempotence.
+Use `opentui/test/test-renderer-invariants.sh` for OpenTUI source-tree and
+renderer invariants.
 Never claim a build passed without reviewing its CI artifact and logs.
 
 ## CI operations
@@ -42,9 +43,9 @@ a release. Publishing must use the normal `workflow_dispatch` inputs so the
 `publish` job consumes artifacts from that same run.
 
 Do not download artifacts for local repackaging when the workflow can publish
-them itself. For upstream products cloned during CI, represent source changes
-as repository-owned patches and include those patches in the product cache
-contract; do not rely on a dirty local submodule.
+them itself. For upstream products consumed during CI, represent source
+changes as versioned commits in `ci/source-manifest.json` and include those
+commits in the product cache contract; do not rely on a dirty checkout.
 
 ## Version pins and patch compatibility
 
@@ -60,13 +61,17 @@ Android existentes. Actualmente son Bun `1.2.13` y OpenCode `1.3.13`.
 OpenTUI Android debe compilarse como Bionic desde el código fuente portado.
 `patchelf` no es una solución válida para OpenTUI: no sustituye el port de
 fuente ni debe usarse para fabricar `RPATH`, interpreter o `DT_NEEDED` después
-del enlace. Los cambios del checkout local deben convertirse en un parche
-rastreado bajo `opentui/patches/opentui/` y aplicarse en CI antes de compilar;
-no se debe confiar en modificaciones sucias del submódulo ni en un fallback
-musl. El target fijado para los artefactos Android de OpenTUI es
+del enlace. Los cambios del checkout local deben convertirse en commits
+rastreados por `ci/source-manifest.json` y publicarse en el remoto declarado
+antes de compilar; no se debe confiar en modificaciones sucias del submódulo ni
+en un fallback musl. El target fijado para los artefactos Android de OpenTUI es
 `aarch64-linux-android.24`, salvo autorización explícita para cambiarlo.
 - Los workflows, scripts, manifiestos y nombres de artifacts deben consumir los
   inputs/versiones fijados; no deben introducir defaults contradictorios.
+- Las adaptaciones de fuentes deben vivir en los commits indicados por
+  `ci/source-manifest.json` o en fuentes externas fijadas por
+  `ci/external-sources.lock`. CI debe validar el commit y el árbol limpio; no
+  debe clonar una rama y mutarla con parches de build.
 
 ## Conventions
 

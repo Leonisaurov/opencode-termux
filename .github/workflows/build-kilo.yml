@@ -28,6 +28,7 @@ env:
   HOST_BUN_VERSION: '1.3.2'
   KILO_VERSION: "${{ inputs.kilo_version || '7.4.20' }}"
   KILO_BRANCH: "v${{ inputs.kilo_version || '7.4.20' }}"
+  KILO_OPENTUI_REF: '5b3d520550e118fd436f682bd67242b95a05318b'
   ANDROID_API: '24'
   ANDROID_NDK_VERSION: '28.1.13356709'
   ZIG_VERSION: '0.15.2'
@@ -90,13 +91,11 @@ jobs:
         id: kilo-source
         run: |
           set -euo pipefail
-          if [ ! -d kilo/src/.git ]; then
-            rm -rf kilo/src
-            git clone --depth 1 --branch "v${{ inputs.kilo_version || '7.4.20' }}" \
-              https://github.com/Kilo-Org/kilocode.git kilo/src
-          fi
           test -f kilo/src/packages/opencode/package.json
-          echo "commit=$(git -C kilo/src rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          commit="$(git -C kilo/src rev-parse HEAD)"
+          test "$commit" = 'ea7ea9f91eacd2539929d53da9376828ca277aa2'
+          test -z "$(git -C kilo/src status --porcelain --untracked-files=all)"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
 
       - name: Compute Kilo cache contract
         id: kilo-contract
@@ -108,14 +107,12 @@ jobs:
           args=(--root "$GITHUB_WORKSPACE" --product kilo
             --path kilo/scripts/build.sh --path kilo/scripts/build-kilo-android.ts
             --path ci/scripts/env.sh --path .github/workflows/build-kilo.yml
-            --path kilo/patches/kilocode-incremental-smoke.patch
-            --path opentui/patches/opentui/android-termux-port-kilo.patch
-            --path opentui/patches/opentui/android-termux-build-kilo.patch
+            --path ci/source-manifest.json
             --path bun/artifacts/bun-android
             --path kilo/src/bun.lock --path kilo/src/package.json
             --path kilo/src/packages/opencode/package.json
             --value "KILO_VERSION=${{ inputs.kilo_version || '7.4.20' }}"
-            --value "KILO_OPENTUI_REF=9b216a58d974704ae638b3043aece2eb70b5ff19"
+            --value "KILO_OPENTUI_REF=5b3d520550e118fd436f682bd67242b95a05318b"
             --value "BUN_VERSION=$BUN_VERSION" --value "HOST_BUN_VERSION=$HOST_BUN_VERSION")
           key="$(python3 ci/scripts/cache-contract.py key "${args[@]}")"
           echo "key=$key" >> "$GITHUB_OUTPUT"
@@ -171,7 +168,7 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: restore-checkpoint
-          checkpoint-prefix: ci-cache-v2-recovery-kilo-${{ runner.os }}-${{ runner.arch }}-version-${{ env.KILO_VERSION }}-bun-${{ env.BUN_VERSION }}-opentui-${{ env.KILO_BRANCH }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-patch-${{ hashFiles('kilo/patches/kilocode-incremental-smoke.patch', 'opentui/patches/opentui/android-termux-port-kilo.patch', 'opentui/patches/opentui/android-termux-build-kilo.patch') }}-
+          checkpoint-prefix: ci-cache-v2-recovery-kilo-${{ runner.os }}-${{ runner.arch }}-version-${{ env.KILO_VERSION }}-bun-${{ env.BUN_VERSION }}-opentui-${{ env.KILO_OPENTUI_REF }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-
           checkpoint-path: |
             ${{ github.workspace }}/kilo/src
             ${{ env.WORK_DIR }}
@@ -259,7 +256,7 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: save-checkpoint
-          checkpoint-prefix: ci-cache-v2-recovery-kilo-${{ runner.os }}-${{ runner.arch }}-version-${{ env.KILO_VERSION }}-bun-${{ env.BUN_VERSION }}-opentui-${{ env.KILO_BRANCH }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-patch-${{ hashFiles('kilo/patches/kilocode-incremental-smoke.patch', 'opentui/patches/opentui/android-termux-port-kilo.patch', 'opentui/patches/opentui/android-termux-build-kilo.patch') }}-
+          checkpoint-prefix: ci-cache-v2-recovery-kilo-${{ runner.os }}-${{ runner.arch }}-version-${{ env.KILO_VERSION }}-bun-${{ env.BUN_VERSION }}-opentui-${{ env.KILO_OPENTUI_REF }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-
           checkpoint-path: |
             ${{ github.workspace }}/kilo/src
             ${{ env.WORK_DIR }}

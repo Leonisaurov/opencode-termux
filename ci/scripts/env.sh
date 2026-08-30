@@ -48,6 +48,16 @@ export ANDROID_STRIP="${NDK_TOOLCHAIN}/bin/llvm-strip"
 export ANDROID_NM="${NDK_TOOLCHAIN}/bin/llvm-nm"
 export ANDROID_LD="${NDK_TOOLCHAIN}/bin/ld.lld"
 
+# Source commits are part of the repository contract. The values deliberately
+# name commits, not branches or dirty working trees, so a cache cannot hide a
+# different source tree.
+export BUN_SOURCE_COMMIT="${BUN_SOURCE_COMMIT:-d7b539a544a36e457eab6c7a8a050fba1d4ac6d6}"
+export OPENCODE_SOURCE_COMMIT="${OPENCODE_SOURCE_COMMIT:-77f342a97d8c606caf101d4b4668bb175c9af5aa}"
+export KILO_SOURCE_COMMIT="${KILO_SOURCE_COMMIT:-ea7ea9f91eacd2539929d53da9376828ca277aa2}"
+export CODEX_SOURCE_COMMIT="${CODEX_SOURCE_COMMIT:-fee9a8d5f08291b72c580d15aa0b08c7c3ecb204}"
+export OPENTUI_OPENCODE_SOURCE_COMMIT="${OPENTUI_OPENCODE_SOURCE_COMMIT:-658db4cbe0da0adfeb5edac0273ee68911b29c3e}"
+export OPENTUI_KILO_SOURCE_COMMIT="${OPENTUI_KILO_SOURCE_COMMIT:-5b3d520550e118fd436f682bd67242b95a05318b}"
+
 # Source checkouts are canonical and never generated inside another product.
 export BUN_BUILD_ROOT="${BUN_BUILD_ROOT:-${REPO_ROOT}/bun/build}"
 export BUN_SRC="${BUN_SRC:-${REPO_ROOT}/bun/src}"
@@ -93,6 +103,42 @@ echo "OpenCode ver:  ${OPENCODE_VERSION}"
 echo "Cache schema:  ci-cache-v2"
 echo "Jobs:          ${JOBS}"
 echo "==========================================="
+
+validate_source_checkout() {
+  local source_dir="$1"
+  local expected="$2"
+  local label="$3"
+  test -d "$source_dir" || { echo "ERROR: missing vendored $label source at $source_dir" >&2; return 1; }
+  test ! -e "$source_dir/.git" || {
+    echo "ERROR: $label source still contains nested git metadata: $source_dir" >&2
+    return 1
+  }
+  test -n "$expected" # Keep the origin revision in the build contract.
+}
+
+ensure_external_checkout() {
+  local source_dir="$1"
+  local remote="$2"
+  local expected="$3"
+  local label="$4"
+  local actual
+  if [ ! -d "$source_dir/.git" ]; then
+    mkdir -p "$source_dir"
+    git -C "$source_dir" init -q
+    git -C "$source_dir" remote add origin "$remote"
+    git -C "$source_dir" fetch -q --depth=1 origin "$expected"
+    git -C "$source_dir" checkout -q --detach FETCH_HEAD
+  fi
+  actual="$(git -C "$source_dir" rev-parse HEAD 2>/dev/null || true)"
+  test "$actual" = "$expected" || {
+    echo "ERROR: $label source is $actual; expected $expected" >&2
+    return 1
+  }
+  test -z "$(git -C "$source_dir" status --porcelain --untracked-files=all)" || {
+    echo "ERROR: $label source checkout is dirty: $source_dir" >&2
+    return 1
+  }
+}
 
 # Run a legacy build script through the shared content-addressed state engine.
 # Each caller supplies the node metadata and this function appends the caller

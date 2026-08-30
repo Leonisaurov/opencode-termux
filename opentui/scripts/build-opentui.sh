@@ -4,7 +4,7 @@
 # Usage: ./scripts/build-opentui.sh
 #
 # Strategy:
-#   Build with Zig's aarch64-linux-android.24 target and the pinned Android libc
+#   Build with Zig's aarch64-linux-android.24 target and the versioned Android
 #   source port. The generated android-libc.txt points Zig at the NDK Bionic
 #   headers/CRT, so the final ELF is linked for Android without post-link hacks.
 
@@ -36,7 +36,7 @@ mkdir -p "$ZIG_LOCAL_CACHE_DIR" "$ZIG_GLOBAL_CACHE_DIR"
 
 incremental_exec opentui \
     --input "$SCRIPT_DIR/build-opentui.sh" --input "$REPO_ROOT/ci/scripts/env.sh" \
-    --input "$REPO_ROOT/opentui/patches" --input "$OPENTUI_SRC" \
+    --input "$REPO_ROOT/ci/source-manifest.json" --input "$OPENTUI_SRC" \
     --value "ZIG_VERSION=$ZIG_VERSION" --value "ANDROID_API=$ANDROID_API" \
     --value "OPENTUI_TARGET=$OPENTUI_TARGET" --value "ANDROID_NDK_LIB_DIR=$ANDROID_NDK_LIB_DIR" \
     --value "ZIG_LIBC_FILE=$ZIG_LIBC_FILE" \
@@ -46,41 +46,10 @@ ZIG_BIN="${ZIG_BIN:-zig}"
 
 echo "=== Building libopentui.so for Android aarch64 ==="
 
-# Clone opentui if needed
-if [ ! -d "$OPENTUI_SRC/.git" ]; then
-    echo ">>> Cloning opentui..."
-    git clone --depth 1 https://github.com/anomalyco/opentui.git "$OPENTUI_SRC"
-else
-    echo ">>> opentui source exists at $OPENTUI_SRC"
-fi
+validate_source_checkout "$OPENTUI_SRC" "$OPENTUI_OPENCODE_SOURCE_COMMIT" "OpenTUI"
+echo ">>> OpenTUI source exists at $OPENTUI_SRC"
 
 OPENTUI_ZIG_DIR="$OPENTUI_SRC/packages/core/src/zig"
-
-# Apply the repository-owned Android libc patch to the pinned upstream source.
-# Cached source may already contain it; reject a different partial application.
-OPENTUI_PATCH="$REPO_ROOT/opentui/patches/opentui/android-libc-link.patch"
-OPENTUI_PORT_PATCH="$REPO_ROOT/opentui/patches/opentui/android-termux-port.patch"
-cd "$OPENTUI_SRC"
-if git apply --check "$OPENTUI_PATCH" >/dev/null 2>&1; then
-    git apply "$OPENTUI_PATCH"
-elif git apply --reverse --check "$OPENTUI_PATCH" >/dev/null 2>&1; then
-    echo ">>> OpenTUI Android libc patch already applied"
-else
-    echo "ERROR: OpenTUI Android libc patch does not apply cleanly" >&2
-    exit 1
-fi
-
-# Apply the repository-owned Android/Termux source port after the linker patch.
-# This is the same source state validated in the local pinned checkout; CI must
-# never silently build the unpatched upstream renderer.
-if git apply --check "$OPENTUI_PORT_PATCH" >/dev/null 2>&1; then
-    git apply "$OPENTUI_PORT_PATCH"
-elif git apply --reverse --check "$OPENTUI_PORT_PATCH" >/dev/null 2>&1; then
-    echo ">>> OpenTUI Android/Termux source port already applied"
-else
-    echo "ERROR: OpenTUI Android/Termux source port does not apply cleanly" >&2
-    exit 1
-fi
 
 if [ ! -f "$OPENTUI_ZIG_DIR/build.zig" ]; then
     echo "ERROR: build.zig not found at $OPENTUI_ZIG_DIR"

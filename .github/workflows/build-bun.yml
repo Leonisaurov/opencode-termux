@@ -42,10 +42,8 @@ jobs:
       - name: Create work directory
         run: mkdir -p "$WORK_DIR"
 
-      # Bun is cloned by apply-patches.sh later in this job, so hashFiles() for
-      # bun/src would be empty during restore and non-empty during save. The
-      # pinned Bun version is the stable dependency boundary for this download
-      # cache; the build contract still hashes every source and patch input.
+      # Bun is vendored in the root checkout. Its source commit is part of the
+      # cache contract and is validated before the build starts.
       - name: Cache Bun package downloads
         id: cache-bun-dependencies
         uses: ./ci/actions/incremental-cache
@@ -70,15 +68,6 @@ jobs:
           path: ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
           key: ci-cache-v2-toolchain-${{ runner.os }}-${{ runner.arch }}-zig-${{ env.ZIG_VERSION }}-api-${{ env.ANDROID_API }}
 
-      # ── Patch hashes ──────────────────────────────────────────
-      - name: Compute patch hashes
-        id: hashes
-        run: |
-          echo "bun_patch_hash=$(sha256sum bun/patches/bun/android-support.patch | cut -c1-16)" >> "$GITHUB_OUTPUT"
-          echo "heap_tagging_patch_hash=$(sha256sum bun/patches/bun/android-heap-tagging.patch | cut -c1-16)" >> "$GITHUB_OUTPUT"
-          echo "zig_patch_hash=$(sha256sum bun/patches/zig/posix-android-sigaction.patch | cut -c1-16)" >> "$GITHUB_OUTPUT"
-          echo "webkit_patch_hash=$(sha256sum bun/patches/webkit/android-support.patch | cut -c1-16)" >> "$GITHUB_OUTPUT"
-
       - name: Compute cache contract keys
         id: contract
         run: |
@@ -90,18 +79,16 @@ jobs:
             --path bun/scripts/build-icu.sh --path bun/scripts/build-webkit.sh
             --path bun/scripts/build-tinycc.sh --path ci/scripts/env.sh
             --path .github/workflows/build-core.yml
-            --path bun/patches/webkit/android-support.patch
+            --path ci/external-sources.lock --path ci/source-manifest.json
             --path bun/cmake/webkit-android-toolchain.cmake
             --value "ICU_VERSION=$ICU_VERSION" --value "WEBKIT_COMMIT=$WEBKIT_COMMIT"
             --value "TINYCC_COMMIT=$TINYCC_COMMIT")
           core_key="$(python3 ci/scripts/cache-contract.py key "${core_args[@]}")"
           echo "core=$core_key" >> "$GITHUB_OUTPUT"
           key_args=(--root "$GITHUB_WORKSPACE" --product bun
-            --path bun/scripts/build-bun.sh --path bun/scripts/apply-patches.sh
+            --path bun/scripts/build-bun.sh
             --path ci/scripts/env.sh --path .github/workflows/build-bun.yml
-            --path bun/patches/bun/android-support.patch
-            --path bun/patches/bun/android-heap-tagging.patch
-            --path bun/patches/zig/posix-android-sigaction.patch
+            --path ci/source-manifest.json
             --value "BUN_VERSION=$BUN_VERSION" --value "WEBKIT_COMMIT=$WEBKIT_COMMIT"
             --value "ICU_VERSION=$ICU_VERSION" --value "TINYCC_COMMIT=$TINYCC_COMMIT"
             --value "BUN_SOURCE_COMMIT=$bun_source_commit"
@@ -189,8 +176,8 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: restore-intermediate
-          key: ci-cache-v2-core-webkit-intermediates-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-patch-${{ steps.hashes.outputs.webkit_patch_hash }}-${{ steps.contract.outputs.core }}
-          restore-prefix: ci-cache-v2-core-webkit-intermediates-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-patch-${{ steps.hashes.outputs.webkit_patch_hash }}-
+          key: ci-cache-v2-core-webkit-intermediates-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-${{ steps.contract.outputs.core }}
+          restore-prefix: ci-cache-v2-core-webkit-intermediates-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-
           path: |
             ${{ env.WORK_DIR }}/webkit-src
             ${{ env.WORK_DIR }}/webkit-build
@@ -248,7 +235,7 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: restore-checkpoint
-          checkpoint-prefix: ci-cache-v2-recovery-core-webkit-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-patch-${{ steps.hashes.outputs.webkit_patch_hash }}-
+          checkpoint-prefix: ci-cache-v2-recovery-core-webkit-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-
           checkpoint-path: |
             ${{ env.ANDROID_NDK_HOME }}
             ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
@@ -325,8 +312,8 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: restore-intermediate
-          key: ci-cache-v2-bun-intermediates-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-zig-${{ steps.hashes.outputs.zig_patch_hash }}-${{ steps.contract.outputs.bun }}
-          restore-prefix: ci-cache-v2-bun-intermediates-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-zig-${{ steps.hashes.outputs.zig_patch_hash }}-
+          key: ci-cache-v2-bun-intermediates-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-zig-${{ steps.contract.outputs.bun }}
+          restore-prefix: ci-cache-v2-bun-intermediates-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-zig-
           path: |
             ${{ env.WORK_DIR }}/bun-build
             ${{ env.WORK_DIR }}/cache
@@ -337,7 +324,7 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: restore-checkpoint
-          checkpoint-prefix: ci-cache-v2-recovery-bun-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-zig-${{ steps.hashes.outputs.zig_patch_hash }}-bunpatch-${{ steps.hashes.outputs.bun_patch_hash }}-heap-${{ steps.hashes.outputs.heap_tagging_patch_hash }}-
+          checkpoint-prefix: ci-cache-v2-recovery-bun-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-zig-${{ env.BUN_SOURCE_COMMIT }}-
           checkpoint-path: |
             ${{ github.workspace }}/bun/src
             ${{ env.WORK_DIR }}/bun-build
@@ -364,7 +351,6 @@ jobs:
         if: steps.cache-webkit.outputs.cache-hit != 'true' || steps.validate-webkit.outputs.ready != 'true'
         run: |
           source ci/scripts/env.sh
-          ./bun/scripts/apply-patches.sh
           ./bun/scripts/build-webkit.sh
 
       - name: Build TinyCC (if needed)
@@ -373,11 +359,10 @@ jobs:
           source ci/scripts/env.sh && ./bun/scripts/build-tinycc.sh
 
       # ── Build Bun ─────────────────────────────────────────────
-      - name: Clone, patch, and build Bun
+      - name: Build versioned Bun source
         if: steps.cache-bun.outputs.cache-hit != 'true' || steps.validate-bun.outputs.ready != 'true'
         run: |
           source ci/scripts/env.sh
-          ./bun/scripts/apply-patches.sh
           ./bun/scripts/build-bun.sh
 
       - name: Verify Bun binary
@@ -475,7 +460,7 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: save-intermediate
-          key: ci-cache-v2-bun-intermediates-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-zig-${{ steps.hashes.outputs.zig_patch_hash }}-${{ steps.contract.outputs.bun }}
+          key: ci-cache-v2-bun-intermediates-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-zig-${{ env.BUN_SOURCE_COMMIT }}-${{ steps.contract.outputs.bun }}
           path: |
             ${{ env.WORK_DIR }}/bun-build
             ${{ env.WORK_DIR }}/cache
@@ -502,7 +487,7 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: save-intermediate
-          key: ci-cache-v2-core-webkit-intermediates-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-patch-${{ steps.hashes.outputs.webkit_patch_hash }}-${{ steps.contract.outputs.core }}
+          key: ci-cache-v2-core-webkit-intermediates-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-${{ steps.contract.outputs.core }}
           path: |
             ${{ env.WORK_DIR }}/webkit-src
             ${{ env.WORK_DIR }}/webkit-build
@@ -580,7 +565,7 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: save-checkpoint
-          checkpoint-prefix: ci-cache-v2-recovery-core-webkit-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-patch-${{ steps.hashes.outputs.webkit_patch_hash }}-
+          checkpoint-prefix: ci-cache-v2-recovery-core-webkit-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-
           checkpoint-path: |
             ${{ env.ANDROID_NDK_HOME }}
             ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
@@ -611,7 +596,7 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: save-checkpoint
-          checkpoint-prefix: ci-cache-v2-recovery-bun-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-zig-${{ steps.hashes.outputs.zig_patch_hash }}-bunpatch-${{ steps.hashes.outputs.bun_patch_hash }}-heap-${{ steps.hashes.outputs.heap_tagging_patch_hash }}-
+          checkpoint-prefix: ci-cache-v2-recovery-bun-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-zig-${{ env.BUN_SOURCE_COMMIT }}-
           checkpoint-path: |
             ${{ github.workspace }}/bun/src
             ${{ env.WORK_DIR }}/bun-build

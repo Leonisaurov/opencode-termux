@@ -14,6 +14,12 @@ Android CLI, code-mode host, and sandbox helper.
 Bun `1.2.13`, OpenCode `1.3.13`, Android API 24, and the `aarch64` target are
 deliberately pinned for compatibility with the Android source ports.
 
+The build consumes the exact source trees declared in
+[`ci/source-manifest.json`](ci/source-manifest.json). Android changes live in
+those pinned commits and CI rejects missing, dirty, or unexpected source
+trees. WebKit and TinyCC are pinned in
+[`ci/external-sources.lock`](ci/external-sources.lock).
+
 ## Install (Termux)
 
 The installer downloads the signed-by-checksum manifest and installs the full
@@ -74,11 +80,11 @@ own product directories; CI owns long builds and the repository keeps only
 reproducible state, scripts, and artifacts.
 
 ```
-opencode/{src,build,test,scripts,patches,deps,artifacts}/
-kilo/{src,build,test,scripts,patches,deps,artifacts,config}/
+opencode/{src,build,test,scripts,deps,artifacts}/
+kilo/{src,build,test,scripts,deps,artifacts,config}/
 codex/{src,build,test,scripts,artifacts}/
-bun/{src,build,test,scripts,patches,artifacts,cmake}/
-opentui/{src/{opencode,kilo},build,test,scripts,patches,artifacts}/
+bun/{src,build,test,scripts,artifacts,cmake}/
+opentui/{src/{opencode,kilo},build,test,scripts,artifacts}/
 ci/{scripts,docker}/              # shared state, runner, and CI helpers
   .github/workflows/
     build-*.yml                    # dependency-aware GitHub Actions workflows
@@ -133,8 +139,8 @@ Cargo/Zig/ccache/compiler state and is restored by a stable compatibility prefix
 and a failure checkpoint contains the complete resumable tree plus the node
 manifest. Intermediate keys are written only from a validated stage, while the
 checkpoint key is immutable per run attempt and is restored by prefix on the
-next run. Its prefix includes the relevant source-patch fingerprint, preventing
-a partially patched checkout from crossing a patch revision. A partial manifest
+next run. Its prefix includes the effective source commits and lockfiles,
+preventing a partial checkout from crossing a source revision. A partial manifest
 is never accepted as a final artifact; the native build system (Cargo,
 Ninja/CMake, or Zig) decides which translation units still need work. The exact
 contract also fingerprints the cache engine itself, so a
@@ -152,9 +158,15 @@ artifacts but intentionally do not publish a release; use `workflow_dispatch`
 with the pinned component versions when a release is requested. The `publish`
 job downloads and validates artifacts from that same run, so no local
 repackaging is needed. Small upstream-source changes are stored as
-repository-owned patches and included in the affected product's cache key.
+versioned source commits and included in the affected product's cache key.
 
 ---
+
+## Historical port details
+
+The following section records why the Android ports exist. Its historical use
+of “patch” describes the changes that are now integrated in the pinned source
+commits; CI no longer applies these files after checkout.
 
 ## What Was Patched and Why
 

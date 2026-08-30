@@ -1,0 +1,170 @@
+
+set(DEFAULT_ENABLE_LLVM ON)
+
+# if target is bun-zig, set ENABLE_LLVM to OFF
+if(TARGET bun-zig)
+  set(DEFAULT_ENABLE_LLVM OFF)
+endif()
+
+optionx(ENABLE_LLVM BOOL "If LLVM should be used for compilation" DEFAULT ${DEFAULT_ENABLE_LLVM})
+
+if(NOT ENABLE_LLVM)
+  return()
+endif()
+
+# Android: The NDK toolchain file already sets compilers. We only need to find
+# host LLVM tools (lld, strip) but NOT override CMAKE_C_COMPILER/CMAKE_CXX_COMPILER.
+# However, we DO need to propagate the NDK compilers and toolchain to sub-builds
+# (dependency libraries) via CMAKE_ARGS.
+# NOTE: Before project() is called, CMAKE_SYSTEM_NAME isn't "Android" yet.
+# We detect Android by checking if the toolchain file path contains "android".
+if(CMAKE_SYSTEM_NAME STREQUAL "Android"
+   OR ABI STREQUAL "android"
+   OR ANDROID_BUILD
+   OR (CMAKE_TOOLCHAIN_FILE AND CMAKE_TOOLCHAIN_FILE MATCHES "android"))
+  message(STATUS "Android build detected - skipping host LLVM compiler setup, using NDK compilers")
+  # Find host lld for linking (we still want it for Zig builds)
+  find_program(LLD_PROGRAM ld.lld
+    HINTS /usr/bin /usr/local/bin
+    PATHS /usr/lib/llvm-19/bin /usr/lib/llvm-18/bin /usr/lib/llvm/bin
+  )
+  if(NOT LLD_PROGRAM)
+    message(STATUS "ld.lld not found on host - Android NDK linker will be used")
+  endif()
+
+  # NOTE: CMAKE_C_COMPILER from the toolchain file is not available yet (before project()).
+  # We defer CMAKE_ARGS population to Options.cmake, which runs after project().
+  # For now, just set a flag that Options.cmake can use.
+  set(ANDROID_DEFER_CMAKE_ARGS ON)
+
+  # Use NDK strip (already set by toolchain file)
+  return()
+endif()
+
+set(DEFAULT_LLVM_VERSION "19.1.7")
+
+optionx(LLVM_VERSION STRING "The version of LLVM to use" DEFAULT ${DEFAULT_LLVM_VERSION})
+
+string(REGEX MATCH "([0-9]+)\\.([0-9]+)\\.([0-9]+)" USE_LLVM_VERSION ${LLVM_VERSION})
+if(USE_LLVM_VERSION)
+  set(LLVM_VERSION_MAJOR ${CMAKE_MATCH_1})
+  set(LLVM_VERSION_MINOR ${CMAKE_MATCH_2})
+  set(LLVM_VERSION_PATCH ${CMAKE_MATCH_3})
+endif()
+
+set(LLVM_PATHS)
+
+if(APPLE)
+  execute_process(
+    COMMAND brew --prefix
+    OUTPUT_VARIABLE HOMEBREW_PREFIX
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+
+  if(NOT HOMEBREW_PREFIX)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|ARM64|aarch64|AARCH64")
+      set(HOMEBREW_PREFIX /opt/homebrew)
+    else()
+      set(HOMEBREW_PREFIX /usr/local)
+    endif()
+  endif()
+
+  if(USE_LLVM_VERSION)
+    list(APPEND LLVM_PATHS ${HOMEBREW_PREFIX}/opt/llvm@${LLVM_VERSION_MAJOR}/bin)
+  endif()
+
+  list(APPEND LLVM_PATHS ${HOMEBREW_PREFIX}/opt/llvm/bin)
+endif()
+
+if(UNIX)
+  list(APPEND LLVM_PATHS /usr/lib/llvm/bin)
+
+  if(USE_LLVM_VERSION)
+    list(APPEND LLVM_PATHS
+      /usr/lib/llvm-${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}.${LLVM_VERSION_PATCH}/bin
+      /usr/lib/llvm-${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}/bin
+      /usr/lib/llvm-${LLVM_VERSION_MAJOR}/bin
+      /usr/lib/llvm${LLVM_VERSION_MAJOR}/bin
+    )
+  endif()
+endif()
+
+macro(find_llvm_command variable command)
+  set(commands ${command})
+
+  if(USE_LLVM_VERSION)
+    list(APPEND commands
+      ${command}-${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}.${LLVM_VERSION_PATCH}
+      ${command}-${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}
+      ${command}-${LLVM_VERSION_MAJOR}
+    )
+  endif()
+
+  find_command(
+    VARIABLE ${variable}
+    VERSION_VARIABLE LLVM_VERSION
+    COMMAND ${commands}
+    PATHS ${LLVM_PATHS}
+    VERSION >=${LLVM_VERSION_MAJOR}.1.0
+  )
+  list(APPEND CMAKE_ARGS -D${variable}=${${variable}})
+endmacro()
+
+macro(find_llvm_command_no_version variable command)
+  set(commands ${command})
+
+  if(USE_LLVM_VERSION)
+    list(APPEND commands
+      ${command}-${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}.${LLVM_VERSION_PATCH}
+      ${command}-${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}
+      ${command}-${LLVM_VERSION_MAJOR}
+    )
+  endif()
+
+  find_command(
+    VARIABLE ${variable}
+    VERSION_VARIABLE LLVM_VERSION
+    COMMAND ${commands}
+    PATHS ${LLVM_PATHS}
+  )
+  list(APPEND CMAKE_ARGS -D${variable}=${${variable}})
+endmacro()
+
+if(WIN32)
+  find_llvm_command(CMAKE_C_COMPILER clang-cl)
+  find_llvm_command(CMAKE_CXX_COMPILER clang-cl)
+  find_llvm_command_no_version(CMAKE_LINKER lld-link)
+  find_llvm_command_no_version(CMAKE_AR llvm-lib)
+  find_llvm_command_no_version(CMAKE_STRIP llvm-strip)
+else()
+  find_llvm_command(CMAKE_C_COMPILER clang)
+  find_llvm_command(CMAKE_CXX_COMPILER clang++)
+  find_llvm_command(CMAKE_LINKER llvm-link)
+  find_llvm_command(CMAKE_AR llvm-ar)
+  if (LINUX)
+    # On Linux, strip ends up being more useful for us.
+    find_command(
+      VARIABLE
+        CMAKE_STRIP
+      COMMAND
+        strip
+      REQUIRED
+        ON
+    )
+  else()
+    find_llvm_command(CMAKE_STRIP llvm-strip)
+  endif()
+  find_llvm_command(CMAKE_RANLIB llvm-ranlib)
+  if(LINUX)
+    find_llvm_command(LLD_PROGRAM ld.lld)
+  endif()
+  if(APPLE)
+    find_llvm_command(CMAKE_DSYMUTIL dsymutil)
+  endif()
+endif()
+
+if(ENABLE_ANALYSIS)
+  find_llvm_command(CLANG_FORMAT_PROGRAM clang-format)
+  find_llvm_command(CLANG_TIDY_PROGRAM clang-tidy)
+endif()

@@ -30,6 +30,7 @@ CHUNK = 1024 * 1024
 ENGINE_PATHS = (
     "ci/scripts/cache-contract.py",
     "ci/scripts/build-state.py",
+    "ci/scripts/validate-source-tree.py",
     "ci/actions/incremental-cache/action.yml",
 )
 

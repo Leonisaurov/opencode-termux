@@ -6,15 +6,8 @@
 # This configures and builds Bun using CMake + Ninja with the Android NDK.
 # Requires WebKit to be built first (scripts/build-webkit.sh).
 #
-# The Zig vendor patch (sigaction/sigprocmask bypass) must be applied AFTER
-# Bun's build system downloads its custom Zig fork, but BEFORE the bun-zig
-# target compiles. We accomplish this by running `ninja clone-zig` first to
-# trigger the download, then applying the patch, then running the full build.
-#
-# The Zig cache is retained between retries so translate-c and build-obj can
-# reuse their generated modules. It is invalidated only when the vendor patch
-# changes the generated source contract, preventing stale FileNotFound entries
-# without throwing away otherwise-correct compiler work.
+# Bun is vendored directly in this monorepo. Native source changes are tracked
+# in the root repository; this script never mutates the source before compiling.
 
 set -euo pipefail
 
@@ -23,9 +16,7 @@ source "$SCRIPT_DIR/../../ci/scripts/env.sh"
 
 incremental_exec bun \
     --input "$SCRIPT_DIR/build-bun.sh" --input "$REPO_ROOT/ci/scripts/env.sh" \
-    --input "$REPO_ROOT/bun/patches/bun/android-support.patch" \
-    --input "$REPO_ROOT/bun/patches/bun/android-heap-tagging.patch" \
-    --input "$REPO_ROOT/bun/patches/zig/posix-android-sigaction.patch" --input "$BUN_SRC" \
+    --input "$REPO_ROOT/ci/source-manifest.json" --input "$BUN_SRC" \
     --value "BUN_VERSION=$BUN_VERSION" --value "ANDROID_API=$ANDROID_API" \
     --value "ANDROID_NDK_VERSION=$ANDROID_NDK_VERSION" \
     --dep "$BUN_STATE_DIR/nodes/webkit.json" \
@@ -35,9 +26,10 @@ echo "=== Building Bun v${BUN_VERSION} for Android aarch64 ==="
 
 # Verify prerequisites
 if [ ! -d "$BUN_SRC" ]; then
-    echo "ERROR: Bun source not found. Run scripts/apply-patches.sh first."
+    echo "ERROR: Bun source not found in the vendored monorepo tree."
     exit 1
 fi
+validate_source_checkout "$BUN_SRC" "$BUN_SOURCE_COMMIT" "Bun"
 
 if [ ! -d "$WEBKIT_OUTPUT/lib" ]; then
     echo "ERROR: WebKit not built. Run scripts/build-webkit.sh first."
@@ -57,46 +49,24 @@ fi
 #
 # Fix: Symlink .zig-cache -> the explicit cache dir so both paths resolve to
 # the same physical location. Preserve this cache across normal retries; it is
-# invalidated only below when the Zig vendor patch changes the cache contract.
+# The cache is retained between retries so generated modules can be reused.
 echo ">>> Setting up Zig cache directories..."
-ZIG_PATCH_FILE="$REPO_ROOT/bun/patches/zig/posix-android-sigaction.patch"
-ZIG_PATCH_DIGEST="$(sha256sum "$ZIG_PATCH_FILE" | cut -d' ' -f1)"
 ZIG_CACHE_ROOT="$BUN_BUILD/cache/zig"
 ZIG_CACHE_LOCAL="$ZIG_CACHE_ROOT/local"
 ZIG_CACHE_GLOBAL="$ZIG_CACHE_ROOT/global"
-ZIG_CACHE_MARKER="$ZIG_CACHE_ROOT/.opencode-termux-zig-patch"
 
 mkdir -p "$ZIG_CACHE_LOCAL" "$ZIG_CACHE_GLOBAL"
 ln -sfn "$BUN_BUILD/cache/zig/local" "$BUN_SRC/.zig-cache"
 echo "    Symlinked $BUN_SRC/.zig-cache -> $BUN_BUILD/cache/zig/local"
 
-clear_zig_generated_cache() {
-    # Only generated Zig entries are contract-sensitive. Keep the CMake/Ninja
-    # graph and every unrelated compiler cache intact for the next retry.
-    rm -rf "$ZIG_CACHE_LOCAL" "$ZIG_CACHE_GLOBAL"
-    mkdir -p "$ZIG_CACHE_LOCAL" "$ZIG_CACHE_GLOBAL"
-}
-
-reconcile_zig_cache_contract() {
-    local previous=""
-    if [ -f "$ZIG_CACHE_MARKER" ]; then
-        previous="$(cat "$ZIG_CACHE_MARKER")"
-    fi
-    if [ -n "$previous" ] && [ "$previous" != "$ZIG_PATCH_DIGEST" ]; then
-        echo ">>> Zig vendor patch changed; invalidating only generated Zig entries..."
-        clear_zig_generated_cache
-    fi
-    printf '%s\n' "$ZIG_PATCH_DIGEST" > "$ZIG_CACHE_MARKER"
-}
-
 # Create build directory
 mkdir -p "$BUN_BUILD"
 
-# CMake toolchain is inside the patched Bun source
+# CMake toolchain is inside the versioned Bun source
 BUN_TOOLCHAIN="$BUN_SRC/cmake/toolchains/android-aarch64.cmake"
 if [ ! -f "$BUN_TOOLCHAIN" ]; then
     echo "ERROR: Android toolchain not found at $BUN_TOOLCHAIN"
-    echo "       Did apply-patches.sh run successfully?"
+    echo "       The pinned Bun source is incomplete."
     exit 1
 fi
 
@@ -120,67 +90,16 @@ cmake \
 echo ""
 echo ">>> Configure complete."
 
-# Download Zig vendor BEFORE the full build.
-# The clone-zig target downloads Bun's custom Zig fork to $BUN_SRC/vendor/zig/.
-# We need Zig downloaded first so we can patch posix.zig before compilation starts.
+# Download Bun's pinned Zig vendor before the full build.
 echo ">>> Downloading Zig vendor (clone-zig target)..."
 cd "$BUN_BUILD"
 ninja clone-zig || true  # May not exist as a standalone target in all versions
-
-# Apply Zig vendor patch AFTER download, BEFORE build
-ZIG_POSIX="$BUN_SRC/vendor/zig/lib/std/posix.zig"
-if [ -f "$ZIG_POSIX" ]; then
-    echo ">>> Applying Zig vendor patch (sigaction/sigprocmask Android bypass)..."
-    cd "$BUN_SRC"
-    if patch --dry-run -p1 < "$REPO_ROOT/bun/patches/zig/posix-android-sigaction.patch" >/dev/null 2>&1; then
-        patch -p1 < "$REPO_ROOT/bun/patches/zig/posix-android-sigaction.patch"
-        echo "    Zig patch applied successfully."
-    else
-        # Check if already applied by looking for the Android bypass code
-        if grep -q "comptime builtin.abi.isAndroid()" "$ZIG_POSIX" 2>/dev/null; then
-            echo "    Zig patch already applied."
-        else
-            echo "WARNING: Zig patch doesn't match cleanly. Trying with --fuzz..."
-            patch -p1 --fuzz=3 < "$REPO_ROOT/bun/patches/zig/posix-android-sigaction.patch" || {
-                echo "ERROR: Could not apply Zig patch. Manual intervention required."
-                exit 1
-            }
-        fi
-    fi
-    reconcile_zig_cache_contract
-else
-    echo "WARNING: Zig vendor not yet downloaded ($ZIG_POSIX not found)."
-    echo "         Zig may be downloaded during the build. If the build fails,"
-    echo "         re-run this script to apply the patch and retry."
-fi
 
 # Build
 echo ">>> Building Bun (this will take 30-45 minutes)..."
 echo "    .zig-cache -> $(readlink -f "$BUN_SRC/.zig-cache" 2>/dev/null || echo 'NOT A SYMLINK')"
 cd "$BUN_BUILD"
-ninja -j"$JOBS" 2>&1 || {
-    echo ""
-    echo ">>> Build failed. Checking if Zig was downloaded during the build..."
-    # If Zig was just downloaded during the build and the patch wasn't applied,
-    # apply it now and retry
-    if [ -f "$ZIG_POSIX" ] && ! grep -q "comptime builtin.abi.isAndroid()" "$ZIG_POSIX" 2>/dev/null; then
-        echo ">>> Zig downloaded during build but patch not applied. Applying now..."
-        cd "$BUN_SRC"
-        patch -p1 < "$REPO_ROOT/bun/patches/zig/posix-android-sigaction.patch" || {
-            echo "ERROR: Zig patch failed to apply"
-            exit 1
-        }
-        echo "    Zig patch applied. Clearing generated Zig entries and rebuilding..."
-        clear_zig_generated_cache
-        printf '%s\n' "$ZIG_PATCH_DIGEST" > "$ZIG_CACHE_MARKER"
-        ln -sfn "$BUN_BUILD/cache/zig/local" "$BUN_SRC/.zig-cache"
-        cd "$BUN_BUILD"
-        ninja -j"$JOBS"
-    else
-        echo "ERROR: Build failed (Zig patch was already applied — different error)"
-        exit 1
-    fi
-}
+ninja -j"$JOBS"
 
 # Verify output
 BUN_BINARY="$BUN_BUILD/bun"

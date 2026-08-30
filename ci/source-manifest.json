@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "sources": {
+    "bun": {
+      "path": "bun/src",
+      "mode": "vendored",
+      "commit": "d7b539a544a36e457eab6c7a8a050fba1d4ac6d6"
+    },
+    "opencode": {
+      "path": "opencode/src",
+      "mode": "vendored",
+      "commit": "77f342a97d8c606caf101d4b4668bb175c9af5aa"
+    },
+    "kilo": {
+      "path": "kilo/src",
+      "mode": "vendored",
+      "commit": "ea7ea9f91eacd2539929d53da9376828ca277aa2"
+    },
+    "codex": {
+      "path": "codex/src",
+      "mode": "vendored",
+      "commit": "fee9a8d5f08291b72c580d15aa0b08c7c3ecb204"
+    },
+    "opentui-opencode": {
+      "path": "opentui/src/opencode",
+      "mode": "vendored",
+      "commit": "658db4cbe0da0adfeb5edac0273ee68911b29c3e"
+    },
+    "opentui-kilo": {
+      "path": "opentui/src/kilo",
+      "mode": "vendored",
+      "commit": "5b3d520550e118fd436f682bd67242b95a05318b"
+    }
+  }
+}

@@ -6,7 +6,7 @@ on:
       codex_ref:
         description: 'Commit o tag de openai/codex'
         required: false
-        default: '50ef7395faee1d0e2d01730f9636aa06091c7be3'
+        default: 'fee9a8d5f08291b72c580d15aa0b08c7c3ecb204'
       v8_version:
         description: 'Versión de rusty_v8 compatible con codex-code-mode-host'
         required: false
@@ -16,7 +16,7 @@ on:
       codex_ref:
         type: string
         required: false
-        default: '50ef7395faee1d0e2d01730f9636aa06091c7be3'
+        default: 'fee9a8d5f08291b72c580d15aa0b08c7c3ecb204'
       v8_version:
         type: string
         required: false
@@ -62,19 +62,17 @@ jobs:
           path: ${{ env.ANDROID_NDK_HOME }}
           key: ci-cache-v2-toolchain-${{ runner.os }}-${{ runner.arch }}-ndk-${{ env.ANDROID_NDK_VERSION }}-api-${{ env.ANDROID_API }}
 
-      - name: Clone pinned Codex source
-        env:
-          CODEX_REF: ${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}
+      - name: Validate versioned Codex source
         run: |
           set -euo pipefail
-          CODEX_SRC="$WORK_DIR/codex-src"
-          rm -rf "$CODEX_SRC"
-          git clone --filter=blob:none --no-checkout https://github.com/openai/codex.git "$CODEX_SRC"
-          git -C "$CODEX_SRC" fetch --depth 1 origin "$CODEX_REF"
-          git -C "$CODEX_SRC" checkout --detach FETCH_HEAD
-          echo "CODEX_SRC=$CODEX_SRC" >> "$GITHUB_ENV"
-          echo "CODEX_RESOLVED_COMMIT=$(git -C "$CODEX_SRC" rev-parse HEAD)" >> "$GITHUB_ENV"
-          git -C "$CODEX_SRC" log -1 --oneline
+          test -f codex/src/codex-rs/Cargo.toml
+          CODEX_RESOLVED_COMMIT="$(git -C codex/src rev-parse HEAD)"
+          test "$CODEX_RESOLVED_COMMIT" = "${{ inputs.codex_ref || 'fee9a8d5f08291b72c580d15aa0b08c7c3ecb204' }}"
+          test -z "$(git -C codex/src status --porcelain --untracked-files=all)"
+          echo "CODEX_SRC=$GITHUB_WORKSPACE/codex/src" >> "$GITHUB_ENV"
+          echo "CODEX_RESOLVED_COMMIT=$CODEX_RESOLVED_COMMIT" >> "$GITHUB_ENV"
+          echo "CODEX_SOURCE_COMMIT=$CODEX_RESOLVED_COMMIT" >> "$GITHUB_ENV"
+          git -C codex/src log -1 --oneline
 
       - name: Resolve Codex Rust toolchain and cache contract
         id: contract
@@ -85,13 +83,12 @@ jobs:
           echo "RUST_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
           export UPSTREAM_COMMIT="$CODEX_RESOLVED_COMMIT" RUST_TOOLCHAIN
           export ANDROID_TRIPLE_API="aarch64-linux-android${ANDROID_API}"
-          CODEX_REL_SRC="${CODEX_SRC#"$GITHUB_WORKSPACE"/}"
           args=(--root "$GITHUB_WORKSPACE" --product codex
             --path codex/scripts/build-codex-android.sh --path ci/scripts/env.sh
             --path .github/workflows/build-codex.yml
             --path .github/workflows/build-rusty-v8-android.yml
-            --path "$CODEX_REL_SRC/codex-rs/Cargo.lock"
-            --path "$CODEX_REL_SRC/codex-rs/code-mode-host/build.rs"
+            --path codex/src/codex-rs/Cargo.lock
+            --path codex/src/codex-rs/code-mode-host/build.rs
             --value "CODEX_REF=$CODEX_RESOLVED_COMMIT" --value "V8_VERSION=${{ inputs.v8_version || '150.4.0' }}")
           cache_key="$(python3 ci/scripts/cache-contract.py key "${args[@]}")"
           echo "key=$cache_key" >> "$GITHUB_OUTPUT"
@@ -214,7 +211,7 @@ jobs:
 
       - name: Install Rust Android target
         if: steps.validate-codex.outputs.ready != 'true'
-        working-directory: ${{ env.WORK_DIR }}/codex-src/codex-rs
+        working-directory: codex/src/codex-rs
         run: |
           set -euo pipefail
           RUST_TOOLCHAIN="$(sed -n 's/^channel = "\([^"]*\)"/\1/p' rust-toolchain.toml | head -1)"
@@ -318,7 +315,7 @@ jobs:
       - name: Upload Codex binaries
         uses: actions/upload-artifact@v4
         with:
-          name: codex-android-aarch64-${{ inputs.codex_ref || '50ef7395faee1d0e2d01730f9636aa06091c7be3' }}
+          name: codex-android-aarch64-${{ inputs.codex_ref || 'fee9a8d5f08291b72c580d15aa0b08c7c3ecb204' }}
           path: |
             codex/artifacts/codex-android
             codex/artifacts/codex-code-mode-host

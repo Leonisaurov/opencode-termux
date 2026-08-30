@@ -8,7 +8,7 @@ on:
     inputs:
       opentui_ref:
         required: false
-        default: '9eabce704096837148d935554fcae9c19e6e21f4'
+        default: '658db4cbe0da0adfeb5edac0273ee68911b29c3e'
       opencode_version:
         required: false
         default: '1.3.13'
@@ -31,7 +31,7 @@ jobs:
   opentui:
     uses: ./.github/workflows/build-opentui.yml
     with:
-      opentui_ref: ${{ inputs.opentui_ref || '9eabce704096837148d935554fcae9c19e6e21f4' }}
+      opentui_ref: ${{ inputs.opentui_ref || '658db4cbe0da0adfeb5edac0273ee68911b29c3e' }}
     secrets: inherit
 
   bun:
@@ -46,7 +46,7 @@ jobs:
     uses: ./.github/workflows/build-opencode.yml
     with:
       bun_version: ${{ inputs.bun_version || '1.2.13' }}
-      opentui_ref: ${{ inputs.opentui_ref || '9eabce704096837148d935554fcae9c19e6e21f4' }}
+      opentui_ref: ${{ inputs.opentui_ref || '658db4cbe0da0adfeb5edac0273ee68911b29c3e' }}
       opencode_version: ${{ inputs.opencode_version || '1.3.13' }}
       require_dependency_artifacts: true
     secrets: inherit

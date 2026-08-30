@@ -16,7 +16,7 @@ source "$SCRIPT_DIR/../../ci/scripts/env.sh"
 incremental_exec webkit \
     --input "$SCRIPT_DIR/build-webkit.sh" --input "$REPO_ROOT/ci/scripts/env.sh" \
     --input "$REPO_ROOT/bun/cmake/webkit-android-toolchain.cmake" \
-    --input "$REPO_ROOT/bun/patches/webkit/android-support.patch" --input "$WEBKIT_SRC" \
+    --input "$REPO_ROOT/ci/external-sources.lock" --input "$WEBKIT_SRC" \
     --value "WEBKIT_COMMIT=$WEBKIT_COMMIT" --value "ANDROID_API=$ANDROID_API" \
     --value "ANDROID_NDK_VERSION=$ANDROID_NDK_VERSION" \
     --dep "$BUN_STATE_DIR/nodes/icu.json" \
@@ -35,6 +35,12 @@ echo "Output dir:    $WEBKIT_OUTPUT"
 echo "ICU prefix:    $DEPS_PREFIX"
 echo "Toolchain:     $TOOLCHAIN"
 echo ""
+
+ensure_external_checkout \
+    "$WEBKIT_SRC" \
+    "https://github.com/oven-sh/WebKit.git" \
+    "$WEBKIT_COMMIT" \
+    "WebKit"
 
 # Verify ICU is built
 if [ ! -f "$DEPS_PREFIX/lib/libicuuc.a" ]; then
