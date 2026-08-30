@@ -140,6 +140,13 @@ reusable Rusty V8 workflow first, downloads its verified artifact, and only
 then builds `codex-cli` and `codex-code-mode-host`. Codex builds run only for
 Codex/build workflow changes or manual dispatch.
 
+CI operations use the local `gh` CLI. Push-triggered runs validate and upload
+artifacts but intentionally do not publish a release; use `workflow_dispatch`
+with the pinned component versions when a release is requested. The `publish`
+job downloads and validates artifacts from that same run, so no local
+repackaging is needed. Small upstream-source changes are stored as
+repository-owned patches and included in the affected product's cache key.
+
 ---
 
 ## What Was Patched and Why

@@ -34,6 +34,18 @@ python3 ci/scripts/test-build-state.py
 Use `opentui/test/test-renderer-invariants.sh` for OpenTUI patch idempotence.
 Never claim a build passed without reviewing its CI artifact and logs.
 
+## CI operations
+
+Use the local `gh` CLI to dispatch, inspect, and monitor GitHub Actions; do not
+use `gita` for CI operations. A push run validates builds but does not publish
+a release. Publishing must use the normal `workflow_dispatch` inputs so the
+`publish` job consumes artifacts from that same run.
+
+Do not download artifacts for local repackaging when the workflow can publish
+them itself. For upstream products cloned during CI, represent source changes
+as repository-owned patches and include those patches in the product cache
+contract; do not rely on a dirty local submodule.
+
 ## Version pins and patch compatibility
 
 Las versiones de Bun y OpenCode están fijadas deliberadamente por los parches
