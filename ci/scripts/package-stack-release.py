@@ -16,13 +16,14 @@ def main():
     specs={"bun":(["bun"],"tar.gz",[]),"opentui":(["libopentui.so"],"tar.gz",[]),"opencode":(["opencode"],"tar.gz",["bun","opentui"]),"kilo":(["kilo"],"tar.gz",["bun"]),"codex":(["codex-android","codex-code-mode-host","codex-linux-sandbox"],"tar.gz",[])}
     versions={"bun":a.bun,"opentui":a.opentui,"opencode":a.opencode,"kilo":a.kilo,"codex":a.codex}; comps={}
     prefixes={"bun":"bun-android-aarch64-","opentui":"opentui-android-aarch64-","opencode":"opencode-android-aarch64-","kilo":"kilo-android-aarch64-","codex":"codex-android-aarch64-"}
+    source_names={"kilo":"kilo-android"}
     for name,(files,kind,deps) in specs.items():
         artifact_dirs=[p for p in a.root.iterdir() if p.is_dir() and p.name.startswith(prefixes[name])]
         if len(artifact_dirs) != 1: raise SystemExit(f"{name}: artifact ambiguo o ausente")
         source=artifact_dirs[0]; archive=a.out/f"{name}-{versions[name]}-android-aarch64.tar.gz"
         with tarfile.open(archive,"w:gz") as t:
             for f in files:
-                matches=list(source.rglob(f));
+                matches=list(source.rglob(source_names.get(name, f)));
                 if len(matches)!=1 or not matches[0].is_file(): raise SystemExit(f"{name}: artifact ambiguo o ausente: {f}")
                 verify(matches[0], f)
                 t.add(matches[0],arcname=f)
