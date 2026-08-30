@@ -26,6 +26,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--manifest"); p.add_argument("--prefix", default=DEFAULT_PREFIX, help=f"prefijo de instalación (default: {DEFAULT_PREFIX})")
     p.add_argument("--just", action="append", choices=COMPONENTS); p.add_argument("--all", action="store_true")
     p.add_argument("--yes", action="store_true"); p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--smoke-test", action="store_true", help="ejecuta --version después de instalar; no bloquea la instalación")
     p.add_argument("--version", action="version", version="opencode-termux-installer 3.0.0")
     a = p.parse_args()
     if a.release_opt is not None: a.release = a.release_opt
@@ -159,6 +160,27 @@ def verify_file(path: pathlib.Path, component: str, name: str) -> None:
         info = subprocess.check_output(["file", str(path)], text=True)
         if "ELF" not in info or not re.search(r"aarch64|ARM aarch64", info): fail(f"{component}: arquitectura ELF inválida en {name}")
 
+def smoke(path: pathlib.Path, component: str) -> bool:
+    try:
+        result = subprocess.run([str(path), "--version"], capture_output=True, text=True, timeout=30)
+    except OSError as e:
+        print(f"[!] smoke test falló: {component} --version no se pudo ejecutar: {e}\n  ejecutable: {path}", file=sys.stderr)
+        return False
+    except subprocess.TimeoutExpired as e:
+        print(f"[!] smoke test falló: {component} --version excedió 30s; stdout={e.stdout or '<vacío>'!r}; stderr={e.stderr or '<vacío>'!r}\n  ejecutable: {path}", file=sys.stderr)
+        return False
+    if result.returncode == 0: return True
+    try: info = subprocess.check_output(["file", str(path)], text=True).strip()
+    except subprocess.CalledProcessError as e: info = f"file falló con código {e.returncode}"
+    print(
+        f"smoke test falló: {component} --version (código {result.returncode})\n"
+        f"  ejecutable: {path}\n"
+        f"  tipo: {info}\n"
+        f"  stdout: {result.stdout.strip() or '<vacío>'}\n"
+        f"  stderr: {result.stderr.strip() or '<vacío>'}", file=sys.stderr
+    )
+    return False
+
 def main() -> None:
     args = parse_args(); tmp = preflight(args); manifest, origin = source_manifest(args, tmp)
     try:
@@ -183,6 +205,7 @@ def main() -> None:
                     target_path = payload / target; target_path.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(ext / f, target_path); target_path.chmod(0o755)
             if args.dry_run: print("Dry-run válido.", file=sys.stderr); return
             prefix = pathlib.Path(args.prefix); backup = pathlib.Path(tempfile.mkdtemp(prefix="opencode-backup.", dir=tmp)); moved=[]
+            smoke_failures = []
             try:
                 files = [p.relative_to(payload) for p in payload.rglob("*") if p.is_file()]
                 for rel in files:
@@ -192,10 +215,10 @@ def main() -> None:
                 for rel in files:
                     dst = prefix / rel; dst.parent.mkdir(parents=True, exist_ok=True); os.replace(payload / rel, dst); moved.append((rel, dst))
                 for n in names:
-                    if n == "opentui": continue
+                    if n == "opentui" or not args.smoke_test: continue
                     exe = prefix / {"bun":"bin/bun", "opencode":"bin/opencode", "kilo":"bin/kilo", "codex":"bin/codex-android"}[n]
-                    if subprocess.run([str(exe), "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0: fail(f"smoke test falló: {n} --version")
-                print("[✓] Instalación completa y validada.", file=sys.stderr)
+                    if not smoke(exe, n): smoke_failures.append(n)
+                print("[✓] Instalación completa: archivos, checksum y arquitectura validados.", file=sys.stderr)
             except BaseException:
                 for _, dst in reversed(moved):
                     if dst.exists(): dst.unlink()
@@ -203,6 +226,8 @@ def main() -> None:
                     dst=prefix/rel; dst.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(backup/rel, dst)
                 raise
             finally: shutil.rmtree(backup, ignore_errors=True)
+            if smoke_failures:
+                fail("instalación completada, pero falló el smoke test opcional para: " + ", ".join(smoke_failures))
         finally: shutil.rmtree(stage, ignore_errors=True)
     finally: manifest.unlink(missing_ok=True)
 

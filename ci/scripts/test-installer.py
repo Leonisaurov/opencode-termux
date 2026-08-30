@@ -46,6 +46,24 @@ class InstallerTests(unittest.TestCase):
         r = self.run_installer("--just", "opencode", "--prefix", str(prefix))
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertTrue((prefix / "bin" / "opencode").is_file())
+
+    def test_smoke_failure_reports_command_diagnostics(self):
+        payload = self.assets / "opencode"
+        payload.write_text("#!/bin/sh\nprintf '%s\\n' stdout\nprintf '%s\\n' stderr >&2\nexit 42\n")
+        payload.chmod(0o755)
+        archive = self.assets / "opencode-failing.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            tar.add(payload, arcname="opencode")
+        data = json.loads(self.manifest.read_text())
+        component = data["components"]["opencode"]
+        component.update(asset="assets/" + archive.name, sha256=hashlib.sha256(archive.read_bytes()).hexdigest(), size=archive.stat().st_size)
+        self.manifest.write_text(json.dumps(data))
+        r = self.run_installer("--just", "opencode", "--smoke-test")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("código 42", r.stderr)
+        self.assertIn("stdout", r.stderr)
+        self.assertIn("stderr", r.stderr)
+        self.assertTrue((self.prefix / "bin" / "opencode").exists())
     def test_bad_checksum_keeps_prefix_untouched(self):
         data=json.loads(self.manifest.read_text()); data["components"]["bun"]["sha256"]="0"*64; self.manifest.write_text(json.dumps(data))
         r=self.run_installer("--just", "bun"); self.assertNotEqual(r.returncode, 0); self.assertFalse((self.prefix / "bin").exists())
