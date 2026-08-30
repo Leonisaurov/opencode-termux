@@ -1,0 +1,11 @@
+--- build.zig.orig	2026-07-29 13:40:57.854241318 -0600
++++ build.zig	2026-07-29 13:41:33.178241320 -0600
+@@ -208,7 +208,7 @@
+     );
+ 
+     // b.addModule with an existing module
+-    _ = b.modules.put(b.dupe("uucode"), mod.lib) catch @panic("OOM");
++    _ = b.modules.put(b.allocator, b.dupe("uucode"), mod.lib) catch @panic("OOM");
+     b.addNamedLazyPath("tables.zig", mod.tables_path);
+ 
+     const test_mod = createLibMod(
