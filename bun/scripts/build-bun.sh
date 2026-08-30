@@ -11,9 +11,10 @@
 # target compiles. We accomplish this by running `ninja clone-zig` first to
 # trigger the download, then applying the patch, then running the full build.
 #
-# The Zig cache must also be cleared between runs to avoid stale cache entries
-# referencing files from deleted source trees (which causes FileNotFound errors
-# in translate-c output lookup).
+# The Zig cache is retained between retries so translate-c and build-obj can
+# reuse their generated modules. It is invalidated only when the vendor patch
+# changes the generated source contract, preventing stale FileNotFound entries
+# without throwing away otherwise-correct compiler work.
 
 set -euo pipefail
 
@@ -23,6 +24,7 @@ source "$SCRIPT_DIR/../../ci/scripts/env.sh"
 incremental_exec bun \
     --input "$SCRIPT_DIR/build-bun.sh" --input "$REPO_ROOT/ci/scripts/env.sh" \
     --input "$REPO_ROOT/bun/patches/bun/android-support.patch" \
+    --input "$REPO_ROOT/bun/patches/bun/android-heap-tagging.patch" \
     --input "$REPO_ROOT/bun/patches/zig/posix-android-sigaction.patch" --input "$BUN_SRC" \
     --value "BUN_VERSION=$BUN_VERSION" --value "ANDROID_API=$ANDROID_API" \
     --value "ANDROID_NDK_VERSION=$ANDROID_NDK_VERSION" \
@@ -54,12 +56,38 @@ fi
 # "file_hash FileNotFound" errors.
 #
 # Fix: Symlink .zig-cache -> the explicit cache dir so both paths resolve to
-# the same physical location. Clear both first to avoid stale entries.
+# the same physical location. Preserve this cache across normal retries; it is
+# invalidated only below when the Zig vendor patch changes the cache contract.
 echo ">>> Setting up Zig cache directories..."
-mkdir -p "$BUN_BUILD/cache/zig/local"
-mkdir -p "$BUN_BUILD/cache/zig/global"
+ZIG_PATCH_FILE="$REPO_ROOT/bun/patches/zig/posix-android-sigaction.patch"
+ZIG_PATCH_DIGEST="$(sha256sum "$ZIG_PATCH_FILE" | cut -d' ' -f1)"
+ZIG_CACHE_ROOT="$BUN_BUILD/cache/zig"
+ZIG_CACHE_LOCAL="$ZIG_CACHE_ROOT/local"
+ZIG_CACHE_GLOBAL="$ZIG_CACHE_ROOT/global"
+ZIG_CACHE_MARKER="$ZIG_CACHE_ROOT/.opencode-termux-zig-patch"
+
+mkdir -p "$ZIG_CACHE_LOCAL" "$ZIG_CACHE_GLOBAL"
 ln -sfn "$BUN_BUILD/cache/zig/local" "$BUN_SRC/.zig-cache"
 echo "    Symlinked $BUN_SRC/.zig-cache -> $BUN_BUILD/cache/zig/local"
+
+clear_zig_generated_cache() {
+    # Only generated Zig entries are contract-sensitive. Keep the CMake/Ninja
+    # graph and every unrelated compiler cache intact for the next retry.
+    rm -rf "$ZIG_CACHE_LOCAL" "$ZIG_CACHE_GLOBAL"
+    mkdir -p "$ZIG_CACHE_LOCAL" "$ZIG_CACHE_GLOBAL"
+}
+
+reconcile_zig_cache_contract() {
+    local previous=""
+    if [ -f "$ZIG_CACHE_MARKER" ]; then
+        previous="$(cat "$ZIG_CACHE_MARKER")"
+    fi
+    if [ -n "$previous" ] && [ "$previous" != "$ZIG_PATCH_DIGEST" ]; then
+        echo ">>> Zig vendor patch changed; invalidating only generated Zig entries..."
+        clear_zig_generated_cache
+    fi
+    printf '%s\n' "$ZIG_PATCH_DIGEST" > "$ZIG_CACHE_MARKER"
+}
 
 # Create build directory
 mkdir -p "$BUN_BUILD"
@@ -119,6 +147,7 @@ if [ -f "$ZIG_POSIX" ]; then
             }
         fi
     fi
+    reconcile_zig_cache_contract
 else
     echo "WARNING: Zig vendor not yet downloaded ($ZIG_POSIX not found)."
     echo "         Zig may be downloaded during the build. If the build fails,"
@@ -141,9 +170,9 @@ ninja -j"$JOBS" 2>&1 || {
             echo "ERROR: Zig patch failed to apply"
             exit 1
         }
-        echo "    Zig patch applied. Clearing Zig cache and rebuilding..."
-        rm -rf "$BUN_BUILD/cache/zig" "$BUN_SRC/.zig-cache"
-        mkdir -p "$BUN_BUILD/cache/zig/local" "$BUN_BUILD/cache/zig/global"
+        echo "    Zig patch applied. Clearing generated Zig entries and rebuilding..."
+        clear_zig_generated_cache
+        printf '%s\n' "$ZIG_PATCH_DIGEST" > "$ZIG_CACHE_MARKER"
         ln -sfn "$BUN_BUILD/cache/zig/local" "$BUN_SRC/.zig-cache"
         cd "$BUN_BUILD"
         ninja -j"$JOBS"

@@ -3,6 +3,10 @@ name: Build OpenCode (final assembly)
 on:
   workflow_dispatch:
     inputs:
+      bun_version:
+        description: 'Bun Android version used by the standalone bundle'
+        required: false
+        default: '1.2.13'
       opentui_ref:
         description: 'Commit, tag o branch de OpenTUI'
         required: false
@@ -13,6 +17,11 @@ on:
         default: '1.3.13'
   workflow_call:
     inputs:
+      bun_version:
+        description: 'Versión de Bun Android que se incrusta'
+        required: false
+        type: string
+        default: '1.2.13'
       opentui_ref:
         description: 'Commit, tag o branch de OpenTUI'
         required: false
@@ -30,20 +39,22 @@ on:
         default: false
 
 concurrency:
-  group: build-opencode-${{ github.ref }}-${{ github.run_id }}
-  cancel-in-progress: true
+  group: build-opencode-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
 
 env:
   PRODUCT: opencode
-  BUN_VERSION: "1.2.13"
+  BUN_VERSION: "${{ inputs.bun_version || '1.2.13' }}"
   HOST_BUN_VERSION: "1.3.2"
   OPENTUI_REF: "${{ inputs.opentui_ref || '9eabce704096837148d935554fcae9c19e6e21f4' }}"
   OPENCODE_VERSION: "${{ inputs.opencode_version || '1.3.13' }}"
   ANDROID_API: "24"
   ANDROID_NDK_VERSION: "28.1.13356709"
+  ICU_VERSION: "75.1"
+  TINYCC_COMMIT: "b91835d8701523e895a2b447713630069514e291"
   WEBKIT_COMMIT: "017930ebf915121f8f593bef61cbbca82d78132d"
   ZIG_VERSION: "0.15.2"
   WORK_DIR: "${{ github.workspace }}/opencode/build"
@@ -61,16 +72,11 @@ jobs:
         with:
           ref: ${{ github.sha }}
 
-      - name: Override OpenCode version from input
-        if: github.event.inputs.opencode_version
-        run: echo "OPENCODE_VERSION=${{ github.event.inputs.opencode_version }}" >> $GITHUB_ENV
-
       - name: Create work directory
         run: mkdir -p "$WORK_DIR"
 
-      - name: Resolve OpenTUI commit for validated fallback
+      - name: Resolve OpenTUI commit for the cache contract
         id: resolve-opentui
-        if: ${{ !inputs.require_dependency_artifacts }}
         run: |
           set -euo pipefail
           resolved="$(git ls-remote https://github.com/anomalyco/opentui.git \
@@ -90,45 +96,139 @@ jobs:
       - name: Compute OpenCode cache contract
         id: contract
         env:
-          UPSTREAM_COMMIT: ${{ steps.resolve-opentui.outputs.commit }}
+          OPENTUI_COMMIT: ${{ steps.resolve-opentui.outputs.commit }}
         run: |
           set -euo pipefail
+          bun_source_commit="$(git ls-tree HEAD bun/src | awk '{print $3}')"
+          opencode_source_commit="$(git ls-tree HEAD opencode/src | awk '{print $3}')"
+          test -n "$bun_source_commit" && test -n "$opencode_source_commit"
           export ANDROID_TRIPLE_API="aarch64-linux-android${ANDROID_API}"
-          args=(--root "$GITHUB_WORKSPACE" --product opencode
-            --path opencode/scripts/build-opencode.sh --path opencode/scripts/make-packages.sh
-            --path ci/scripts/env.sh --path opencode/patches
-            --value "OPENCODE_VERSION=$OPENCODE_VERSION" --value "BUN_VERSION=$BUN_VERSION"
-            --value "HOST_BUN_VERSION=$HOST_BUN_VERSION")
-          opencode_key="$(python3 ci/scripts/cache-contract.py key "${args[@]}")"
-          echo "key=$opencode_key" >> "$GITHUB_OUTPUT"
+          core_args=(--root "$GITHUB_WORKSPACE" --product bun-core
+            --path bun/scripts/build-icu.sh --path bun/scripts/build-webkit.sh
+            --path bun/scripts/build-tinycc.sh --path ci/scripts/env.sh
+            --path .github/workflows/build-core.yml
+            --path bun/patches/webkit/android-support.patch
+            --path bun/cmake/webkit-android-toolchain.cmake
+            --value "ICU_VERSION=$ICU_VERSION" --value "WEBKIT_COMMIT=$WEBKIT_COMMIT"
+            --value "TINYCC_COMMIT=$TINYCC_COMMIT")
+          core_key="$(env -u OPENTUI_COMMIT python3 ci/scripts/cache-contract.py key "${core_args[@]}")"
           bun_args=(--root "$GITHUB_WORKSPACE" --product bun
             --path bun/scripts/build-bun.sh --path bun/scripts/apply-patches.sh
-            --path ci/scripts/env.sh --path bun/patches/bun/android-support.patch
+            --path ci/scripts/env.sh --path .github/workflows/build-bun.yml
+            --path bun/patches/bun/android-support.patch
+            --path bun/patches/bun/android-heap-tagging.patch
             --path bun/patches/zig/posix-android-sigaction.patch
-            --value "BUN_VERSION=$BUN_VERSION" --value "WEBKIT_COMMIT=$WEBKIT_COMMIT")
-          bun_key="$(python3 ci/scripts/cache-contract.py key "${bun_args[@]}")"
+            --value "BUN_VERSION=$BUN_VERSION" --value "WEBKIT_COMMIT=$WEBKIT_COMMIT"
+            --value "ICU_VERSION=$ICU_VERSION" --value "TINYCC_COMMIT=$TINYCC_COMMIT"
+            --value "BUN_SOURCE_COMMIT=$bun_source_commit"
+            --value "CORE_CACHE_KEY=$core_key")
+          bun_key="$(env -u OPENTUI_COMMIT python3 ci/scripts/cache-contract.py key "${bun_args[@]}")"
           echo "bun=$bun_key" >> "$GITHUB_OUTPUT"
           opentui_args=(--root "$GITHUB_WORKSPACE" --product opentui
             --path opentui/scripts/build-opentui.sh --path ci/scripts/env.sh
+            --path .github/workflows/build-opentui.yml
             --path opentui/patches --value "OPENTUI_REF=$OPENTUI_REF"
             --value "OPENTUI_TARGET=aarch64-linux-android.24")
-          opentui_key="$(UPSTREAM_COMMIT="$UPSTREAM_COMMIT" python3 ci/scripts/cache-contract.py key "${opentui_args[@]}")"
+          opentui_key="$(UPSTREAM_COMMIT="$OPENTUI_COMMIT" python3 ci/scripts/cache-contract.py key "${opentui_args[@]}")"
           echo "opentui=$opentui_key" >> "$GITHUB_OUTPUT"
+          args=(--root "$GITHUB_WORKSPACE" --product opencode
+            --path opencode/scripts/build-opencode.sh --path opencode/scripts/make-packages.sh
+            --path ci/scripts/env.sh --path .github/workflows/build-opencode.yml
+            --path opencode/patches
+            --value "OPENCODE_VERSION=$OPENCODE_VERSION" --value "BUN_VERSION=$BUN_VERSION"
+            --value "HOST_BUN_VERSION=$HOST_BUN_VERSION"
+            --value "OPENTUI_REF=$OPENTUI_REF" --value "WEBKIT_COMMIT=$WEBKIT_COMMIT"
+            --value "ICU_VERSION=$ICU_VERSION" --value "TINYCC_COMMIT=$TINYCC_COMMIT"
+            --value "OPENCODE_SOURCE_COMMIT=$opencode_source_commit"
+            --value "BUN_CACHE_KEY=$bun_key" --value "OPENTUI_CACHE_KEY=$opentui_key")
+          opencode_key="$(UPSTREAM_COMMIT="$OPENTUI_COMMIT" python3 ci/scripts/cache-contract.py key "${args[@]}")"
+          echo "key=$opencode_key" >> "$GITHUB_OUTPUT"
+
+      - name: Restore OpenCode source and product state
+        id: cache-opencode-product
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ github.workspace }}/opencode/src
+            ${{ env.WORK_DIR }}/dist/opencode
+            ${{ env.WORK_DIR }}/state/nodes/opencode.json
+          key: ${{ steps.contract.outputs.key }}-artifact
+
+      - name: Validate OpenCode product cache
+        id: validate-opencode
+        run: |
+          set -euo pipefail
+          if test -s "${WORK_DIR}/dist/opencode" \
+             && test "$(readelf -h "${WORK_DIR}/dist/opencode" | sed -n 's/^ *Class: *//p')" = ELF64 \
+             && test "$(readelf -h "${WORK_DIR}/dist/opencode" | sed -n 's/^ *Machine: *//p')" = AArch64 \
+             && python3 ci/scripts/build-state.py verify --root "$GITHUB_WORKSPACE" \
+                  --state-dir "$WORK_DIR/state" --node opencode >/dev/null 2>&1; then
+            echo ready=true >> "$GITHUB_OUTPUT"
+          else
+            echo ready=false >> "$GITHUB_OUTPUT"
+          fi
+
+      # Restore the OpenTUI fallback caches before the per-attempt checkpoint.
+      # Source and output use exact producer keys; Zig state may come from the
+      # producer's stable compatibility prefix. The checkpoint is applied
+      # after these layers so the newest partial build always wins.
+      - name: Cache OpenTUI source fallback
+        if: steps.validate-opencode.outputs.ready != 'true' && !inputs.require_dependency_artifacts
+        id: cache-opentui-source
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/opentui/src/opencode
+          key: ${{ steps.contract.outputs.opentui }}-source
+
+      - name: Cache OpenTUI Zig intermediates fallback
+        if: steps.validate-opencode.outputs.ready != 'true' && !inputs.require_dependency_artifacts
+        id: cache-opentui-zig
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: restore-intermediate
+          key: ci-cache-v2-opentui-intermediates-${{ runner.os }}-${{ runner.arch }}-commit-${{ steps.resolve-opentui.outputs.commit }}-target-aarch64-linux-android.24-zig-${{ env.ZIG_VERSION }}-ndk-${{ env.ANDROID_NDK_VERSION }}-${{ steps.contract.outputs.opentui }}
+          restore-prefix: ci-cache-v2-opentui-intermediates-${{ runner.os }}-${{ runner.arch }}-commit-${{ steps.resolve-opentui.outputs.commit }}-target-aarch64-linux-android.24-zig-${{ env.ZIG_VERSION }}-ndk-${{ env.ANDROID_NDK_VERSION }}-
+          path: |
+            ${{ github.workspace }}/opentui/build/cache/zig-opentui
+            ${{ github.workspace }}/opentui/build/cache/zig-global
+
+      - name: Cache OpenTUI build fallback
+        if: steps.validate-opencode.outputs.ready != 'true' && !inputs.require_dependency_artifacts
+        id: cache-opentui
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ github.workspace }}/opentui/src/opencode/packages/core/src/lib
+            ${{ github.workspace }}/opentui/build/state/nodes/opentui.json
+          key: ${{ steps.contract.outputs.opentui }}-artifact
+
+      - name: Restore OpenCode resumable checkpoint
+        if: steps.cache-opencode-product.outputs.cache-hit != 'true' || steps.validate-opencode.outputs.ready != 'true'
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: restore-checkpoint
+          checkpoint-prefix: ci-cache-v2-recovery-opencode-${{ runner.os }}-${{ runner.arch }}-version-${{ env.OPENCODE_VERSION }}-bun-${{ env.BUN_VERSION }}-opentui-${{ env.OPENTUI_REF }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-patch-${{ hashFiles('opencode/patches/**', 'opentui/patches/opentui/android-libc-link.patch', 'opentui/patches/opentui/android-termux-port.patch') }}-
+          checkpoint-path: |
+            ${{ github.workspace }}/opencode/src
+            ${{ env.WORK_DIR }}
+            ${{ github.workspace }}/opentui/src/opencode/packages/core/src/lib
+            ${{ github.workspace }}/opentui/build
+            ~/.bun
 
       # ── Restore cached toolchain ──────────────────────────────
       - name: Cache Android NDK
         id: cache-ndk
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ env.ANDROID_NDK_HOME }}
-          key: ci-cache-v1-toolchain-${{ runner.os }}-${{ runner.arch }}-ndk-${{ env.ANDROID_NDK_VERSION }}-api-${{ env.ANDROID_API }}
+          key: ci-cache-v2-toolchain-${{ runner.os }}-${{ runner.arch }}-ndk-${{ env.ANDROID_NDK_VERSION }}-api-${{ env.ANDROID_API }}
 
       - name: Cache Zig
         id: cache-zig
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
-          key: ci-cache-v1-toolchain-${{ runner.os }}-${{ runner.arch }}-zig-${{ env.ZIG_VERSION }}-api-${{ env.ANDROID_API }}
+          key: ci-cache-v2-toolchain-${{ runner.os }}-${{ runner.arch }}-zig-${{ env.ZIG_VERSION }}-api-${{ env.ANDROID_API }}
 
       - name: Cache Bun host
         id: cache-bun-host
@@ -137,26 +237,30 @@ jobs:
           path: ~/.bun
           key: ${{ steps.contract.outputs.key }}-bun-host
 
+      - name: Ensure host Bun is available
+        id: host-bun
+        run: |
+          set -euo pipefail
+          if [ ! -x "$HOME/.bun/bin/bun" ] \
+             || [ "$("$HOME/.bun/bin/bun" --version 2>/dev/null || true)" != "$HOST_BUN_VERSION" ]; then
+            curl -fsSL https://bun.sh/install | bash -s -- "bun-v${HOST_BUN_VERSION}"
+          fi
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+          echo "BUN_INSTALL=$HOME/.bun" >> "$GITHUB_ENV"
+          export PATH="$HOME/.bun/bin:$PATH"
+          test "$(bun --version)" = "$HOST_BUN_VERSION"
+          echo ready=true >> "$GITHUB_OUTPUT"
+
       - name: Receive Bun artifact
+        if: steps.validate-opencode.outputs.ready != 'true'
         uses: actions/download-artifact@v4
         continue-on-error: ${{ !inputs.require_dependency_artifacts }}
         with:
           name: bun-android-aarch64-${{ env.BUN_VERSION }}
           path: ${{ env.WORK_DIR }}/artifact-bun
 
-      - name: Materialize Bun artifact
-        run: |
-          BUN="$(find "$WORK_DIR/artifact-bun" -type f -name bun -print -quit 2>/dev/null || true)"
-          if [ -z "$BUN" ] && [ "${{ inputs.require_dependency_artifacts }}" = "true" ]; then
-            echo 'Required Bun artifact is missing or malformed.' >&2
-            exit 1
-          fi
-          if [ -n "$BUN" ]; then
-            mkdir -p "$GITHUB_WORKSPACE/bun/build/bun-build"
-            install -m 0755 "$BUN" "$GITHUB_WORKSPACE/bun/build/bun-build/bun"
-          fi
-
       - name: Receive OpenTUI artifact
+        if: steps.validate-opencode.outputs.ready != 'true'
         uses: actions/download-artifact@v4
         continue-on-error: ${{ !inputs.require_dependency_artifacts }}
         with:
@@ -167,13 +271,27 @@ jobs:
           path: ${{ env.WORK_DIR }}/artifact-opentui
 
       - name: Materialize OpenTUI artifact
+        if: steps.validate-opencode.outputs.ready != 'true'
         run: |
+          set -euo pipefail
+          EXPECTED_COMMIT="${{ steps.resolve-opentui.outputs.commit }}"
           LIB="$(find "$WORK_DIR/artifact-opentui" -type f -name libopentui.so -print -quit 2>/dev/null || true)"
-          if [ -z "$LIB" ] && [ "${{ inputs.require_dependency_artifacts }}" = "true" ]; then
-            echo 'Required OpenTUI artifact is missing or malformed.' >&2
-            exit 1
+          INFO="$(find "$WORK_DIR/artifact-opentui" -type f -name build-info.txt -print -quit 2>/dev/null || true)"
+          valid=false
+          if [ -n "$LIB" ] && [ -n "$INFO" ] \
+             && grep -Fxq "opentui_commit=$EXPECTED_COMMIT" "$INFO" \
+             && test "$(readelf -h "$LIB" | sed -n 's/^ *Class: *//p')" = ELF64 \
+             && test "$(readelf -h "$LIB" | sed -n 's/^ *Machine: *//p')" = AArch64 \
+             && readelf -d "$LIB" | grep -q 'NEEDED.*libc.so'; then
+            valid=true
           fi
-          if [ -n "$LIB" ]; then
+          if [ "$valid" != true ]; then
+            if [ "${{ inputs.require_dependency_artifacts }}" = "true" ]; then
+              echo "Required OpenTUI artifact is missing, stale, or malformed (expected $EXPECTED_COMMIT)." >&2
+              exit 1
+            fi
+            echo 'OpenTUI artifact is absent/stale; the local dependency cache or build will provide it.'
+          else
             DEST="$GITHUB_WORKSPACE/opentui/src/opencode/packages/core/src/lib/aarch64-linux-android.24"
             mkdir -p "$DEST"
             install -m 0755 "$LIB" "$DEST/libopentui.so"
@@ -181,6 +299,7 @@ jobs:
 
       # ── Restore Bun binary (required — run build-bun first) ──
       - name: Restore Bun binary
+        if: steps.validate-opencode.outputs.ready != 'true'
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -188,55 +307,167 @@ jobs:
             ${{ github.workspace }}/bun/build/state/nodes/bun.json
           key: ${{ steps.contract.outputs.bun }}
 
-      # Restore all caches/artifacts before paying for runner setup.
+      - name: Materialize and verify Bun artifact
+        if: steps.validate-opencode.outputs.ready != 'true'
+        run: |
+          set -euo pipefail
+          BUN="$(find "$WORK_DIR/artifact-bun" -type f -name bun -print -quit 2>/dev/null || true)"
+          if [ -z "$BUN" ] && [ "${{ inputs.require_dependency_artifacts }}" = "true" ]; then
+            echo 'Required Bun artifact is missing or malformed.' >&2
+            exit 1
+          fi
+          if [ -n "$BUN" ]; then
+            mkdir -p "$GITHUB_WORKSPACE/bun/build/bun-build"
+            install -m 0755 "$BUN" "$GITHUB_WORKSPACE/bun/build/bun-build/bun"
+          fi
+          BUN_BINARY="$GITHUB_WORKSPACE/bun/build/bun-build/bun"
+          test -s "$BUN_BINARY"
+          file "$BUN_BINARY"
+          test "$(readelf -h "$BUN_BINARY" | sed -n 's/^ *Class: *//p')" = ELF64
+          test "$(readelf -h "$BUN_BINARY" | sed -n 's/^ *Machine: *//p')" = AArch64
+
+      # Restore all remaining tools before paying for runner setup.
       - name: Install build dependencies
+        if: steps.validate-opencode.outputs.ready != 'true'
         run: source ci/scripts/setup-runner.sh
 
       # ── Build libopentui.so ───────────────────────────────────
-      - name: Cache OpenTUI build
-        if: ${{ !inputs.require_dependency_artifacts }}
-        id: cache-opentui
-        uses: actions/cache@v4
+      - name: Build libopentui.so
+        if: steps.validate-opencode.outputs.ready != 'true' && !inputs.require_dependency_artifacts
+        env:
+          PRODUCT: opentui
+          WORK_DIR: ${{ github.workspace }}/opentui/build
+          BUILD_STATE_DIR: ${{ github.workspace }}/opentui/build/state
+        run: |
+          source ci/scripts/env.sh
+          ./opentui/scripts/build-opentui.sh
+
+      - name: Validate OpenTUI prerequisite
+        if: always()
+        id: validate-opentui
+        run: |
+          set -euo pipefail
+          LIB="$GITHUB_WORKSPACE/opentui/src/opencode/packages/core/src/lib/aarch64-linux-android.24/libopentui.so"
+          open_tui=false
+          if test -s "$LIB" \
+             && test "$(readelf -h "$LIB" | sed -n 's/^ *Class: *//p')" = ELF64 \
+             && test "$(readelf -h "$LIB" | sed -n 's/^ *Machine: *//p')" = AArch64 \
+             && readelf -d "$LIB" | grep -q 'NEEDED.*libc.so'; then
+            open_tui=true
+          fi
+          if [ "${{ steps.validate-opencode.outputs.ready }}" = true ] || [ "$open_tui" = true ]; then
+            echo ready=true >> "$GITHUB_OUTPUT"
+            echo "cache_ready=$open_tui" >> "$GITHUB_OUTPUT"
+          else
+            echo ready=false >> "$GITHUB_OUTPUT"
+            echo cache_ready=false >> "$GITHUB_OUTPUT"
+            echo 'OpenTUI prerequisite is unavailable or malformed.' >&2
+            exit 1
+          fi
+
+      # ── Build OpenCode + packages ─────────────────────────────
+      - name: Build OpenCode standalone binary
+        if: steps.validate-opencode.outputs.ready != 'true'
+        run: |
+          source ci/scripts/env.sh && ./opencode/scripts/build-opencode.sh
+
+      - name: Verify OpenCode binary
+        run: |
+          set -euo pipefail
+          OPENCODE_BINARY="${WORK_DIR}/dist/opencode"
+          ls -lh "$OPENCODE_BINARY"
+          file "$OPENCODE_BINARY"
+          readelf -h "$OPENCODE_BINARY" | grep -E "Machine|Class"
+
+      - name: Validate OpenCode outputs for durable cache
+        if: always()
+        id: final-opencode
+        run: |
+          set -euo pipefail
+          BINARY="${WORK_DIR}/dist/opencode"
+          ready=false
+          if test -s "$BINARY" \
+             && python3 ci/scripts/build-state.py verify --root "$GITHUB_WORKSPACE" \
+                  --state-dir "$WORK_DIR/state" --node opencode >/dev/null 2>&1 \
+             && test "$(readelf -h "$BINARY" | sed -n 's/^ *Class: *//p')" = ELF64 \
+             && test "$(readelf -h "$BINARY" | sed -n 's/^ *Machine: *//p')" = AArch64; then
+            ready=true
+          fi
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+          if [ "$ready" != true ]; then
+            echo "ERROR: OpenCode output or state manifest is not valid." >&2
+            exit 1
+          fi
+
+      - name: Save OpenCode host cache
+        if: always() && steps.host-bun.outputs.ready == 'true' && steps.cache-bun-host.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
         with:
+          mode: save-final
+          path: ~/.bun
+          key: ${{ steps.contract.outputs.key }}-bun-host
+
+      - name: Save OpenTUI fallback cache
+        if: always() && !inputs.require_dependency_artifacts && steps.validate-opentui.outputs.cache_ready == 'true' && steps.cache-opentui.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: save-final
           path: |
             ${{ github.workspace }}/opentui/src/opencode/packages/core/src/lib
             ${{ github.workspace }}/opentui/build/state/nodes/opentui.json
           key: ${{ steps.contract.outputs.opentui }}-artifact
 
-      - name: Build libopentui.so
-        if: ${{ !inputs.require_dependency_artifacts }}
-        run: |
-          PRODUCT=opentui ./opentui/scripts/build-opentui.sh
-
-      # ── Build OpenCode + packages ─────────────────────────────
-      - name: Build OpenCode standalone binary
-        run: |
-          source ci/scripts/env.sh && ./opencode/scripts/build-opencode.sh
-
-      - name: Save OpenCode host/dependency cache
-        if: always() && steps.cache-bun-host.outputs.cache-hit != 'true'
+      - name: Save OpenTUI source fallback cache
+        if: always() && !inputs.require_dependency_artifacts && steps.validate-opentui.outputs.cache_ready == 'true' && steps.cache-opentui-source.outputs.cache-hit != 'true'
         continue-on-error: true
-        uses: actions/cache/save@v4
+        uses: ./ci/actions/incremental-cache
         with:
-          path: ~/.bun
-          key: ${{ steps.contract.outputs.key }}-bun-host
+          mode: save-final
+          path: ${{ github.workspace }}/opentui/src/opencode
+          key: ${{ steps.contract.outputs.opentui }}-source
 
-      - name: Save OpenCode product state
-        if: always()
+      - name: Save OpenTUI Zig fallback cache
+        if: always() && !inputs.require_dependency_artifacts && steps.validate-opentui.outputs.cache_ready == 'true' && steps.cache-opentui-zig.outputs.cache-hit != 'true'
         continue-on-error: true
-        uses: actions/cache/save@v4
+        uses: ./ci/actions/incremental-cache
         with:
+          mode: save-intermediate
           path: |
+            ${{ github.workspace }}/opentui/build/cache/zig-opentui
+            ${{ github.workspace }}/opentui/build/cache/zig-global
+          key: ci-cache-v2-opentui-intermediates-${{ runner.os }}-${{ runner.arch }}-commit-${{ steps.resolve-opentui.outputs.commit }}-target-aarch64-linux-android.24-zig-${{ env.ZIG_VERSION }}-ndk-${{ env.ANDROID_NDK_VERSION }}-${{ steps.contract.outputs.opentui }}
+
+      - name: Save OpenCode durable cache
+        if: success() && steps.final-opencode.outputs.ready == 'true' && steps.cache-opencode-product.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: save-final
+          path: |
+            ${{ github.workspace }}/opencode/src
             ${{ env.WORK_DIR }}/dist/opencode
             ${{ env.WORK_DIR }}/state/nodes/opencode.json
           key: ${{ steps.contract.outputs.key }}-artifact
 
-      - name: Verify OpenCode binary
-        run: |
-          OPENCODE_BINARY="${WORK_DIR}/dist/opencode"
-          ls -lh "$OPENCODE_BINARY"
-          file "$OPENCODE_BINARY"
-          readelf -h "$OPENCODE_BINARY" | grep -E "Machine|Class"
+      - name: Save OpenCode Android NDK cache
+        if: success() && steps.validate-opencode.outputs.ready != 'true' && steps.cache-ndk.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: save-final
+          path: ${{ env.ANDROID_NDK_HOME }}
+          key: ci-cache-v2-toolchain-${{ runner.os }}-${{ runner.arch }}-ndk-${{ env.ANDROID_NDK_VERSION }}-api-${{ env.ANDROID_API }}
+
+      - name: Save OpenCode Zig cache
+        if: success() && steps.validate-opencode.outputs.ready != 'true' && steps.cache-zig.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: save-final
+          path: ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+          key: ci-cache-v2-toolchain-${{ runner.os }}-${{ runner.arch }}-zig-${{ env.ZIG_VERSION }}-api-${{ env.ANDROID_API }}
 
       - name: Create distribution packages
         run: |
@@ -254,6 +485,7 @@ jobs:
             ${{ env.WORK_DIR }}/packages/*.zip
             ${{ env.WORK_DIR }}/packages/*.pkg.tar.xz
             ${{ env.WORK_DIR }}/packages/*.deb
+          if-no-files-found: error
 
       - name: Upload standalone OpenCode artifact
         uses: actions/upload-artifact@v4
@@ -262,11 +494,25 @@ jobs:
           path: ${{ env.WORK_DIR }}/dist/opencode
           if-no-files-found: error
 
+      - name: Save OpenCode resumable checkpoint
+        if: always() && failure()
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: save-checkpoint
+          checkpoint-prefix: ci-cache-v2-recovery-opencode-${{ runner.os }}-${{ runner.arch }}-version-${{ env.OPENCODE_VERSION }}-bun-${{ env.BUN_VERSION }}-opentui-${{ env.OPENTUI_REF }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-patch-${{ hashFiles('opencode/patches/**', 'opentui/patches/opentui/android-libc-link.patch', 'opentui/patches/opentui/android-termux-port.patch') }}-
+          checkpoint-path: |
+            ${{ github.workspace }}/opencode/src
+            ${{ env.WORK_DIR }}
+            ${{ github.workspace }}/opentui/src/opencode/packages/core/src/lib
+            ${{ github.workspace }}/opentui/build
+            ~/.bun
+
       - name: Write CI summary
         if: always()
         env:
           CACHE_DEPENDENCIES: ${{ steps.cache-bun-host.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
-          CACHE_INTERMEDIATES: ${{ steps.cache-opentui.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
+          CACHE_INTERMEDIATES: ${{ steps.cache-opentui-zig.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
         run: source ci/scripts/ci-summary.sh && ci_summary
 
       - name: Cleanup intermediate files

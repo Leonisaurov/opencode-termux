@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Prueba fresh-path + idempotencia del bloque de parche "renderer invariantes"
-# (invariante 1: clamp de codepoint; invariante 2: marcadores de len clamp) que
-# acaba de integrarse en los scripts de build.
+# Prueba fresh-path + idempotencia de los parches de renderer y del bloque de
+# invariantes que los mantiene. El builder legacy de Kilo contiene el bloque
+# Python inline; el builder de OpenTUI aplica el equivalente como parche
+# repository-owned sobre la fuente virgen.
 #
 #   fresh-path:  extrae los fuentes zig FRESCOS (git show HEAD) de cada checkout
 #                de opentui y encadena los bloques python previos del script
@@ -12,10 +13,10 @@
 #                parcheado → no debe producir cambios (diff vacío) y el python
 #                debe reportar "ya parcheado".
 #
-# Uso: .scripts/test-renderer-invariants.sh
+# Uso: opentui/test/test-renderer-invariants.sh
 set -euo pipefail
 
-: "${TMPDIR:=${RUNNER_TEMP:-${PWD}/ci-tmp}}"
+: "${TMPDIR:=/data/data/com.termux/files/usr/tmp}"
 export TMPDIR
 mkdir -p "$TMPDIR"
 test -d "$TMPDIR" && test -w "$TMPDIR"
@@ -139,10 +140,46 @@ print("  idempotencia OK: diff vacío + 'ya parcheado'")
 PYEOF
 }
 
-run_fresh_and_idempotent "$ROOT/kilocode_build.sh" \
+run_fresh_and_idempotent "$ROOT/kilo/scripts/build.sh" \
     "$ROOT/opentui/src/kilo" "kilo-0.3.4"
 
-run_fresh_and_idempotent "$ROOT/opentui/scripts/build-opentui.sh" \
-    "$ROOT/opentui/src/opencode" "opentui-0.4.5"
+run_patch_chain_and_idempotent() {  # $1=src_dir, $2=label, $3...=patches
+    local src="$1" label="$2"
+    shift 2
+    local out="$TMP/$label/source"
+    mkdir -p "$out"
+
+    # Extraer una fuente virgen sin tocar el checkout persistente ni sus parches
+    # locales. Un repositorio temporal permite que git apply compruebe los
+    # mismos paths que usará el workflow.
+    git -C "$src" archive HEAD | tar -xf - -C "$out"
+    git -C "$out" init -q
+
+    echo "=== $label: fresh-path (parches repository-owned) ==="
+    local patch
+    for patch in "$@"; do
+        git -C "$out" apply --check "$ROOT/$patch"
+        git -C "$out" apply "$ROOT/$patch"
+        echo "  aplicado: $patch"
+    done
+
+    echo "=== $label: idempotencia (reverse-check sin modificar) ==="
+    local i
+    for ((i = $#; i > 0; i--)); do
+        patch="${!i}"
+        git -C "$out" apply --reverse --check "$ROOT/$patch"
+    done
+    echo "  idempotencia OK: todos los parches tienen reverse-check limpio"
+}
+
+run_patch_chain_and_idempotent \
+    "$ROOT/opentui/src/opencode" "opentui-0.4.5" \
+    "opentui/patches/opentui/android-libc-link.patch" \
+    "opentui/patches/opentui/android-termux-port.patch"
+
+run_patch_chain_and_idempotent \
+    "$ROOT/opentui/src/kilo" "opentui-0.3.4" \
+    "opentui/patches/opentui/android-termux-port-kilo.patch" \
+    "opentui/patches/opentui/android-termux-build-kilo.patch"
 
 echo "ALL FRESH-PATH + IDEMPOTENCIA TESTS PASSED"

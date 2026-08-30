@@ -14,7 +14,10 @@ export BUN_VERSION
 : "${HOST_BUN_VERSION:=1.3.2}"
 export HOST_BUN_VERSION
 
-: "${TMPDIR:=${RUNNER_TEMP:-${PWD}/ci-tmp}}"
+if [ -n "${GITHUB_ACTIONS:-}" ] && [ -z "${TMPDIR:-}" ] && [ -n "${RUNNER_TEMP:-}" ]; then
+  TMPDIR="$RUNNER_TEMP"
+fi
+: "${TMPDIR:=/data/data/com.termux/files/usr/tmp}"
 export TMPDIR
 mkdir -p "$TMPDIR"
 test -d "$TMPDIR" && test -w "$TMPDIR"

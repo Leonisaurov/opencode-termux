@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import os
+import signal
 import shutil
 import subprocess
 import sys
@@ -77,7 +78,14 @@ def input_digest(args: argparse.Namespace, root: Path) -> tuple[str, list[dict[s
         if not path.is_file():
             raise ValueError(f"dependency manifest does not exist: {raw}")
         manifest = json.loads(path.read_text(encoding="utf-8"))
-        records.append({"kind": "dependency", "name": record_name(path, raw, root), "digest": manifest.get("digest", "")})
+        records.append(
+            {
+                "kind": "dependency",
+                "name": record_name(path, raw, root),
+                "status": str(manifest.get("status", "missing")),
+                "digest": manifest.get("digest", ""),
+            }
+        )
     payload = json.dumps(records, sort_keys=True, separators=(",", ":")).encode()
     return digest_bytes(payload), records
 
@@ -89,6 +97,28 @@ def output_records(args: argparse.Namespace, root: Path) -> list[dict[str, str]]
         if not path.exists():
             raise ValueError(f"required output does not exist: {raw}")
         records.append({"name": record_name(path, raw, root), "digest": digest_path(path)})
+    return records
+
+
+def partial_output_records(args: argparse.Namespace, root: Path) -> list[dict[str, str]]:
+    """Record outputs that exist when a node stops before completion.
+
+    These records are diagnostic and deliberately do not make a failed node
+    reusable. The compiler/build-system directories remain the resumable
+    source of truth; the manifest only explains what was left behind.
+    """
+    records = []
+    for raw in sorted(args.output):
+        path = resolve(raw, root)
+        if path.exists():
+            try:
+                # A failed build may leave a multi-gigabyte output tree or
+                # binary. This field is diagnostic only, so record presence
+                # without walking or hashing it and delaying checkpoint persistence.
+                digest = "present-directory" if path.is_dir() else "present-file"
+                records.append({"name": record_name(path, raw, root), "digest": digest})
+            except OSError:
+                records.append({"name": record_name(path, raw, root), "digest": "unreadable"})
     return records
 
 
@@ -119,8 +149,23 @@ def is_valid(manifest: dict | None, digest: str, outputs: list[dict[str, str]]) 
 def atomic_write(path: Path, value: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    temporary.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    payload = (json.dumps(value, indent=2, sort_keys=True) + "\n").encode()
+    with temporary.open("wb") as stream:
+        stream.write(payload)
+        stream.flush()
+        os.fsync(stream.fileno())
     temporary.replace(path)
+    # The rename is atomic, but syncing the directory also makes the new
+    # manifest survive a runner crash or power loss instead of leaving the
+    # checkpoint one filesystem transaction behind the build tree.
+    try:
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
 
 
 def acquire_lock(state_dir: Path, node: str) -> Path:
@@ -129,7 +174,35 @@ def acquire_lock(state_dir: Path, node: str) -> Path:
     try:
         lock.mkdir()
     except FileExistsError as error:
-        raise RuntimeError(f"node is already being built: {node} ({lock})") from error
+        # A hard runner kill cannot execute `finally`, so a checkpoint may
+        # contain the old directory lock. Reclaim it only when its recorded
+        # owner PID is definitely gone; malformed or live locks remain safe.
+        owner = lock / "owner"
+        stale = False
+        try:
+            fields = dict(
+                line.split("=", 1)
+                for line in owner.read_text(encoding="utf-8").splitlines()
+                if "=" in line
+            )
+            pid = int(fields["pid"])
+            if pid > 0:
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    stale = True
+                except PermissionError:
+                    pass
+        except (OSError, KeyError, ValueError):
+            pass
+        if stale:
+            shutil.rmtree(lock, ignore_errors=True)
+            try:
+                lock.mkdir()
+            except FileExistsError as retry_error:
+                raise RuntimeError(f"node is already being built: {node} ({lock})") from retry_error
+        else:
+            raise RuntimeError(f"node is already being built: {node} ({lock})") from error
     (lock / "owner").write_text(f"pid={os.getpid()}\ntime={time.time()}\n", encoding="utf-8")
     return lock
 
@@ -161,20 +234,91 @@ def run(args: argparse.Namespace) -> int:
         "started_at": int(time.time()),
     }
     atomic_write(manifest_path(state_dir, args.node), manifest)
+    previous_handlers = {}
+    process: subprocess.Popen | None = None
+
+    def mark_interrupted(signum: int, _frame: object) -> None:
+        """Persist a non-reusable marker before a runner terminates us."""
+        try:
+            signal_name = signal.Signals(signum).name
+        except ValueError:
+            signal_name = f"SIG{signum}"
+        if process is not None and process.poll() is None:
+            try:
+                os.killpg(process.pid, signum)
+            except OSError:
+                pass
+        manifest["status"] = "interrupted"
+        manifest["signal"] = signal_name
+        try:
+            manifest["partial_outputs"] = partial_output_records(args, root)
+            atomic_write(manifest_path(state_dir, args.node), manifest)
+        except OSError:
+            pass
+        raise SystemExit(128 + signum)
+
+    # A normal child failure is handled below. SIGTERM/SIGINT need an explicit
+    # marker because a runner cancellation can otherwise leave `building` as
+    # the last state written, even though the compiler directories are useful.
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        previous_handlers[signum] = signal.getsignal(signum)
+        signal.signal(signum, mark_interrupted)
+    command_env = os.environ.copy()
+    command_env.update(
+        {
+            "BUILD_STATE_ACTIVE": "1",
+            "BUILD_STATE_MISS": "1",
+            "BUILD_STATE_NODE": args.node,
+            "BUILD_STATE_DIGEST": digest,
+        }
+    )
     try:
         print(f"BUILD_STATE=miss node={args.node} digest={digest}")
-        result = subprocess.run(args.command, cwd=root, check=False)
-        if result.returncode:
-            manifest["status"] = "failed"
-            manifest["returncode"] = result.returncode
+        process = subprocess.Popen(
+            args.command,
+            cwd=root,
+            env=command_env,
+            start_new_session=True,
+        )
+        returncode = process.wait()
+        if returncode:
+            if returncode < 0:
+                exit_code = 128 - returncode
+                manifest["status"] = "interrupted"
+                manifest["signal"] = signal.Signals(-returncode).name
+            else:
+                exit_code = returncode
+                manifest["status"] = "failed"
+            manifest["returncode"] = exit_code
+            manifest["partial_outputs"] = partial_output_records(args, root)
             atomic_write(manifest_path(state_dir, args.node), manifest)
-            return result.returncode
+            return exit_code
         digest, inputs = input_digest(args, root)
         outputs = output_records(args, root)
         manifest.update({"status": "valid", "digest": digest, "inputs": inputs, "outputs": outputs, "finished_at": int(time.time())})
         atomic_write(manifest_path(state_dir, args.node), manifest)
         return 0
+    except BaseException as error:
+        # A runner cancellation, signal, or exec error can interrupt the child
+        # before it returns a normal status. Keep an explicit checkpoint marker
+        # so the next runner knows the files are resumable, never final.
+        manifest["status"] = "interrupted" if isinstance(error, (KeyboardInterrupt, SystemExit)) else "failed"
+        manifest["error"] = f"{type(error).__name__}: {error}"
+        try:
+            manifest["partial_outputs"] = partial_output_records(args, root)
+            atomic_write(manifest_path(state_dir, args.node), manifest)
+        except OSError:
+            pass
+        raise
     finally:
+        if process is not None and process.poll() is None:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except OSError:
+                pass
+            process.wait()
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
         shutil.rmtree(lock, ignore_errors=True)
 
 
@@ -190,6 +334,47 @@ def check(args: argparse.Namespace) -> int:
     valid = is_valid(manifest, digest, outputs)
     print(f"BUILD_STATE={'valid' if valid else 'invalid'} node={args.node} digest={digest}")
     return 0 if valid else 1
+
+
+def verify(args: argparse.Namespace) -> int:
+    """Verify a valid manifest and every output digest it records.
+
+    This is intentionally independent of the cache key. The key proves that
+    the requested contract was selected; this command proves that the bytes
+    restored under that key still match the state the compiler produced.
+    """
+    root = Path(args.root).resolve()
+    state_dir = resolve(args.state_dir, root)
+    manifest = read_manifest(state_dir, args.node)
+    if not manifest or manifest.get("schema") != SCHEMA or manifest.get("status") != "valid":
+        print(f"BUILD_STATE=invalid node={args.node} reason=manifest", file=sys.stderr)
+        return 1
+    outputs = manifest.get("outputs")
+    if not isinstance(outputs, list) or not outputs:
+        print(f"BUILD_STATE=invalid node={args.node} reason=outputs", file=sys.stderr)
+        return 1
+    seen: set[str] = set()
+    for record in outputs:
+        if not isinstance(record, dict):
+            print(f"BUILD_STATE=invalid node={args.node} reason=output-record", file=sys.stderr)
+            return 1
+        name = record.get("name")
+        expected = record.get("digest")
+        if not isinstance(name, str) or not isinstance(expected, str) or name in seen:
+            print(f"BUILD_STATE=invalid node={args.node} reason=output-record", file=sys.stderr)
+            return 1
+        seen.add(name)
+        path = resolve(name, root)
+        try:
+            path.resolve().relative_to(root)
+        except ValueError:
+            print(f"BUILD_STATE=invalid node={args.node} reason=output-outside-root path={name}", file=sys.stderr)
+            return 1
+        if not path.exists() or digest_path(path) != expected:
+            print(f"BUILD_STATE=invalid node={args.node} reason=output-mismatch path={name}", file=sys.stderr)
+            return 1
+    print(f"BUILD_STATE=verified node={args.node}")
+    return 0
 
 
 def status(args: argparse.Namespace) -> int:
@@ -208,7 +393,7 @@ def status(args: argparse.Namespace) -> int:
 
 def parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["run", "check", "status"])
+    parser.add_argument("command", choices=["run", "check", "verify", "status"])
     parser.add_argument("--root", default=".")
     parser.add_argument("--state-dir", default="build/state")
     parser.add_argument("--node")
@@ -237,6 +422,11 @@ def main() -> int:
         return run(args)
     if args.command == "check":
         return check(args)
+    if args.command == "verify":
+        if not args.node:
+            print("verify requires --node", file=sys.stderr)
+            return 2
+        return verify(args)
     return status(args)
 
 

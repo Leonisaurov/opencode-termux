@@ -126,7 +126,12 @@ cp -r "$DEPS_PREFIX/include/unicode/"* "$WEBKIT_OUTPUT/include/unicode/"
 
 # Create cmakeconfig.h at root of WEBKIT_OUTPUT (needed by SetupWebKit.cmake)
 cp "$WEBKIT_BUILD/cmakeconfig.h" "$WEBKIT_OUTPUT/"
-echo "#define BUN_WEBKIT_VERSION \"${WEBKIT_COMMIT}\"" >> "$WEBKIT_OUTPUT/cmakeconfig.h"
+if grep -q '^#define BUN_WEBKIT_VERSION ' "$WEBKIT_OUTPUT/cmakeconfig.h"; then
+    sed -i "s|^#define BUN_WEBKIT_VERSION .*|#define BUN_WEBKIT_VERSION \"${WEBKIT_COMMIT}\"|" \
+        "$WEBKIT_OUTPUT/cmakeconfig.h"
+else
+    echo "#define BUN_WEBKIT_VERSION \"${WEBKIT_COMMIT}\"" >> "$WEBKIT_OUTPUT/cmakeconfig.h"
+fi
 
 # Set up directory structure that SetupWebKit.cmake expects for WEBKIT_LOCAL
 mkdir -p "$WEBKIT_OUTPUT/JavaScriptCore/Headers/JavaScriptCore"

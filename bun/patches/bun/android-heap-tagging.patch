@@ -1,11 +1,10 @@
 diff --git a/src/main.zig b/src/main.zig
-index 6698634..e9d3e9a 100644
+index c97fe2e..67a3c17 100644
 --- a/src/main.zig
 +++ b/src/main.zig
-@@ -18,4 +18,39 @@ extern fn bun_warn_avx_missing(url: [*:0]const u8) void;
+@@ -20,5 +20,40 @@ extern fn bun_warn_avx_missing(url: [*:0]const u8) void;
  pub extern "c" var _environ: ?*anyopaque;
  pub extern "c" var environ: ?*anyopaque;
-+
 +// bionic mallopt to disable heap pointer tagging (Scudo/TBI). Not in
 +// Zig's stdlib; declared manually. Available since API 31.
 +const M_BIONIC_SET_HEAP_TAGGING_LEVEL: c_int = -204;
@@ -41,4 +40,6 @@ index 6698634..e9d3e9a 100644
 +    if (comptime Environment.isAndroid and builtin.target.cpu.arch.isAARCH64()) {
 +        android_disable_heap_tagging();
 +    }
++
      bun.crash_handler.init();
+     if (Environment.isPosix) {

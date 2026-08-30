@@ -30,8 +30,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-codex-${{ github.ref }}-${{ github.run_id }}
-  cancel-in-progress: true
+  group: build-codex-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   ANDROID_API: '24'
@@ -54,6 +54,13 @@ jobs:
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
+
+      - name: Cache Codex Android NDK
+        id: cache-ndk
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.ANDROID_NDK_HOME }}
+          key: ci-cache-v2-toolchain-${{ runner.os }}-${{ runner.arch }}-ndk-${{ env.ANDROID_NDK_VERSION }}-api-${{ env.ANDROID_API }}
 
       - name: Clone pinned Codex source
         env:
@@ -78,44 +85,106 @@ jobs:
           echo "RUST_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
           export UPSTREAM_COMMIT="$CODEX_RESOLVED_COMMIT" RUST_TOOLCHAIN
           export ANDROID_TRIPLE_API="aarch64-linux-android${ANDROID_API}"
+          CODEX_REL_SRC="${CODEX_SRC#"$GITHUB_WORKSPACE"/}"
           args=(--root "$GITHUB_WORKSPACE" --product codex
             --path codex/scripts/build-codex-android.sh --path ci/scripts/env.sh
-            --path codex/src/codex-rs/Cargo.lock
-            --path codex/src/codex-rs/code-mode-host/build.rs
+            --path .github/workflows/build-codex.yml
+            --path .github/workflows/build-rusty-v8-android.yml
+            --path "$CODEX_REL_SRC/codex-rs/Cargo.lock"
+            --path "$CODEX_REL_SRC/codex-rs/code-mode-host/build.rs"
             --value "CODEX_REF=$CODEX_RESOLVED_COMMIT" --value "V8_VERSION=${{ inputs.v8_version || '150.4.0' }}")
           cache_key="$(python3 ci/scripts/cache-contract.py key "${args[@]}")"
           echo "key=$cache_key" >> "$GITHUB_OUTPUT"
+          echo "commit=$CODEX_RESOLVED_COMMIT" >> "$GITHUB_OUTPUT"
+          echo "rust=$RUST_TOOLCHAIN" >> "$GITHUB_OUTPUT"
 
-      - name: Cache Codex Cargo dependencies
-        id: cache-codex-dependencies
+      - name: Restore Codex final artifacts
+        id: cache-codex-product
         uses: actions/cache/restore@v4
         with:
           path: |
+            codex/artifacts/codex-android
+            codex/artifacts/codex-code-mode-host
+            codex/artifacts/codex-linux-sandbox
+            ${{ env.WORK_DIR }}/state/nodes/codex.json
+          key: ${{ steps.contract.outputs.key }}-artifact
+
+      - name: Validate Codex final artifacts
+        id: validate-codex
+        run: |
+          set -euo pipefail
+          if test -s codex/artifacts/codex-android \
+             && test "$(readelf -h codex/artifacts/codex-android | sed -n 's/^ *Class: *//p')" = ELF64 \
+             && test "$(readelf -h codex/artifacts/codex-android | sed -n 's/^ *Machine: *//p')" = AArch64 \
+             && test -s codex/artifacts/codex-code-mode-host \
+             && test "$(readelf -h codex/artifacts/codex-code-mode-host | sed -n 's/^ *Class: *//p')" = ELF64 \
+             && test "$(readelf -h codex/artifacts/codex-code-mode-host | sed -n 's/^ *Machine: *//p')" = AArch64 \
+             && test -s codex/artifacts/codex-linux-sandbox \
+             && python3 ci/scripts/build-state.py verify --root "$GITHUB_WORKSPACE" \
+                  --state-dir "$WORK_DIR/state" --node codex >/dev/null 2>&1; then
+            echo ready=true >> "$GITHUB_OUTPUT"
+          else
+            echo ready=false >> "$GITHUB_OUTPUT"
+          fi
+
+      # Stable intermediate caches are restored only for a missing final
+      # product and before the per-attempt checkpoint. The checkpoint is
+      # restored last, so it always wins with the most recent partial state.
+      - name: Restore Codex Cargo dependencies
+        if: steps.validate-codex.outputs.ready != 'true'
+        id: cache-codex-dependencies
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: restore-intermediate
+          key: ci-cache-v2-codex-cargo-dependencies-${{ runner.os }}-${{ runner.arch }}-v8-${{ inputs.v8_version || '150.4.0' }}-rust-${{ steps.contract.outputs.rust }}-${{ steps.contract.outputs.key }}
+          restore-prefix: ci-cache-v2-codex-cargo-dependencies-${{ runner.os }}-${{ runner.arch }}-v8-${{ inputs.v8_version || '150.4.0' }}-rust-${{ steps.contract.outputs.rust }}-
+          path: |
             ${{ env.WORK_DIR }}/cache/cargo/registry
             ${{ env.WORK_DIR }}/cache/cargo/git
-          key: ${{ steps.contract.outputs.key }}-dependencies
 
-      - name: Cache Codex Cargo intermediates
+      - name: Restore Codex Cargo intermediates
+        if: steps.validate-codex.outputs.ready != 'true'
         id: cache-codex-intermediates
-        uses: actions/cache/restore@v4
+        uses: ./ci/actions/incremental-cache
         with:
+          mode: restore-intermediate
+          key: ci-cache-v2-codex-cargo-target-${{ runner.os }}-${{ runner.arch }}-v8-${{ inputs.v8_version || '150.4.0' }}-rust-${{ steps.contract.outputs.rust }}-api-${{ env.ANDROID_API }}-${{ steps.contract.outputs.key }}
+          restore-prefix: ci-cache-v2-codex-cargo-target-${{ runner.os }}-${{ runner.arch }}-v8-${{ inputs.v8_version || '150.4.0' }}-rust-${{ steps.contract.outputs.rust }}-api-${{ env.ANDROID_API }}-
           path: ${{ env.WORK_DIR }}/codex-target
-          key: ${{ steps.contract.outputs.key }}-intermediates
 
-      - name: Cache Codex compiler objects
+      - name: Restore Codex compiler objects
+        if: steps.validate-codex.outputs.ready != 'true'
         id: cache-codex-compiler
-        uses: actions/cache/restore@v4
+        uses: ./ci/actions/incremental-cache
         with:
+          mode: restore-intermediate
+          key: ci-cache-v2-codex-compiler-${{ runner.os }}-${{ runner.arch }}-rust-${{ steps.contract.outputs.rust }}-api-${{ env.ANDROID_API }}-${{ steps.contract.outputs.key }}
+          restore-prefix: ci-cache-v2-codex-compiler-${{ runner.os }}-${{ runner.arch }}-rust-${{ steps.contract.outputs.rust }}-api-${{ env.ANDROID_API }}-
           path: ${{ env.WORK_DIR }}/sccache
-          key: ${{ steps.contract.outputs.key }}-compiler
+
+      - name: Restore Codex resumable checkpoint
+        if: steps.cache-codex-product.outputs.cache-hit != 'true' || steps.validate-codex.outputs.ready != 'true'
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: restore-checkpoint
+          checkpoint-prefix: ci-cache-v2-recovery-codex-${{ runner.os }}-${{ runner.arch }}-commit-${{ steps.contract.outputs.commit }}-v8-${{ inputs.v8_version || '150.4.0' }}-rust-${{ steps.contract.outputs.rust }}-api-${{ env.ANDROID_API }}-contract-${{ steps.contract.outputs.key }}-
+          checkpoint-path: |
+            ${{ env.ANDROID_NDK_HOME }}
+            ${{ env.WORK_DIR }}/codex-target
+            ${{ env.WORK_DIR }}/sccache
+            ${{ env.WORK_DIR }}/cache/cargo/registry
+            ${{ env.WORK_DIR }}/cache/cargo/git
+            ${{ env.WORK_DIR }}/state/nodes
 
       - name: Download verified Rusty V8 artifact
+        if: steps.validate-codex.outputs.ready != 'true'
         uses: actions/download-artifact@v4
         with:
           name: rusty-v8-${{ inputs.v8_version || '150.4.0' }}-ptrcomp-sandbox-aarch64-linux-android
           path: ${{ env.WORK_DIR }}/rusty-v8
 
       - name: Export Rusty V8 paths
+        if: steps.validate-codex.outputs.ready != 'true'
         run: |
           set -euo pipefail
           ARCHIVE="$(find "$WORK_DIR/rusty-v8" -name 'librusty_v8_*.a.gz' -print -quit)"
@@ -124,16 +193,27 @@ jobs:
           echo "RUSTY_V8_ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
           echo "RUSTY_V8_SRC_BINDING_PATH=$BINDING" >> "$GITHUB_ENV"
 
+      - name: Verify Rusty V8 artifact manifest
+        if: steps.validate-codex.outputs.ready != 'true'
+        run: |
+          set -euo pipefail
+          MANIFEST="$(find "$WORK_DIR/rusty-v8" -type f -name '*.sha256' -print -quit)"
+          test -n "$MANIFEST"
+          (cd "$(dirname "$MANIFEST")" && sha256sum -c "$(basename "$MANIFEST")")
+
       - name: Install build dependencies and NDK
+        if: steps.validate-codex.outputs.ready != 'true'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq build-essential cmake perl pkg-config m4 zip unzip file protobuf-compiler
           source ci/scripts/setup-runner.sh
 
       - name: Enable zram swap
+        if: steps.validate-codex.outputs.ready != 'true'
         uses: ./ci/actions/zram
 
       - name: Install Rust Android target
+        if: steps.validate-codex.outputs.ready != 'true'
         working-directory: ${{ env.WORK_DIR }}/codex-src/codex-rs
         run: |
           set -euo pipefail
@@ -144,6 +224,7 @@ jobs:
           rustup target list --installed --toolchain "$RUST_TOOLCHAIN" | grep -Fx aarch64-linux-android
 
       - name: Install sccache
+        if: steps.validate-codex.outputs.ready != 'true'
         run: |
           set -euo pipefail
           SCCACHE_VERSION="v0.8.2"
@@ -155,34 +236,84 @@ jobs:
           echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
 
       - name: Build Codex CLI and code-mode host
+        if: steps.validate-codex.outputs.ready != 'true'
         run: source ci/scripts/env.sh && ./codex/scripts/build-codex-android.sh
 
       # Preserve useful Cargo/sccache work when the final linker fails.
       - name: Save Codex Cargo dependencies (best effort)
-        if: always() && steps.cache-codex-dependencies.outputs.cache-hit != 'true'
+        if: success() && steps.validate-codex.outputs.ready != 'true' && steps.cache-codex-dependencies.outputs.cache-hit != 'true'
         continue-on-error: true
-        uses: actions/cache/save@v4
+        uses: ./ci/actions/incremental-cache
         with:
+          mode: save-intermediate
           path: |
             ${{ env.WORK_DIR }}/cache/cargo/registry
             ${{ env.WORK_DIR }}/cache/cargo/git
-          key: ${{ steps.contract.outputs.key }}-dependencies
+          key: ci-cache-v2-codex-cargo-dependencies-${{ runner.os }}-${{ runner.arch }}-v8-${{ inputs.v8_version || '150.4.0' }}-rust-${{ steps.contract.outputs.rust }}-${{ steps.contract.outputs.key }}
 
       - name: Save Codex Cargo intermediates (best effort)
-        if: always() && steps.cache-codex-intermediates.outputs.cache-hit != 'true'
+        if: success() && steps.validate-codex.outputs.ready != 'true' && steps.cache-codex-intermediates.outputs.cache-hit != 'true'
         continue-on-error: true
-        uses: actions/cache/save@v4
+        uses: ./ci/actions/incremental-cache
         with:
+          mode: save-intermediate
           path: ${{ env.WORK_DIR }}/codex-target
-          key: ${{ steps.contract.outputs.key }}-intermediates
+          key: ci-cache-v2-codex-cargo-target-${{ runner.os }}-${{ runner.arch }}-v8-${{ inputs.v8_version || '150.4.0' }}-rust-${{ steps.contract.outputs.rust }}-api-${{ env.ANDROID_API }}-${{ steps.contract.outputs.key }}
 
       - name: Save Codex compiler objects (best effort)
-        if: always() && steps.cache-codex-compiler.outputs.cache-hit != 'true'
+        if: success() && steps.validate-codex.outputs.ready != 'true' && steps.cache-codex-compiler.outputs.cache-hit != 'true'
         continue-on-error: true
-        uses: actions/cache/save@v4
+        uses: ./ci/actions/incremental-cache
         with:
+          mode: save-intermediate
           path: ${{ env.WORK_DIR }}/sccache
-          key: ${{ steps.contract.outputs.key }}-compiler
+          key: ci-cache-v2-codex-compiler-${{ runner.os }}-${{ runner.arch }}-rust-${{ steps.contract.outputs.rust }}-api-${{ env.ANDROID_API }}-${{ steps.contract.outputs.key }}
+
+      - name: Validate Codex outputs for durable cache
+        if: always()
+        id: final-codex
+        run: |
+          set -euo pipefail
+          ndk=false
+          if [ "${{ steps.validate-codex.outputs.ready }}" = true ] \
+             || test -x "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${ANDROID_API}-clang"; then
+            ndk=true
+          fi
+          echo "ndk_ready=$ndk" >> "$GITHUB_OUTPUT"
+          if test -s codex/artifacts/codex-android \
+             && test -s codex/artifacts/codex-code-mode-host \
+             && test -s codex/artifacts/codex-linux-sandbox \
+             && test "$ndk" = true \
+             && python3 ci/scripts/build-state.py verify --root "$GITHUB_WORKSPACE" \
+                  --state-dir "$WORK_DIR/state" --node codex >/dev/null 2>&1; then
+            echo ready=true >> "$GITHUB_OUTPUT"
+          else
+            echo ready=false >> "$GITHUB_OUTPUT"
+            echo "ERROR: Codex outputs or state manifest are not valid." >&2
+            exit 1
+          fi
+
+      - name: Save Codex Android NDK cache
+        if: always() && steps.validate-codex.outputs.ready != 'true' && steps.final-codex.outputs.ndk_ready == 'true' && steps.cache-ndk.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: save-final
+          path: ${{ env.ANDROID_NDK_HOME }}
+          key: ci-cache-v2-toolchain-${{ runner.os }}-${{ runner.arch }}-ndk-${{ env.ANDROID_NDK_VERSION }}-api-${{ env.ANDROID_API }}
+
+      - name: Save Codex durable artifacts
+        if: success() && steps.cache-codex-product.outputs.cache-hit != 'true' && steps.final-codex.outputs.ready == 'true'
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: save-final
+          path: |
+            codex/artifacts/codex-android
+            codex/artifacts/codex-code-mode-host
+            codex/artifacts/codex-linux-sandbox
+            ${{ env.WORK_DIR }}/state/nodes/codex.json
+          key: ${{ steps.contract.outputs.key }}-artifact
 
       - name: Upload Codex binaries
         uses: actions/upload-artifact@v4
@@ -193,6 +324,21 @@ jobs:
             codex/artifacts/codex-code-mode-host
             codex/artifacts/codex-linux-sandbox
           if-no-files-found: error
+
+      - name: Save Codex resumable checkpoint
+        if: always() && failure()
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: save-checkpoint
+          checkpoint-prefix: ci-cache-v2-recovery-codex-${{ runner.os }}-${{ runner.arch }}-commit-${{ steps.contract.outputs.commit }}-v8-${{ inputs.v8_version || '150.4.0' }}-rust-${{ steps.contract.outputs.rust }}-api-${{ env.ANDROID_API }}-contract-${{ steps.contract.outputs.key }}-
+          checkpoint-path: |
+            codex/artifacts
+            ${{ env.WORK_DIR }}/codex-target
+            ${{ env.WORK_DIR }}/sccache
+            ${{ env.WORK_DIR }}/cache/cargo/registry
+            ${{ env.WORK_DIR }}/cache/cargo/git
+            ${{ env.WORK_DIR }}/state/nodes
 
       - name: Write CI summary
         if: always()

@@ -13,6 +13,7 @@ import subprocess
 from pathlib import PurePosixPath
 
 PRODUCTS = ("bun", "opentui", "opencode", "kilo", "codex")
+GRAPH_PRODUCTS = ("core", "opentui", "bun", "opencode", "kilo", "rusty_v8", "codex")
 
 
 def classify(paths: list[str]) -> set[str]:
@@ -27,6 +28,37 @@ def classify(paths: list[str]) -> set[str]:
         if parts[0] in PRODUCTS:
             changed.add(parts[0])
     return changed
+
+
+def affected_products(changed: set[str]) -> set[str]:
+    """Expand direct changes into the same-run producer dependency graph.
+
+    The orchestrator passes artifacts between jobs in one run. A consumer
+    therefore cannot run alone when one of its producers is selected: the
+    producer must be selected as well. This is deliberately conservative for
+    Bun and OpenTUI because both runtimes are embedded into standalone outputs.
+    """
+    if not changed:
+        return set()
+    if set(PRODUCTS).issubset(changed):
+        return set(GRAPH_PRODUCTS)
+
+    affected: set[str] = set()
+    if "bun" in changed:
+        # OpenCode always consumes an OpenTUI artifact from this run, even
+        # when the OpenTUI source itself did not change. Selecting the
+        # producer avoids a skipped `needs` edge; its exact cache normally
+        # makes this a no-op.
+        affected.update({"core", "bun", "opentui", "opencode", "kilo"})
+    if "opentui" in changed:
+        affected.update({"core", "bun", "opentui", "opencode", "kilo"})
+    if "opencode" in changed:
+        affected.update({"core", "bun", "opentui", "opencode"})
+    if "kilo" in changed:
+        affected.update({"core", "bun", "kilo"})
+    if "codex" in changed:
+        affected.update({"rusty_v8", "codex"})
+    return affected
 
 
 def changed_paths(root: str, base: str, head: str) -> list[str]:
@@ -49,13 +81,21 @@ def main() -> int:
     parser.add_argument("--base", default="HEAD^")
     parser.add_argument("--head", default="HEAD")
     parser.add_argument("--format", choices=["plain", "github"], default="plain")
+    parser.add_argument(
+        "--graph",
+        action="store_true",
+        help="emit producer/consumer closure for the Android workflow DAG",
+    )
     args = parser.parse_args()
-    products = sorted(classify(changed_paths(args.root, args.base, args.head)))
+    direct = classify(changed_paths(args.root, args.base, args.head))
+    products = sorted(affected_products(direct) if args.graph else direct)
     value = ",".join(products)
     if args.format == "github":
         print(f"changed_products={value}")
-        for product in PRODUCTS:
-            print(f"changed_{product}={'true' if product in products else 'false'}")
+        prefix = "build_" if args.graph else "changed_"
+        names = GRAPH_PRODUCTS if args.graph else PRODUCTS
+        for product in names:
+            print(f"{prefix}{product}={'true' if product in products else 'false'}")
     else:
         print(value or "none")
     return 0

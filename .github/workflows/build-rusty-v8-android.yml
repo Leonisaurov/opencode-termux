@@ -53,8 +53,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-rusty-v8-${{ inputs.v8_version }}-${{ github.run_id }}
-  cancel-in-progress: true
+  group: build-rusty-v8-${{ github.ref }}-${{ inputs.v8_version || '150.4.0' }}
+  cancel-in-progress: false
 
 jobs:
   build-android:
@@ -167,10 +167,10 @@ jobs:
 
       - name: Cache Chromium host sysroot
         id: cache-sysroot
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: upstream-rusty-v8/build/linux/debian_bullseye_amd64-sysroot
-          key: rusty-v8-sysroot-${{ inputs.v8_version || '150.4.0' }}-debian-bullseye-amd64
+          key: ci-cache-v2-rusty-v8-sysroot-${{ inputs.v8_version || '150.4.0' }}-debian-bullseye-amd64
 
       - name: Install Chromium host sysroot
         if: steps.cache-sysroot.outputs.cache-hit != 'true'
@@ -193,37 +193,15 @@ jobs:
           export UPSTREAM_COMMIT="$(git -C upstream-rusty-v8 rev-parse HEAD)"
           export ANDROID_API=24 ANDROID_NDK_VERSION=r26c ANDROID_TRIPLE_API=aarch64-linux-android24 ZIG_VERSION=none
           args=(--root "$GITHUB_WORKSPACE" --product rusty-v8
+            --path .github/workflows/build-rusty-v8-android.yml
             --path upstream-rusty-v8/git_submodule_status.txt
             --path upstream-rusty-v8/Cargo.lock --path upstream-rusty-v8/build.rs
+            --path upstream-rusty-v8/build/config/android/BUILD.gn
+            --path upstream-rusty-v8/build/config/android/config.gni
+            --path upstream-rusty-v8/third_party/libc++/src/include/__mbstate_t.h
             --value "V8_VERSION=${{ inputs.v8_version || '150.4.0' }}")
           cache_key="$(python3 ci/scripts/cache-contract.py key "${args[@]}")"
           echo "key=$cache_key" >> "$GITHUB_OUTPUT"
-
-      - name: Cache Rusty V8 Cargo dependencies
-        id: cache-v8-dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ steps.contract.outputs.key }}-dependencies
-
-      # ── Cache del build desde fuente ──
-      # third_party = NDK r26c + clang que el build.rs descarga; gn_out = salida
-      # de la compilación de V8; build = clang de Chromium descargado por el
-      # build.rs + src_binding.rs generado (build_dir a 2 niveles sobre OUT_DIR);
-      # sccache = cache de objetos C++/Rust.
-      - name: Cache V8 source build (NDK + clang + gn_out + build + sccache)
-        id: cache-v8
-        uses: actions/cache@v4
-        with:
-          path: |
-            upstream-rusty-v8/third_party
-            upstream-rusty-v8/build/linux/debian_bullseye_amd64-sysroot
-            upstream-rusty-v8/target/aarch64-linux-android/release/gn_out
-            upstream-rusty-v8/target/aarch64-linux-android/release/build
-            upstream-rusty-v8/target/sccache
-          key: ${{ steps.contract.outputs.key }}-intermediates
 
       - name: Restore validated Rusty V8 artifact
         id: cache-v8-artifact
@@ -245,21 +223,66 @@ jobs:
             echo "ready=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # Reuse Cargo/V8 state from a compatible version, then overlay the
+      # newest per-attempt checkpoint. Cargo, GN and Ninja retain their own
+      # fingerprints, so a small source change rebuilds only affected units.
+      - name: Restore Rusty V8 Cargo dependencies
+        if: steps.validate-v8.outputs.ready != 'true'
+        id: cache-v8-dependencies
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: restore-intermediate
+          key: ci-cache-v2-rusty-v8-cargo-${{ runner.os }}-${{ runner.arch }}-v8-${{ inputs.v8_version || '150.4.0' }}-rust-1.91.0-${{ steps.contract.outputs.key }}
+          restore-prefix: ci-cache-v2-rusty-v8-cargo-${{ runner.os }}-${{ runner.arch }}-v8-${{ inputs.v8_version || '150.4.0' }}-rust-1.91.0-
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+
+      # Submodules are checked out before this cache is restored. Keep the
+      # current checkout's patched third_party tree authoritative; only reuse
+      # generated Cargo/GN output and compiler objects here.
+      - name: Restore Rusty V8 build intermediates
+        if: steps.validate-v8.outputs.ready != 'true'
+        id: cache-v8
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: restore-intermediate
+          key: ci-cache-v2-rusty-v8-intermediates-${{ runner.os }}-${{ runner.arch }}-v8-${{ inputs.v8_version || '150.4.0' }}-api-24-ndk-r26c-rust-1.91.0-${{ steps.contract.outputs.key }}
+          restore-prefix: ci-cache-v2-rusty-v8-intermediates-${{ runner.os }}-${{ runner.arch }}-v8-${{ inputs.v8_version || '150.4.0' }}-api-24-ndk-r26c-rust-1.91.0-
+          path: |
+            upstream-rusty-v8/build/linux/debian_bullseye_amd64-sysroot
+            upstream-rusty-v8/target/aarch64-linux-android/release
+            upstream-rusty-v8/target/sccache
+
+      - name: Restore Rusty V8 resumable checkpoint
+        if: steps.validate-v8.outputs.ready != 'true'
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: restore-checkpoint
+          checkpoint-prefix: ci-cache-v2-recovery-rusty-v8-${{ runner.os }}-${{ runner.arch }}-v8-${{ inputs.v8_version || '150.4.0' }}-api-24-ndk-r26c-rust-1.91.0-contract-${{ steps.contract.outputs.key }}-
+          checkpoint-path: |
+            upstream-rusty-v8/third_party
+            upstream-rusty-v8/build/linux/debian_bullseye_amd64-sysroot
+            upstream-rusty-v8/target
+            ~/.cargo/registry
+            ~/.cargo/git
+            dist
+
       # These packages/toolchains are needed only on a cold or invalid V8 cache.
       - name: Install build dependencies
-        if: steps.cache-v8.outputs.cache-hit != 'true' || steps.validate-v8.outputs.ready != 'true'
+        if: steps.validate-v8.outputs.ready != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y python3 curl git unzip util-linux kmod gpg zstd libglib2.0-dev libclang-19-dev
           echo "LIBCLANG_PATH=/usr/lib/llvm-19/lib" >> "$GITHUB_ENV"
 
       - name: Enable zram swap
-        if: steps.cache-v8.outputs.cache-hit != 'true' || steps.validate-v8.outputs.ready != 'true'
+        if: steps.validate-v8.outputs.ready != 'true'
         uses: ./ci/actions/zram
 
       # ── Toolchain Rust del crate v8 150.4.0 (rustup channel del repo) ──
       - name: Install Rust 1.91.0 + android target
-        if: steps.cache-v8.outputs.cache-hit != 'true' || steps.validate-v8.outputs.ready != 'true'
+        if: steps.validate-v8.outputs.ready != 'true'
         run: |
           rustup toolchain install 1.91.0 --profile minimal
           rustup target add --toolchain 1.91.0 aarch64-linux-android
@@ -267,7 +290,7 @@ jobs:
       # ── sccache (release binario de mozilla, más rápido que cargo install) ──
       # SCCACHE_DIR va DENTRO del checkout para incluirlo en el cache key.
       - name: Install sccache
-        if: steps.cache-v8.outputs.cache-hit != 'true' || steps.validate-v8.outputs.ready != 'true'
+        if: steps.validate-v8.outputs.ready != 'true'
         run: |
           set -euo pipefail
           SCCACHE_VERSION="v0.8.2"
@@ -281,7 +304,7 @@ jobs:
 
       # ── Build desde fuente (30-90 min en frío) ──
       - name: Build rusty_v8 sandbox from source
-        if: steps.cache-v8.outputs.cache-hit != 'true' || steps.validate-v8.outputs.ready != 'true'
+        if: steps.validate-v8.outputs.ready != 'true'
         env:
           V8_FROM_SOURCE: "1"
           SCCACHE_IDLE_TIMEOUT: "0"
@@ -307,7 +330,7 @@ jobs:
       # target/<TARGET>/release/gn_out/obj/. Se busca con find en ambos árboles
       # (fallback al primer candidato bajo release) con fail-fast informativo.
       - name: Stage sandbox release pair
-        if: steps.cache-v8.outputs.cache-hit != 'true' || steps.validate-v8.outputs.ready != 'true'
+        if: steps.validate-v8.outputs.ready != 'true'
         run: |
           set -euo pipefail
           TARGET="aarch64-linux-android"
@@ -373,20 +396,69 @@ jobs:
           test -s dist/*.sha256
           (cd dist && sha256sum -c ./*.sha256)
 
+      - name: Save Rusty V8 sysroot cache
+        if: success() && steps.cache-sysroot.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: save-final
+          path: upstream-rusty-v8/build/linux/debian_bullseye_amd64-sysroot
+          key: ci-cache-v2-rusty-v8-sysroot-${{ inputs.v8_version || '150.4.0' }}-debian-bullseye-amd64
+
+      - name: Save Rusty V8 Cargo dependency cache
+        if: success() && steps.validate-v8.outputs.ready != 'true' && steps.cache-v8-dependencies.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: save-intermediate
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ci-cache-v2-rusty-v8-cargo-${{ runner.os }}-${{ runner.arch }}-v8-${{ inputs.v8_version || '150.4.0' }}-rust-1.91.0-${{ steps.contract.outputs.key }}
+
+      - name: Save Rusty V8 source build cache
+        if: success() && steps.cache-v8.outputs.cache-hit != 'true' && steps.validate-v8.outputs.ready != 'true'
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: save-intermediate
+          path: |
+            upstream-rusty-v8/build/linux/debian_bullseye_amd64-sysroot
+            upstream-rusty-v8/target/aarch64-linux-android/release
+            upstream-rusty-v8/target/sccache
+          key: ci-cache-v2-rusty-v8-intermediates-${{ runner.os }}-${{ runner.arch }}-v8-${{ inputs.v8_version || '150.4.0' }}-api-24-ndk-r26c-rust-1.91.0-${{ steps.contract.outputs.key }}
+
       # ── Artifact (debug / descarga manual si no se quiere Release) ──
       - name: Upload artifact (debug)
         uses: actions/upload-artifact@v4
         with:
-          name: rusty-v8-${{ inputs.v8_version }}-ptrcomp-sandbox-aarch64-linux-android
+          name: rusty-v8-${{ inputs.v8_version || '150.4.0' }}-ptrcomp-sandbox-aarch64-linux-android
           path: dist/*
           if-no-files-found: error
 
       - name: Save validated Rusty V8 artifact cache
         if: success() && steps.validate-v8.outputs.ready != 'true' && steps.cache-v8-artifact.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
         with:
+          mode: save-final
           path: dist
           key: ${{ steps.contract.outputs.key }}-artifact
+
+      - name: Save Rusty V8 resumable checkpoint
+        if: always() && failure()
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: save-checkpoint
+          checkpoint-prefix: ci-cache-v2-recovery-rusty-v8-${{ runner.os }}-${{ runner.arch }}-v8-${{ inputs.v8_version || '150.4.0' }}-api-24-ndk-r26c-rust-1.91.0-contract-${{ steps.contract.outputs.key }}-
+          checkpoint-path: |
+            upstream-rusty-v8/third_party
+            upstream-rusty-v8/build/linux/debian_bullseye_amd64-sysroot
+            upstream-rusty-v8/target
+            ~/.cargo/registry
+            ~/.cargo/git
+            dist
 
       - name: Write CI summary
         if: always()

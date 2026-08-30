@@ -37,8 +37,9 @@ if [ ! -d "$ICU_SRC/source" ]; then
     rm -f "$ICU_TARBALL"
 fi
 
-# Build host ICU tools first (required for cross-build)
-if [ ! -f "$ICU_HOST_BUILD/bin/icupkg" ]; then
+# Build host ICU tools first (required for cross-build). Reconfigure on a state
+# miss, but let make reuse every object that is still current.
+if [ "${BUILD_STATE_MISS:-0}" = "1" ] || [ ! -f "$ICU_HOST_BUILD/bin/icupkg" ]; then
     echo ">>> Building host ICU tools..."
     mkdir -p "$ICU_HOST_BUILD"
     cd "$ICU_HOST_BUILD"
@@ -49,8 +50,10 @@ else
     echo ">>> Host ICU tools already built"
 fi
 
-# Cross-compile ICU for Android
-if [ ! -f "$DEPS_PREFIX/lib/libicuuc.a" ]; then
+# Cross-compile ICU for Android. A state miss means the contract changed; the
+# existing build directory is intentionally retained so make can relink or
+# rebuild only affected translation units.
+if [ "${BUILD_STATE_MISS:-0}" = "1" ] || [ ! -f "$DEPS_PREFIX/lib/libicuuc.a" ]; then
     echo ">>> Cross-compiling ICU for Android aarch64..."
     mkdir -p "$ICU_ANDROID_BUILD"
     cd "$ICU_ANDROID_BUILD"

@@ -20,6 +20,9 @@ def main() -> None:
     assert MODULE.classify(["ci/scripts/env.sh"]) == set(MODULE.PRODUCTS)
     assert MODULE.classify([".github/workflows/build-bun.yml"]) == set(MODULE.PRODUCTS)
     assert MODULE.classify(["README.md"]) == set()
+    assert MODULE.affected_products({"bun"}) == {"core", "bun", "opentui", "opencode", "kilo"}
+    assert MODULE.affected_products({"codex"}) == {"rusty_v8", "codex"}
+    assert MODULE.affected_products(set(MODULE.PRODUCTS)) == set(MODULE.GRAPH_PRODUCTS)
     print("changed-products tests: OK")
 
 

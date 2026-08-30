@@ -4,18 +4,19 @@
 
 set -euo pipefail
 
-# Termux owns the process temporary directory. Validate it before any build
-# helper or compiler is allowed to create temporary files.
-if [ -n "${GITHUB_ACTIONS:-}" ]; then
-  : "${TMPDIR:=${RUNNER_TEMP:-${REPO_ROOT:-.}/build/tmp}}"
-else
-  : "${TMPDIR:=/data/data/com.termux/files/usr/tmp}"
+export REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+# Termux owns the process temporary directory. GitHub Actions supplies its
+# runner-managed equivalent; otherwise use the canonical Termux directory.
+# Validate it before any build helper or compiler is allowed to create files.
+if [ -n "${GITHUB_ACTIONS:-}" ] && [ -z "${TMPDIR:-}" ] && [ -n "${RUNNER_TEMP:-}" ]; then
+  TMPDIR="$RUNNER_TEMP"
 fi
+: "${TMPDIR:=/data/data/com.termux/files/usr/tmp}"
 export TMPDIR
 mkdir -p "$TMPDIR"
 test -d "$TMPDIR" && test -w "$TMPDIR"
 
-export REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export PRODUCT="${PRODUCT:-opencode}"
 export PRODUCT_ROOT="${PRODUCT_ROOT:-$REPO_ROOT/$PRODUCT}"
 
@@ -89,7 +90,7 @@ echo "Target:        ${ANDROID_TRIPLE}"
 echo "Bun version:   ${BUN_VERSION}"
 echo "WebKit commit: ${WEBKIT_COMMIT}"
 echo "OpenCode ver:  ${OPENCODE_VERSION}"
-echo "Cache schema:  ci-cache-v1"
+echo "Cache schema:  ci-cache-v2"
 echo "Jobs:          ${JOBS}"
 echo "==========================================="
 

@@ -123,10 +123,24 @@ With warm caches (WebKit + Bun cached), CI runs complete in ~4 minutes.
 Use CI workflows for builds; do not launch the multi-hour toolchain locally.
 For static inspection, use `ci/scripts/build-pipeline.sh` only when needed and
 `python3 ci/scripts/build-state.py status` for manifests under each product's
-`build/state`.
-shows their current state. The engine hashes sources, toolchain/version values,
-dependencies, and outputs, so a no-op preserves compiler caches while a changed
-leaf invalidates only its descendants.
+`build/state`; it shows their current state. The engine hashes sources,
+toolchain/version values, dependencies, and outputs, so a no-op preserves
+compiler caches while a changed leaf invalidates only its descendants.
+
+Every long-running workflow has three cache layers. An exact key contains only
+a validated final output; a versioned intermediate key contains reusable source,
+Cargo/Zig/ccache/compiler state and is restored by a stable compatibility prefix;
+and a failure checkpoint contains the complete resumable tree plus the node
+manifest. Intermediate keys are written only from a validated stage, while the
+checkpoint key is immutable per run attempt and is restored by prefix on the
+next run. Its prefix includes the relevant source-patch fingerprint, preventing
+a partially patched checkout from crossing a patch revision. A partial manifest
+is never accepted as a final artifact; the native build system (Cargo,
+Ninja/CMake, or Zig) decides which translation units still need work. The exact
+contract also fingerprints the cache engine itself, so a
+validator or checkpoint-policy change cannot bless an artifact made by older
+cache logic. ICU, WebKit, TinyCC, and Bun checkpoints are separate so progress
+in one stage cannot overwrite a valid result from another stage.
 
 Codex follows the same dependency rule in CI: `build-codex.yml` calls the
 reusable Rusty V8 workflow first, downloads its verified artifact, and only

@@ -18,8 +18,20 @@ import sys
 from pathlib import Path
 
 
-SCHEMA = "ci-cache-v1"
+SCHEMA = "ci-cache-v2"
 CHUNK = 1024 * 1024
+
+# Cache correctness depends on the code that computes and validates the
+# contract, not just on the product sources. Keep these files in every exact
+# contract so changing cache semantics cannot resurrect an artifact created by
+# an older validator or state runner. Stable intermediate restore prefixes do
+# not include the contract digest on purpose: native build systems can still
+# reuse compatible object files after a cache-engine change.
+ENGINE_PATHS = (
+    "ci/scripts/cache-contract.py",
+    "ci/scripts/build-state.py",
+    "ci/actions/incremental-cache/action.yml",
+)
 
 
 def sha256(path: Path) -> str:
@@ -62,6 +74,10 @@ def contract(root: Path, product: str, paths: list[str], values: list[str]) -> d
         "rust": value("RUST_TOOLCHAIN", "unknown"),
         "upstream": value("UPSTREAM_COMMIT", value("WEBKIT_COMMIT")),
         "values": dict(item.split("=", 1) for item in values),
+        "cache_engine": {
+            path: path_digest((root / path).resolve())
+            for path in ENGINE_PATHS
+        },
         "paths": {
             path: path_digest((root / path).resolve())
             for path in sorted(set(paths))

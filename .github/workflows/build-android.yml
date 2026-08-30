@@ -41,38 +41,89 @@ permissions:
 
 concurrency:
   group: stack-release-${{ github.event.inputs.release || github.ref }}
-  cancel-in-progress: true
+  # Let an active build publish its recovery checkpoints; newer pending runs
+  # still supersede older pending runs in this concurrency group.
+  cancel-in-progress: false
 
 jobs:
+  detect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      core: ${{ steps.changes.outputs.build_core }}
+      opentui: ${{ steps.changes.outputs.build_opentui }}
+      bun: ${{ steps.changes.outputs.build_bun }}
+      opencode: ${{ steps.changes.outputs.build_opencode }}
+      kilo: ${{ steps.changes.outputs.build_kilo }}
+      rusty_v8: ${{ steps.changes.outputs.build_rusty_v8 }}
+      codex: ${{ steps.changes.outputs.build_codex }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Detect affected producer graph
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.before || '' }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            echo 'changed_products=manual' >> "$GITHUB_OUTPUT"
+            for product in core opentui bun opencode kilo rusty_v8 codex; do
+              echo "build_${product}=true" >> "$GITHUB_OUTPUT"
+            done
+            exit 0
+          fi
+
+          base="${BASE_SHA:-}"
+          case "$base" in
+            ''|0000000000000000000000000000000000000000)
+              base='HEAD^'
+              ;;
+          esac
+          python3 ci/scripts/changed-products.py \
+            --root "$GITHUB_WORKSPACE" --base "$base" --head HEAD \
+            --format github --graph >> "$GITHUB_OUTPUT"
+
   core:
+    needs: detect
+    if: needs.detect.outputs.core == 'true'
     uses: ./.github/workflows/build-core.yml
     secrets: inherit
   opentui:
+    needs: detect
+    if: needs.detect.outputs.opentui == 'true'
     uses: ./.github/workflows/build-opentui.yml
     with:
       opentui_ref: ${{ inputs.opentui_ref || '9eabce704096837148d935554fcae9c19e6e21f4' }}
     secrets: inherit
   bun:
-    needs: core
+    needs: [detect, core]
+    if: needs.detect.outputs.bun == 'true'
     uses: ./.github/workflows/build-bun.yml
     with:
       bun_version: ${{ inputs.bun_version || '1.2.13' }}
     secrets: inherit
   rusty-v8:
+    needs: detect
+    if: needs.detect.outputs.rusty_v8 == 'true'
     uses: ./.github/workflows/build-rusty-v8-android.yml
     with:
       v8_version: ${{ inputs.v8_version || '150.4.0' }}
     secrets: inherit
   opencode:
-    needs: [bun, opentui]
+    needs: [detect, bun, opentui]
+    if: needs.detect.outputs.opencode == 'true'
     uses: ./.github/workflows/build-opencode.yml
     with:
+      bun_version: ${{ inputs.bun_version || '1.2.13' }}
       opentui_ref: ${{ inputs.opentui_ref || '9eabce704096837148d935554fcae9c19e6e21f4' }}
       opencode_version: ${{ inputs.opencode_version || '1.3.13' }}
       require_dependency_artifacts: true
     secrets: inherit
   kilo:
-    needs: bun
+    needs: [detect, bun]
+    if: needs.detect.outputs.kilo == 'true'
     uses: ./.github/workflows/build-kilo.yml
     with:
       use_existing_bun: true
@@ -80,7 +131,8 @@ jobs:
       kilo_version: ${{ inputs.kilo_version || '7.4.20' }}
     secrets: inherit
   codex:
-    needs: rusty-v8
+    needs: [detect, rusty-v8]
+    if: needs.detect.outputs.codex == 'true'
     uses: ./.github/workflows/build-codex.yml
     with:
       use_existing_v8: true
@@ -88,8 +140,8 @@ jobs:
       v8_version: ${{ inputs.v8_version || '150.4.0' }}
     secrets: inherit
   publish:
-    needs: [bun, opentui, opencode, kilo, codex]
-    if: ${{ github.event_name == 'workflow_dispatch' && always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped') }}
+    needs: [detect, bun, opentui, opencode, kilo, codex]
+    if: ${{ github.event_name == 'workflow_dispatch' && always() && needs.detect.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped') }}
     permissions:
       contents: write
       actions: read

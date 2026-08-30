@@ -7,6 +7,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: build-core-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   PRODUCT: bun
   ICU_VERSION: "75.1"
@@ -32,22 +36,22 @@ jobs:
       # ── Restore cached toolchain ──────────────────────────────
       - name: Cache Android NDK
         id: cache-ndk
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ env.ANDROID_NDK_HOME }}
-          key: ci-cache-v1-toolchain-${{ runner.os }}-${{ runner.arch }}-ndk-${{ env.ANDROID_NDK_VERSION }}-api-${{ env.ANDROID_API }}
+          key: ci-cache-v2-toolchain-${{ runner.os }}-${{ runner.arch }}-ndk-${{ env.ANDROID_NDK_VERSION }}-api-${{ env.ANDROID_API }}
 
       - name: Cache Zig
         id: cache-zig
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
-          key: ci-cache-v1-toolchain-${{ runner.os }}-${{ runner.arch }}-zig-${{ env.ZIG_VERSION }}-api-${{ env.ANDROID_API }}
+          key: ci-cache-v2-toolchain-${{ runner.os }}-${{ runner.arch }}-zig-${{ env.ZIG_VERSION }}-api-${{ env.ANDROID_API }}
 
       # ── Patch hashes ──────────────────────────────────────────
       - name: Compute patch hashes
         id: hashes
-        run: echo "webkit_patch_hash=$(sha256sum bun/patches/webkit/android-support.patch | cut -c1-16)" >> $GITHUB_OUTPUT
+        run: echo "webkit_patch_hash=$(sha256sum bun/patches/webkit/android-support.patch | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
       - name: Compute cache contract key
         id: contract
@@ -57,6 +61,7 @@ jobs:
           key_args=(--root "$GITHUB_WORKSPACE" --product bun-core
             --path bun/scripts/build-icu.sh --path bun/scripts/build-webkit.sh
             --path bun/scripts/build-tinycc.sh --path ci/scripts/env.sh
+            --path .github/workflows/build-core.yml
             --path bun/patches/webkit/android-support.patch
             --path bun/cmake/webkit-android-toolchain.cmake
             --value "ICU_VERSION=$ICU_VERSION" --value "WEBKIT_COMMIT=$WEBKIT_COMMIT"
@@ -67,7 +72,7 @@ jobs:
       # ── ICU ───────────────────────────────────────────────────
       - name: Cache ICU build
         id: cache-icu
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             ${{ env.WORK_DIR }}/deps-android/prefix
@@ -79,16 +84,33 @@ jobs:
         run: |
           set -euo pipefail
           if test -s "${WORK_DIR}/deps-android/prefix/lib/libicuuc.a" \
-             && test -s "${WORK_DIR}/state/nodes/icu.json"; then
+             && python3 ci/scripts/build-state.py verify --root "$GITHUB_WORKSPACE" \
+                  --state-dir "$WORK_DIR/state" --node icu >/dev/null 2>&1; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Restore ICU build intermediates
+        if: steps.cache-icu.outputs.cache-hit != 'true' || steps.validate-icu.outputs.ready != 'true'
+        id: cache-icu-intermediates
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: restore-intermediate
+          key: ci-cache-v2-core-icu-intermediates-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-icu-${{ env.ICU_VERSION }}-${{ steps.contract.outputs.key }}
+          restore-prefix: ci-cache-v2-core-icu-intermediates-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-icu-${{ env.ICU_VERSION }}-
+          path: |
+            ${{ env.WORK_DIR }}/icu-src
+            ${{ env.WORK_DIR }}/icu-host-build
+            ${{ env.WORK_DIR }}/icu-android-build
+            ${{ env.WORK_DIR }}/deps-android/prefix
+            ${{ env.WORK_DIR }}/state/nodes/icu.json
+            ${{ env.WORK_DIR }}/cache/ccache
+
       # ── WebKit/JSC ────────────────────────────────────────────
       - name: Cache WebKit build
         id: cache-webkit
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             ${{ env.WORK_DIR }}/webkit-android
@@ -103,11 +125,27 @@ jobs:
           if test -s "${WORK_DIR}/webkit-android/cmakeconfig.h" \
              && test -d "${WORK_DIR}/webkit-android/include/JavaScriptCore" \
              && find "${WORK_DIR}/webkit-android/lib" -maxdepth 1 -type f -name '*.a' -size +0c -print -quit | grep -q . \
-             && test -s "${WORK_DIR}/state/nodes/webkit.json"; then
+             && python3 ci/scripts/build-state.py verify --root "$GITHUB_WORKSPACE" \
+                  --state-dir "$WORK_DIR/state" --node webkit >/dev/null 2>&1; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Restore WebKit build intermediates
+        if: steps.cache-webkit.outputs.cache-hit != 'true' || steps.validate-webkit.outputs.ready != 'true'
+        id: cache-webkit-intermediates
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: restore-intermediate
+          key: ci-cache-v2-core-webkit-intermediates-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-patch-${{ steps.hashes.outputs.webkit_patch_hash }}-${{ steps.contract.outputs.key }}
+          restore-prefix: ci-cache-v2-core-webkit-intermediates-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-patch-${{ steps.hashes.outputs.webkit_patch_hash }}-
+          path: |
+            ${{ env.WORK_DIR }}/webkit-src
+            ${{ env.WORK_DIR }}/webkit-build
+            ${{ env.WORK_DIR }}/webkit-android
+            ${{ env.WORK_DIR }}/state/nodes/webkit.json
+            ${{ env.WORK_DIR }}/cache/ccache
 
       # ── TinyCC ────────────────────────────────────────────────
       - name: Validate TinyCC cache
@@ -115,11 +153,92 @@ jobs:
         run: |
           set -euo pipefail
           if test -s "${WORK_DIR}/webkit-android/lib/libtcc.a" \
-             && test -s "${WORK_DIR}/state/nodes/tinycc.json"; then
+             && python3 ci/scripts/build-state.py verify --root "$GITHUB_WORKSPACE" \
+                  --state-dir "$WORK_DIR/state" --node tinycc >/dev/null 2>&1; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Restore TinyCC build intermediates
+        if: steps.validate-tinycc.outputs.ready != 'true'
+        id: cache-tinycc-intermediates
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: restore-intermediate
+          key: ci-cache-v2-core-tinycc-intermediates-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-tinycc-${{ env.TINYCC_COMMIT }}-${{ steps.contract.outputs.key }}
+          restore-prefix: ci-cache-v2-core-tinycc-intermediates-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-tinycc-${{ env.TINYCC_COMMIT }}-
+          path: |
+            ${{ env.WORK_DIR }}/tinycc-src
+            ${{ env.WORK_DIR }}/webkit-android/lib/libtcc.a
+            ${{ env.WORK_DIR }}/state/nodes/tinycc.json
+            ${{ env.WORK_DIR }}/cache/ccache
+
+      # The exact caches contain only validated outputs. Stage-specific
+      # checkpoints avoid overlaying a stale WebKit tree when only ICU is
+      # missing, while still allowing each compiler to resume its own state.
+      - name: Restore ICU resumable checkpoint
+        if: steps.cache-icu.outputs.cache-hit != 'true' || steps.validate-icu.outputs.ready != 'true'
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: restore-checkpoint
+          checkpoint-prefix: ci-cache-v2-recovery-core-icu-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-icu-${{ env.ICU_VERSION }}-
+          checkpoint-path: |
+            ${{ env.ANDROID_NDK_HOME }}
+            ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+            ${{ env.WORK_DIR }}/icu-src
+            ${{ env.WORK_DIR }}/icu-host-build
+            ${{ env.WORK_DIR }}/icu-android-build
+            ${{ env.WORK_DIR }}/deps-android/prefix
+            ${{ env.WORK_DIR }}/state/nodes/icu.json
+            ${{ env.WORK_DIR }}/cache/ccache
+
+      - name: Restore WebKit resumable checkpoint
+        if: steps.cache-webkit.outputs.cache-hit != 'true' || steps.validate-webkit.outputs.ready != 'true'
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: restore-checkpoint
+          checkpoint-prefix: ci-cache-v2-recovery-core-webkit-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-patch-${{ steps.hashes.outputs.webkit_patch_hash }}-
+          checkpoint-path: |
+            ${{ env.ANDROID_NDK_HOME }}
+            ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+            ${{ env.WORK_DIR }}/webkit-src
+            ${{ env.WORK_DIR }}/webkit-build
+            ${{ env.WORK_DIR }}/webkit-android
+            ${{ env.WORK_DIR }}/state/nodes/webkit.json
+            ${{ env.WORK_DIR }}/cache/ccache
+
+      - name: Restore TinyCC resumable checkpoint
+        if: steps.cache-webkit.outputs.cache-hit != 'true' || steps.validate-webkit.outputs.ready != 'true' || steps.validate-tinycc.outputs.ready != 'true'
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: restore-checkpoint
+          checkpoint-prefix: ci-cache-v2-recovery-core-tinycc-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-tinycc-${{ env.TINYCC_COMMIT }}-
+          checkpoint-path: |
+            ${{ env.ANDROID_NDK_HOME }}
+            ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+            ${{ env.WORK_DIR }}/tinycc-src
+            ${{ env.WORK_DIR }}/webkit-android/lib/libtcc.a
+            ${{ env.WORK_DIR }}/state/nodes/tinycc.json
+            ${{ env.WORK_DIR }}/cache/ccache
+
+      - name: Validate Core state after checkpoint restore
+        id: validate-core
+        run: |
+          set -euo pipefail
+          node_valid() {
+            python3 ci/scripts/build-state.py verify --root "$GITHUB_WORKSPACE" \
+              --state-dir "$WORK_DIR/state" --node "$1" >/dev/null 2>&1
+          }
+          icu=false
+          webkit=false
+          tinycc=false
+          if node_valid "${WORK_DIR}/state/nodes/icu.json" && test -s "${WORK_DIR}/deps-android/prefix/lib/libicuuc.a"; then icu=true; fi
+          if node_valid "${WORK_DIR}/state/nodes/webkit.json" && test -s "${WORK_DIR}/webkit-android/cmakeconfig.h" && test -d "${WORK_DIR}/webkit-android/include/JavaScriptCore" && find "${WORK_DIR}/webkit-android/lib" -maxdepth 1 -type f -name '*.a' -size +0c -print -quit | grep -q .; then webkit=true; fi
+          if node_valid "${WORK_DIR}/state/nodes/tinycc.json" && test -s "${WORK_DIR}/webkit-android/lib/libtcc.a"; then tinycc=true; fi
+          echo "icu_ready=$icu" >> "$GITHUB_OUTPUT"
+          echo "webkit_ready=$webkit" >> "$GITHUB_OUTPUT"
+          echo "tinycc_ready=$tinycc" >> "$GITHUB_OUTPUT"
 
       # Installing packages is unnecessary when every validated cache is ready.
       - name: Install build dependencies
@@ -149,11 +268,193 @@ jobs:
         run: |
           source ci/scripts/env.sh && ./bun/scripts/build-tinycc.sh
 
+      - name: Validate Core outputs for durable caches
+        if: always()
+        id: final-core
+        run: |
+          set -euo pipefail
+          node_valid() {
+            python3 ci/scripts/build-state.py verify --root "$GITHUB_WORKSPACE" \
+              --state-dir "$WORK_DIR/state" --node "$1" >/dev/null 2>&1
+          }
+          icu=false
+          webkit=false
+          tinycc=false
+          if node_valid "${WORK_DIR}/state/nodes/icu.json" && test -s "${WORK_DIR}/deps-android/prefix/lib/libicuuc.a"; then icu=true; fi
+          if node_valid "${WORK_DIR}/state/nodes/webkit.json" && test -s "${WORK_DIR}/webkit-android/cmakeconfig.h" && test -d "${WORK_DIR}/webkit-android/include/JavaScriptCore" && find "${WORK_DIR}/webkit-android/lib" -maxdepth 1 -type f -name '*.a' -size +0c -print -quit | grep -q .; then webkit=true; fi
+          if node_valid "${WORK_DIR}/state/nodes/tinycc.json" && test -s "${WORK_DIR}/webkit-android/lib/libtcc.a"; then tinycc=true; fi
+          echo "icu_ready=$icu" >> "$GITHUB_OUTPUT"
+          echo "webkit_ready=$webkit" >> "$GITHUB_OUTPUT"
+          echo "tinycc_ready=$tinycc" >> "$GITHUB_OUTPUT"
+          if [ "$icu" != true ] || [ "$webkit" != true ] || [ "$tinycc" != true ]; then
+            echo "ERROR: one or more core stages are not valid; refusing to publish a successful core job." >&2
+            exit 1
+          fi
+
+      - name: Validate Core toolchains for durable cache
+        if: always()
+        id: final-toolchains
+        run: |
+          set -euo pipefail
+          ndk=false
+          zig=false
+          if test -x "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${ANDROID_API}-clang"; then ndk=true; fi
+          if test -x "${WORK_DIR}/zig-${ZIG_VERSION}/zig"; then zig=true; fi
+          echo "ndk_ready=$ndk" >> "$GITHUB_OUTPUT"
+          echo "zig_ready=$zig" >> "$GITHUB_OUTPUT"
+          # A complete exact core cache is publishable without the toolchains:
+          # the runner will not compile anything in that case. If the core
+          # cache was rebuilt, however, both toolchains must be present.
+          core_ready=false
+          if [ "${{ steps.final-core.outputs.icu_ready }}" = true ] \
+             && [ "${{ steps.final-core.outputs.webkit_ready }}" = true ] \
+             && [ "${{ steps.final-core.outputs.tinycc_ready }}" = true ]; then
+            core_ready=true
+          fi
+          if [ "$core_ready" != true ] && { [ "$ndk" != true ] || [ "$zig" != true ]; }; then
+            echo "ERROR: Android NDK or Zig toolchain is incomplete." >&2
+            exit 1
+          fi
+
+      - name: Save Core Android NDK cache
+        if: always() && steps.final-toolchains.outputs.ndk_ready == 'true' && steps.cache-ndk.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: save-final
+          path: ${{ env.ANDROID_NDK_HOME }}
+          key: ci-cache-v2-toolchain-${{ runner.os }}-${{ runner.arch }}-ndk-${{ env.ANDROID_NDK_VERSION }}-api-${{ env.ANDROID_API }}
+
+      - name: Save Core Zig toolchain cache
+        if: always() && steps.final-toolchains.outputs.zig_ready == 'true' && steps.cache-zig.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: save-final
+          path: ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+          key: ci-cache-v2-toolchain-${{ runner.os }}-${{ runner.arch }}-zig-${{ env.ZIG_VERSION }}-api-${{ env.ANDROID_API }}
+
+      - name: Save ICU durable cache
+        if: always() && steps.final-core.outputs.icu_ready == 'true' && steps.cache-icu.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: save-final
+          key: ${{ steps.contract.outputs.key }}-icu
+          path: |
+            ${{ env.WORK_DIR }}/deps-android/prefix
+            ${{ env.WORK_DIR }}/state/nodes/icu.json
+
+      - name: Save ICU build intermediates
+        if: always() && steps.final-core.outputs.icu_ready == 'true' && steps.cache-icu.outputs.cache-hit != 'true' && steps.cache-icu-intermediates.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: save-intermediate
+          key: ci-cache-v2-core-icu-intermediates-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-icu-${{ env.ICU_VERSION }}-${{ steps.contract.outputs.key }}
+          path: |
+            ${{ env.WORK_DIR }}/icu-src
+            ${{ env.WORK_DIR }}/icu-host-build
+            ${{ env.WORK_DIR }}/icu-android-build
+            ${{ env.WORK_DIR }}/deps-android/prefix
+            ${{ env.WORK_DIR }}/state/nodes/icu.json
+            ${{ env.WORK_DIR }}/cache/ccache
+
+      - name: Save WebKit durable cache
+        if: always() && steps.final-core.outputs.webkit_ready == 'true' && steps.final-core.outputs.tinycc_ready == 'true' && steps.cache-webkit.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: save-final
+          key: ${{ steps.contract.outputs.key }}-webkit
+          path: |
+            ${{ env.WORK_DIR }}/webkit-android
+            ${{ env.WORK_DIR }}/state/nodes/webkit.json
+            ${{ env.WORK_DIR }}/state/nodes/tinycc.json
+
+      - name: Save WebKit build intermediates
+        if: always() && steps.final-core.outputs.webkit_ready == 'true' && steps.cache-webkit.outputs.cache-hit != 'true' && steps.cache-webkit-intermediates.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: save-intermediate
+          key: ci-cache-v2-core-webkit-intermediates-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-patch-${{ steps.hashes.outputs.webkit_patch_hash }}-${{ steps.contract.outputs.key }}
+          path: |
+            ${{ env.WORK_DIR }}/webkit-src
+            ${{ env.WORK_DIR }}/webkit-build
+            ${{ env.WORK_DIR }}/webkit-android
+            ${{ env.WORK_DIR }}/state/nodes/webkit.json
+            ${{ env.WORK_DIR }}/cache/ccache
+
+      - name: Save TinyCC build intermediates
+        if: always() && steps.final-core.outputs.tinycc_ready == 'true' && steps.cache-tinycc-intermediates.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: save-intermediate
+          key: ci-cache-v2-core-tinycc-intermediates-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-tinycc-${{ env.TINYCC_COMMIT }}-${{ steps.contract.outputs.key }}
+          path: |
+            ${{ env.WORK_DIR }}/tinycc-src
+            ${{ env.WORK_DIR }}/webkit-android/lib/libtcc.a
+            ${{ env.WORK_DIR }}/state/nodes/tinycc.json
+            ${{ env.WORK_DIR }}/cache/ccache
+
+      # A failed run gets one immutable checkpoint per stage. Keeping these
+      # namespaces separate is important: a partial ICU retry must not replace
+      # a usable WebKit tree (or vice versa) in the next runner.
+      - name: Save ICU resumable checkpoint
+        if: always() && failure()
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: save-checkpoint
+          checkpoint-prefix: ci-cache-v2-recovery-core-icu-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-icu-${{ env.ICU_VERSION }}-
+          checkpoint-path: |
+            ${{ env.ANDROID_NDK_HOME }}
+            ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+            ${{ env.WORK_DIR }}/icu-src
+            ${{ env.WORK_DIR }}/icu-host-build
+            ${{ env.WORK_DIR }}/icu-android-build
+            ${{ env.WORK_DIR }}/deps-android/prefix
+            ${{ env.WORK_DIR }}/state/nodes/icu.json
+            ${{ env.WORK_DIR }}/cache/ccache
+
+      - name: Save WebKit resumable checkpoint
+        if: always() && failure()
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: save-checkpoint
+          checkpoint-prefix: ci-cache-v2-recovery-core-webkit-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-patch-${{ steps.hashes.outputs.webkit_patch_hash }}-
+          checkpoint-path: |
+            ${{ env.ANDROID_NDK_HOME }}
+            ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+            ${{ env.WORK_DIR }}/webkit-src
+            ${{ env.WORK_DIR }}/webkit-build
+            ${{ env.WORK_DIR }}/webkit-android
+            ${{ env.WORK_DIR }}/state/nodes/webkit.json
+            ${{ env.WORK_DIR }}/cache/ccache
+
+      - name: Save TinyCC resumable checkpoint
+        if: always() && failure()
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: save-checkpoint
+          checkpoint-prefix: ci-cache-v2-recovery-core-tinycc-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-tinycc-${{ env.TINYCC_COMMIT }}-
+          checkpoint-path: |
+            ${{ env.ANDROID_NDK_HOME }}
+            ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+            ${{ env.WORK_DIR }}/tinycc-src
+            ${{ env.WORK_DIR }}/webkit-android/lib/libtcc.a
+            ${{ env.WORK_DIR }}/state/nodes/tinycc.json
+            ${{ env.WORK_DIR }}/cache/ccache
+
       - name: Write CI summary
         if: always()
         env:
           CACHE_DEPENDENCIES: ${{ steps.cache-icu.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
-          CACHE_INTERMEDIATES: ${{ steps.cache-webkit.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
+          CACHE_INTERMEDIATES: ${{ steps.cache-webkit-intermediates.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
         run: source ci/scripts/ci-summary.sh && ci_summary
 
       - name: Cleanup intermediate files

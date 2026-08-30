@@ -48,8 +48,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.run_id }}
-  cancel-in-progress: true
+  group: build-opentui-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   ZIG_VERSION: "0.15.2"                    # ziglang.org estándar (NO oven-sh)
@@ -105,34 +105,28 @@ jobs:
           export ANDROID_TRIPLE_API="aarch64-linux-android${ANDROID_API}"
           args=(--root "$GITHUB_WORKSPACE" --product opentui
             --path opentui/scripts/build-opentui.sh --path ci/scripts/env.sh
+            --path .github/workflows/build-opentui.yml
             --path opentui/patches --value "OPENTUI_REF=$OPENTUI_REF"
             --value "OPENTUI_TARGET=$OPENTUI_TARGET")
           cache_key="$(python3 ci/scripts/cache-contract.py key "${args[@]}")"
           echo "key=$cache_key" >> "$GITHUB_OUTPUT"
 
+      - name: Compute OpenTUI patch hash
+        id: hashes
+        run: |
+          set -euo pipefail
+          patch_hash="$(sha256sum \
+            opentui/patches/opentui/android-libc-link.patch \
+            opentui/patches/opentui/android-termux-port.patch | sha256sum | cut -c1-16)"
+          echo "patch_hash=$patch_hash" >> "$GITHUB_OUTPUT"
+
       # ── Cachés ────────────────────────────────────────────────
       - name: Cache Zig toolchain
         id: cache-zig
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
-          key: ${{ steps.contract.outputs.key }}-zig
-
-      - name: Cache OpenTUI Zig intermediates
-        id: cache-zig-intermediates
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ env.WORK_DIR }}/cache/zig-opentui
-            ${{ env.WORK_DIR }}/cache/zig-global
-          key: ${{ steps.contract.outputs.key }}-zig-intermediates
-
-      - name: Cache opentui source
-        id: cache-opentui
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.OPENTUI_SRC }}
-          key: ${{ steps.contract.outputs.key }}-source
+          key: ci-cache-v2-toolchain-${{ runner.os }}-${{ runner.arch }}-zig-${{ env.ZIG_VERSION }}-api-${{ env.ANDROID_API }}
 
       - name: Restore OpenTUI output cache
         id: cache-opentui-output
@@ -148,19 +142,60 @@ jobs:
         run: |
           set -euo pipefail
           LIB="$OPENTUI_SRC/packages/core/src/lib/$OPENTUI_TARGET/libopentui.so"
-          if test -s "$LIB" && test -s "$WORK_DIR/state/nodes/opentui.json"; then
+          if test -s "$LIB" \
+             && test "$(readelf -h "$LIB" | sed -n 's/^ *Class: *//p')" = ELF64 \
+             && test "$(readelf -h "$LIB" | sed -n 's/^ *Machine: *//p')" = AArch64 \
+             && readelf -d "$LIB" | grep -q 'NEEDED.*libc.so' \
+             && python3 ci/scripts/build-state.py verify --root "$GITHUB_WORKSPACE" \
+                  --state-dir "$WORK_DIR/state" --node opentui >/dev/null 2>&1; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # Restore reusable state before the per-attempt checkpoint. The
+      # checkpoint is applied last so a newer partial build always wins over
+      # an older stable intermediate cache.
+      - name: Restore OpenTUI source cache
+        if: steps.validate-opentui.outputs.ready != 'true'
+        id: cache-opentui
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.OPENTUI_SRC }}
+          key: ${{ steps.contract.outputs.key }}-source
+
+      - name: Restore OpenTUI Zig intermediates
+        if: steps.validate-opentui.outputs.ready != 'true'
+        id: cache-zig-intermediates
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: restore-intermediate
+          key: ci-cache-v2-opentui-intermediates-${{ runner.os }}-${{ runner.arch }}-commit-${{ steps.resolve.outputs.commit }}-target-${{ env.OPENTUI_TARGET }}-zig-${{ env.ZIG_VERSION }}-ndk-${{ env.ANDROID_NDK_VERSION }}-${{ steps.contract.outputs.key }}
+          restore-prefix: ci-cache-v2-opentui-intermediates-${{ runner.os }}-${{ runner.arch }}-commit-${{ steps.resolve.outputs.commit }}-target-${{ env.OPENTUI_TARGET }}-zig-${{ env.ZIG_VERSION }}-ndk-${{ env.ANDROID_NDK_VERSION }}-
+          path: |
+            ${{ env.WORK_DIR }}/cache/zig-opentui
+            ${{ env.WORK_DIR }}/cache/zig-global
+
+      - name: Restore OpenTUI resumable checkpoint
+        if: steps.cache-opentui-output.outputs.cache-hit != 'true' || steps.validate-opentui.outputs.ready != 'true'
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: restore-checkpoint
+          checkpoint-prefix: ci-cache-v2-recovery-opentui-${{ runner.os }}-${{ runner.arch }}-commit-${{ steps.resolve.outputs.commit }}-target-${{ env.OPENTUI_TARGET }}-zig-${{ env.ZIG_VERSION }}-ndk-${{ env.ANDROID_NDK_VERSION }}-patch-${{ steps.hashes.outputs.patch_hash }}-
+          checkpoint-path: |
+            ${{ env.OPENTUI_SRC }}
+            ${{ env.WORK_DIR }}/cache
+            ${{ env.WORK_DIR }}/state/nodes
+            ${{ env.WORK_DIR }}/android-ndk
+            ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+
       # ── Toolchain ─────────────────────────────────────────────
       - name: Cache Android NDK
         id: cache-ndk
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ env.WORK_DIR }}/android-ndk
-          key: ci-cache-v1-toolchain-${{ runner.os }}-${{ runner.arch }}-ndk-${{ env.ANDROID_NDK_VERSION }}-api-${{ env.ANDROID_API }}
+          key: ci-cache-v2-toolchain-${{ runner.os }}-${{ runner.arch }}-ndk-${{ env.ANDROID_NDK_VERSION }}-api-${{ env.ANDROID_API }}
 
       - name: Install Android NDK
         if: steps.validate-opentui.outputs.ready != 'true' && steps.cache-ndk.outputs.cache-hit != 'true'
@@ -286,23 +321,85 @@ jobs:
           } > "$LIB_DIR/build-info.txt"
           cat "$LIB_DIR/build-info.txt"
 
+      - name: Validate OpenTUI outputs for durable caches
+        if: always()
+        id: final-opentui
+        run: |
+          set -euo pipefail
+          LIB="$OPENTUI_SRC/packages/core/src/lib/$OPENTUI_TARGET/libopentui.so"
+          ready=false
+          if test -s "$LIB" \
+             && python3 ci/scripts/build-state.py verify --root "$GITHUB_WORKSPACE" \
+                  --state-dir "$WORK_DIR/state" --node opentui >/dev/null 2>&1 \
+             && test "$(readelf -h "$LIB" | sed -n 's/^ *Class: *//p')" = ELF64 \
+             && test "$(readelf -h "$LIB" | sed -n 's/^ *Machine: *//p')" = AArch64 \
+             && readelf -d "$LIB" | grep -q 'NEEDED.*libc.so'; then
+            ready=true
+          fi
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+          if [ "$ready" != true ]; then
+            echo "ERROR: OpenTUI output or state manifest is not valid." >&2
+            exit 1
+          fi
+
       - name: Save libopentui.so to cache (key por commit)
-        if: steps.validate-opentui.outputs.ready != 'true' && steps.cache-opentui-output.outputs.cache-hit != 'true'
+        if: success() && steps.final-opentui.outputs.ready == 'true' && steps.cache-opentui-output.outputs.cache-hit != 'true'
+        continue-on-error: true
         # build-opencode.yml restaura esta key y copia el .so a node_modules.
         # La key incluye el commit resuelto y el hash del build
         # (build-v4-opentui-<commit>-<hash>): cada
         # commit genera una entrada de cache PROPIA, así actions/cache
         # (que no sobreescribe) no choca entre runs con commits distintos.
-        # Ya no se necesita continue-on-error: la key es única por commit.
+        # continue-on-error permite que una carrera de dos runs no convierta
+        # un build correcto en fallo de job.
         # UPGRADE FÁCIL: al cambiar el pin opentui_ref a un commit nuevo, la
         # key cambia automáticamente → cache miss → se recompila. Sin pasos
         # manuales.
-        uses: actions/cache/save@v4
+        uses: ./ci/actions/incremental-cache
         with:
+          mode: save-final
           path: |
             ${{ env.OPENTUI_SRC }}/packages/core/src/lib
             ${{ env.WORK_DIR }}/state/nodes/opentui.json
           key: ${{ steps.contract.outputs.key }}-artifact
+
+      - name: Save OpenTUI source cache
+        if: success() && steps.validate-opentui.outputs.ready != 'true' && steps.cache-opentui.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: save-final
+          path: ${{ env.OPENTUI_SRC }}
+          key: ${{ steps.contract.outputs.key }}-source
+
+      - name: Save OpenTUI Zig intermediates cache
+        if: success() && steps.validate-opentui.outputs.ready != 'true' && steps.cache-zig-intermediates.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: save-intermediate
+          path: |
+            ${{ env.WORK_DIR }}/cache/zig-opentui
+            ${{ env.WORK_DIR }}/cache/zig-global
+          key: ci-cache-v2-opentui-intermediates-${{ runner.os }}-${{ runner.arch }}-commit-${{ steps.resolve.outputs.commit }}-target-${{ env.OPENTUI_TARGET }}-zig-${{ env.ZIG_VERSION }}-ndk-${{ env.ANDROID_NDK_VERSION }}-${{ steps.contract.outputs.key }}
+
+      - name: Save OpenTUI Zig toolchain cache
+        if: success() && steps.validate-opentui.outputs.ready != 'true' && steps.cache-zig.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: save-final
+          path: ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+          key: ci-cache-v2-toolchain-${{ runner.os }}-${{ runner.arch }}-zig-${{ env.ZIG_VERSION }}-api-${{ env.ANDROID_API }}
+
+      - name: Save OpenTUI Android NDK cache
+        if: success() && steps.validate-opentui.outputs.ready != 'true' && steps.cache-ndk.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: save-final
+          path: ${{ env.WORK_DIR }}/android-ndk
+          key: ci-cache-v2-toolchain-${{ runner.os }}-${{ runner.arch }}-ndk-${{ env.ANDROID_NDK_VERSION }}-api-${{ env.ANDROID_API }}
 
       - name: Upload libopentui.so artifact
         uses: actions/upload-artifact@v4
@@ -311,11 +408,25 @@ jobs:
           path: ${{ env.OPENTUI_SRC }}/packages/core/src/lib/${{ env.OPENTUI_TARGET }}/
           if-no-files-found: error
 
+      - name: Save OpenTUI resumable checkpoint
+        if: always() && failure()
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: save-checkpoint
+          checkpoint-prefix: ci-cache-v2-recovery-opentui-${{ runner.os }}-${{ runner.arch }}-commit-${{ steps.resolve.outputs.commit }}-target-${{ env.OPENTUI_TARGET }}-zig-${{ env.ZIG_VERSION }}-ndk-${{ env.ANDROID_NDK_VERSION }}-patch-${{ steps.hashes.outputs.patch_hash }}-
+          checkpoint-path: |
+            ${{ env.OPENTUI_SRC }}
+            ${{ env.WORK_DIR }}/cache
+            ${{ env.WORK_DIR }}/state/nodes
+            ${{ env.WORK_DIR }}/android-ndk
+            ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+
       - name: Write CI summary
         if: always()
         env:
           CACHE_DEPENDENCIES: ${{ steps.cache-ndk.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
-          CACHE_INTERMEDIATES: ${{ steps.cache-opentui-output.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
+          CACHE_INTERMEDIATES: ${{ steps.cache-zig-intermediates.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
         run: source ci/scripts/ci-summary.sh && ci_summary
 
       # ── Cleanup ────────────────────────────────────────────────

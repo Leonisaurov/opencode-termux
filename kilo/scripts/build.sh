@@ -70,6 +70,10 @@ mkdir -p "$MARKERS"
 incremental_exec kilo \
     --input "$SCRIPT_DIR/build.sh" --input "$REPO_ROOT/ci/scripts/env.sh" \
     --input "$SCRIPT_DIR/build-kilo-android.ts" --input "$KILO_SRC" \
+    --input "$REPO_ROOT/kilo/patches/kilocode-incremental-smoke.patch" \
+    --input "$REPO_ROOT/opentui/patches/opentui/android-termux-port-kilo.patch" \
+    --input "$REPO_ROOT/opentui/patches/opentui/android-termux-build-kilo.patch" \
+    --input "$KILO_OPENTUI_SRC/packages/core/src/lib/$KILO_OPENTUI_TARGET/libopentui.so" \
     --input "$MODELS_CACHE" --input "$ANDROID_BUN" \
     --value "KILO_VERSION=$KILO_VERSION" \
     --value "KILO_BRANCH=$KILO_BRANCH" \
@@ -130,6 +134,27 @@ compute_fingerprint() {
         fi
         fp+="sha_${script//[^a-zA-Z0-9]/_}=${h}\n"
     done
+
+    # Repository-owned patches and the Android OpenTUI output are part of the
+    # effective input, even though the generic directory digest skips generated
+    # dependency trees. A patch edit must invalidate the corresponding marker;
+    # otherwise the legacy fingerprint could skip a stale native library.
+    local patch_sha="missing"
+    [ -f "$REPO_ROOT/kilo/patches/kilocode-incremental-smoke.patch" ] \
+        && patch_sha="$(sha256sum "$REPO_ROOT/kilo/patches/kilocode-incremental-smoke.patch" | cut -c1-16)"
+    fp+="kilo_source_patch_sha=${patch_sha}\n"
+    patch_sha="missing"
+    [ -f "$REPO_ROOT/opentui/patches/opentui/android-termux-port-kilo.patch" ] \
+        && patch_sha="$(sha256sum "$REPO_ROOT/opentui/patches/opentui/android-termux-port-kilo.patch" | cut -c1-16)"
+    fp+="kilo_opentui_port_patch_sha=${patch_sha}\n"
+    patch_sha="missing"
+    [ -f "$REPO_ROOT/opentui/patches/opentui/android-termux-build-kilo.patch" ] \
+        && patch_sha="$(sha256sum "$REPO_ROOT/opentui/patches/opentui/android-termux-build-kilo.patch" | cut -c1-16)"
+    fp+="kilo_opentui_build_patch_sha=${patch_sha}\n"
+    local opentui_so_sha="missing"
+    [ -f "$KILO_OPENTUI_SRC/packages/core/src/lib/$KILO_OPENTUI_TARGET/libopentui.so" ] \
+        && opentui_so_sha="$(sha256sum "$KILO_OPENTUI_SRC/packages/core/src/lib/$KILO_OPENTUI_TARGET/libopentui.so" | cut -c1-16)"
+    fp+="kilo_opentui_so_sha=${opentui_so_sha}\n"
 
     # KILO_VERSION va baked en el define KILO_VERSION del binario → invalidar si cambia
     fp+="kilo_version=${KILO_VERSION}\n"
@@ -201,9 +226,10 @@ else
         if [ "$val_old" != "$val_now" ]; then
             printf '   - %s: %s → %s\n' "$key" "${val_old:-<ausente>}" "$val_now"
             case "$key" in
-                kilo_root_bun_lock|kilo_root_package_json|kilo_pkg_bun_lock|kilo_pkg_package_json|otui_fix_present|fingerprint_version|sha_kilocode_build_sh|kilo_version)
+                kilo_root_bun_lock|kilo_root_package_json|kilo_pkg_bun_lock|kilo_pkg_package_json|otui_fix_present|fingerprint_version|sha_kilocode_build_sh|kilo_source_patch_sha|kilo_version)
                     invalidate_deps=1 ;;
-                sha_scripts_build_opentui_sh|zig_version)
+                sha_scripts_build_opentui_sh|kilo_opentui_port_patch_sha|kilo_opentui_build_patch_sha|kilo_opentui_so_sha|zig_libc_file|zig_version|kilo_opentui_tag)
+                    invalidate_deps=1
                     invalidate_opentui=1 ;;
                 kilo_opentui_ref)
                     # ref de opentui 0.3.4 cambió → reinstall deps + recompilar .so

@@ -22,7 +22,7 @@ incremental_exec codex \
     --value "CODEX_TARGET_DIR=$CODEX_TARGET_DIR" \
     --value "RUSTY_V8_ARCHIVE=${RUSTY_V8_ARCHIVE:-}" \
     --value "RUSTY_V8_SRC_BINDING_PATH=${RUSTY_V8_SRC_BINDING_PATH:-}" \
-    --output "$CODEX_OUT" --output "$CODEX_HOST_OUT"
+    --output "$CODEX_OUT" --output "$CODEX_HOST_OUT" --output "$CODEX_SANDBOX_OUT"
 
 if [ ! -f "$CODEX_SRC/codex-rs/Cargo.toml" ]; then
     echo "ERROR: Codex checkout not found at $CODEX_SRC"

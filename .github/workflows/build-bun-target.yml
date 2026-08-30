@@ -13,13 +13,16 @@ permissions:
 
 concurrency:
   group: build-bun-target-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   BUN_VERSION: "${{ github.event.inputs.bun_version || '1.2.13' }}"
   ANDROID_API: "24"
   ANDROID_NDK_VERSION: "28.1.13356709"
+  ICU_VERSION: "75.1"
+  ZIG_VERSION: "0.15.2"
   WEBKIT_COMMIT: "017930ebf915121f8f593bef61cbbca82d78132d"
+  TINYCC_COMMIT: "b91835d8701523e895a2b447713630069514e291"
   PRODUCT: bun
   WORK_DIR: "${{ github.workspace }}/bun/build"
   ANDROID_NDK_HOME: "${{ github.workspace }}/bun/build/android-ndk"
@@ -39,21 +42,45 @@ jobs:
         id: hashes
         run: |
           echo "bun_patch_hash=$(sha256sum bun/patches/bun/android-support.patch | cut -c1-16)" >> "$GITHUB_OUTPUT"
+          echo "heap_tagging_patch_hash=$(sha256sum bun/patches/bun/android-heap-tagging.patch | cut -c1-16)" >> "$GITHUB_OUTPUT"
           echo "zig_patch_hash=$(sha256sum bun/patches/zig/posix-android-sigaction.patch | cut -c1-16)" >> "$GITHUB_OUTPUT"
-          echo "TARGET_NAME=bun-linux-arm64-android-v${BUN_VERSION}" >> $GITHUB_ENV
+          echo "TARGET_NAME=bun-linux-arm64-android-v${BUN_VERSION}" >> "$GITHUB_ENV"
 
       - name: Compute Bun cache contract
         id: contract
         run: |
           set -euo pipefail
-          export ANDROID_TRIPLE_API="aarch64-linux-android${ANDROID_API}" ZIG_VERSION=0.15.2
-          args=(--root "$GITHUB_WORKSPACE" --product bun
+          bun_source_commit="$(git ls-tree HEAD bun/src | awk '{print $3}')"
+          test -n "$bun_source_commit"
+          export ANDROID_TRIPLE_API="aarch64-linux-android${ANDROID_API}"
+          core_args=(--root "$GITHUB_WORKSPACE" --product bun-core
+            --path bun/scripts/build-icu.sh --path bun/scripts/build-webkit.sh
+            --path bun/scripts/build-tinycc.sh --path ci/scripts/env.sh
+            --path .github/workflows/build-core.yml
+            --path bun/patches/webkit/android-support.patch
+            --path bun/cmake/webkit-android-toolchain.cmake
+            --value "ICU_VERSION=$ICU_VERSION" --value "WEBKIT_COMMIT=$WEBKIT_COMMIT"
+            --value "TINYCC_COMMIT=$TINYCC_COMMIT")
+          core_key="$(python3 ci/scripts/cache-contract.py key "${core_args[@]}")"
+          bun_args=(--root "$GITHUB_WORKSPACE" --product bun
             --path bun/scripts/build-bun.sh --path bun/scripts/apply-patches.sh
-            --path ci/scripts/env.sh --path bun/patches/bun/android-support.patch
+            --path ci/scripts/env.sh --path .github/workflows/build-bun.yml
+            --path bun/patches/bun/android-support.patch
+            --path bun/patches/bun/android-heap-tagging.patch
             --path bun/patches/zig/posix-android-sigaction.patch
-            --value "BUN_VERSION=$BUN_VERSION")
-          cache_key="$(python3 ci/scripts/cache-contract.py key "${args[@]}")"
-          echo "key=$cache_key" >> "$GITHUB_OUTPUT"
+            --value "BUN_VERSION=$BUN_VERSION" --value "WEBKIT_COMMIT=$WEBKIT_COMMIT"
+            --value "ICU_VERSION=$ICU_VERSION" --value "TINYCC_COMMIT=$TINYCC_COMMIT"
+            --value "BUN_SOURCE_COMMIT=$bun_source_commit"
+            --value "CORE_CACHE_KEY=$core_key")
+          bun_key="$(python3 ci/scripts/cache-contract.py key "${bun_args[@]}")"
+          echo "bun=$bun_key" >> "$GITHUB_OUTPUT"
+          target_args=(--root "$GITHUB_WORKSPACE" --product bun-target
+            --path .github/workflows/build-bun-target.yml
+            --path ci/scripts/env.sh
+            --value "BUN_CACHE_KEY=$bun_key" --value "BUN_VERSION=$BUN_VERSION"
+            --value "WEBKIT_COMMIT=$WEBKIT_COMMIT")
+          target_key="$(python3 ci/scripts/cache-contract.py key "${target_args[@]}")"
+          echo "target=$target_key" >> "$GITHUB_OUTPUT"
 
       # ── Restore Bun binary ────────────────────────────────────
       - name: Restore Bun binary
@@ -62,7 +89,7 @@ jobs:
           path: |
             ${{ env.WORK_DIR }}/bun-build/bun
             ${{ env.WORK_DIR }}/state/nodes/bun.json
-          key: ${{ steps.contract.outputs.key }}
+          key: ${{ steps.contract.outputs.bun }}
           fail-on-cache-miss: true
 
       # ── Verify Bun binary ─────────────────────────────────────
@@ -72,41 +99,93 @@ jobs:
           echo "=== Bun binary verification ==="
           ls -lh "$BUN_BINARY"
           file "$BUN_BINARY"
-          readelf -h "$BUN_BINARY" 2>/dev/null | grep -E "Machine|Class"
+          test "$(readelf -h "$BUN_BINARY" | sed -n 's/^ *Class: *//p')" = ELF64
+          test "$(readelf -h "$BUN_BINARY" | sed -n 's/^ *Machine: *//p')" = AArch64
+
+      # ── Cache the target runtime ──────────────────────────────
+      - name: Cache target runtime tarball
+        id: cache-target
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.WORK_DIR }}/${{ env.TARGET_NAME }}.tgz
+          key: ${{ steps.contract.outputs.target }}-target
+
+      - name: Validate target runtime cache
+        id: validate-target
+        run: |
+          set -euo pipefail
+          if test -s "${WORK_DIR}/${TARGET_NAME}.tgz" \
+             && tar -tzf "${WORK_DIR}/${TARGET_NAME}.tgz" >/dev/null \
+             && tar -tzf "${WORK_DIR}/${TARGET_NAME}.tgz" | grep -Eq '/package/bin/bun$'; then
+            echo ready=true >> "$GITHUB_OUTPUT"
+          else
+            echo ready=false >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Restore target runtime resumable checkpoint
+        if: steps.cache-target.outputs.cache-hit != 'true' || steps.validate-target.outputs.ready != 'true'
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: restore-checkpoint
+          checkpoint-prefix: ci-cache-v2-recovery-bun-target-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-webkit-${{ env.WEBKIT_COMMIT }}-contract-${{ steps.contract.outputs.target }}-
+          checkpoint-path: |
+            ${{ env.WORK_DIR }}/bun-target
+            ${{ env.WORK_DIR }}/${{ env.TARGET_NAME }}.tgz
 
       # ── Create target runtime bundle ──────────────────────────
       - name: Create target runtime bundle
+        if: steps.validate-target.outputs.ready != 'true'
         run: |
           BUN_BINARY="${WORK_DIR}/bun-build/bun"
           TARGET_DIR="${WORK_DIR}/bun-target/${TARGET_NAME}"
           PACKAGE_DIR="${TARGET_DIR}/package"
-          
+
           echo "=== Creating target runtime: ${TARGET_NAME} ==="
-          
+
           # Create npm-style package structure
           mkdir -p "$PACKAGE_DIR/bin"
           cp "$BUN_BINARY" "$PACKAGE_DIR/bin/bun"
           chmod +x "$PACKAGE_DIR/bin/bun"
-          
+
           echo "Package structure:"
           find "$TARGET_DIR" -type f -o -type l | sort
-          
+
           # Create tarball (same format as npm registry packages)
           echo ">>> Creating tarball..."
           cd "${WORK_DIR}/bun-target"
           tar czf "${WORK_DIR}/${TARGET_NAME}.tgz" "${TARGET_NAME}/"
-          
+
           echo ""
           echo "=== Target runtime created ==="
           ls -lh "${WORK_DIR}/${TARGET_NAME}.tgz"
           ls -lh "$PACKAGE_DIR/bin/bun"
 
-      # ── Cache the target runtime ──────────────────────────────
-      - name: Cache target runtime tarball
-        uses: actions/cache@v4
+      - name: Validate target runtime for durable cache
+        if: always()
+        id: final-target
+        run: |
+          set -euo pipefail
+          TARBALL="${WORK_DIR}/${TARGET_NAME}.tgz"
+          ready=false
+          if test -s "$TARBALL" \
+             && tar -tzf "$TARBALL" >/dev/null \
+             && tar -tzf "$TARBALL" | grep -Eq '/package/bin/bun$'; then
+            ready=true
+          fi
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+          if [ "$ready" != true ]; then
+            echo "ERROR: target runtime tarball is missing, corrupt, or incomplete." >&2
+            exit 1
+          fi
+
+      - name: Save target runtime cache
+        if: success() && steps.final-target.outputs.ready == 'true' && steps.cache-target.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
         with:
+          mode: save-final
           path: ${{ env.WORK_DIR }}/${{ env.TARGET_NAME }}.tgz
-          key: ${{ steps.contract.outputs.key }}-target
+          key: ${{ steps.contract.outputs.target }}-target
 
       # ── Upload tarball as artifact ────────────────────────────
       - name: Upload target runtime artifact
@@ -115,3 +194,14 @@ jobs:
           name: bun-target-android-aarch64-${{ env.BUN_VERSION }}
           path: ${{ env.WORK_DIR }}/${{ env.TARGET_NAME }}.tgz
           if-no-files-found: error
+
+      - name: Save target runtime resumable checkpoint
+        if: always() && failure()
+        continue-on-error: true
+        uses: ./ci/actions/incremental-cache
+        with:
+          mode: save-checkpoint
+          checkpoint-prefix: ci-cache-v2-recovery-bun-target-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-webkit-${{ env.WEBKIT_COMMIT }}-contract-${{ steps.contract.outputs.target }}-
+          checkpoint-path: |
+            ${{ env.WORK_DIR }}/bun-target
+            ${{ env.WORK_DIR }}/${{ env.TARGET_NAME }}.tgz
