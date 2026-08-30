@@ -31,6 +31,8 @@ cd "$BUN_SRC"
 git checkout -- . 2>/dev/null || true  # Reset any previous patches
 git apply --stat "$REPO_ROOT/bun/patches/bun/android-support.patch"
 git apply "$REPO_ROOT/bun/patches/bun/android-support.patch"
+git apply --stat "$REPO_ROOT/bun/patches/bun/android-heap-tagging.patch"
+git apply "$REPO_ROOT/bun/patches/bun/android-heap-tagging.patch"
 echo "    Bun patches applied successfully"
 
 # --- Clone WebKit ---
