@@ -7,7 +7,7 @@ import sys, tarfile, tempfile, urllib.parse, urllib.request, zipfile
 
 SCHEMA = "opencode-termux.stack/v1"
 COMPONENTS = ("bun", "opentui", "opencode", "kilo", "codex")
-DEFAULT_PREFIX = os.environ.get("PREFIX", "/data/data/com.termux/files/usr")
+DEFAULT_PREFIX = "/data/data/com.termux/files/usr"
 DEFAULT_TMP = os.environ.get("TMPDIR", "/data/data/com.termux/files/usr/tmp")
 ABSOLUTE = re.compile(r"^(?:/|[A-Za-z]:[\\/])")
 
@@ -23,7 +23,7 @@ def release(value: str) -> str:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Instala opencode-termux desde un manifiesto firmado por checksum")
     p.add_argument("release", nargs="?", default="latest"); p.add_argument("--release", dest="release_opt")
-    p.add_argument("--manifest"); p.add_argument("--prefix", default=DEFAULT_PREFIX)
+    p.add_argument("--manifest"); p.add_argument("--prefix", default=DEFAULT_PREFIX, help=f"prefijo de instalación (default: {DEFAULT_PREFIX})")
     p.add_argument("--just", action="append", choices=COMPONENTS); p.add_argument("--all", action="store_true")
     p.add_argument("--yes", action="store_true"); p.add_argument("--dry-run", action="store_true")
     p.add_argument("--version", action="version", version="opencode-termux-installer 3.0.0")

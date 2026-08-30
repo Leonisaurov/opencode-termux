@@ -40,6 +40,12 @@ class InstallerTests(unittest.TestCase):
         for component in ("opencode", "kilo", "codex"):
             r = self.run_installer("--just", component)
             self.assertEqual(r.returncode, 0, f"{component}: {r.stderr}")
+
+    def test_custom_prefix_uses_local_bin(self):
+        prefix = self.tmp / ".local"
+        r = self.run_installer("--just", "opencode", "--prefix", str(prefix))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue((prefix / "bin" / "opencode").is_file())
     def test_bad_checksum_keeps_prefix_untouched(self):
         data=json.loads(self.manifest.read_text()); data["components"]["bun"]["sha256"]="0"*64; self.manifest.write_text(json.dumps(data))
         r=self.run_installer("--just", "bun"); self.assertNotEqual(r.returncode, 0); self.assertFalse((self.prefix / "bin").exists())

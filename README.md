@@ -33,6 +33,17 @@ curl -fsSL https://raw.githubusercontent.com/Leonisaurov/opencode-termux/main/in
 curl -fsSL https://raw.githubusercontent.com/Leonisaurov/opencode-termux/main/install.sh | sh -s -- --just codex
 ```
 
+By default, files go to `/data/data/com.termux/files/usr/bin` and
+`/data/data/com.termux/files/usr/lib`. To install into a user-local prefix,
+pass `--prefix`; the same layout is then created below `$HOME/.local/`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Leonisaurov/opencode-termux/main/install.sh | sh -s -- --prefix="$HOME/.local/"
+```
+
+For example, OpenCode is installed as `$HOME/.local/bin/opencode` and
+OpenTUI as `$HOME/.local/lib/libopentui.so`.
+
 Codex installs `codex-android`, `codex-code-mode-host`, and
 `codex-linux-sandbox` together. To pin a release, append `1.18.11 --yes` (or
 use `--release 1.18.11 --yes`). Use `--dry-run` to validate without changing
