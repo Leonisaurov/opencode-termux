@@ -41,4 +41,4 @@ index 6698634..e9d3e9a 100644
 +    if (comptime Environment.isAndroid and builtin.target.cpu.arch.isAARCH64()) {
 +        android_disable_heap_tagging();
 +    }
-     _bun.crash_handler.init();
+     bun.crash_handler.init();
