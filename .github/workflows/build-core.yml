@@ -230,9 +230,9 @@ jobs:
           icu=false
           webkit=false
           tinycc=false
-          if node_valid "${WORK_DIR}/state/nodes/icu.json" && test -s "${WORK_DIR}/deps-android/prefix/lib/libicuuc.a"; then icu=true; fi
-          if node_valid "${WORK_DIR}/state/nodes/webkit.json" && test -s "${WORK_DIR}/webkit-android/cmakeconfig.h" && test -d "${WORK_DIR}/webkit-android/include/JavaScriptCore" && find "${WORK_DIR}/webkit-android/lib" -maxdepth 1 -type f -name '*.a' -size +0c -print -quit | grep -q .; then webkit=true; fi
-          if node_valid "${WORK_DIR}/state/nodes/tinycc.json" && test -s "${WORK_DIR}/webkit-android/lib/libtcc.a"; then tinycc=true; fi
+          if node_valid icu && test -s "${WORK_DIR}/deps-android/prefix/lib/libicuuc.a"; then icu=true; fi
+          if node_valid webkit && test -s "${WORK_DIR}/webkit-android/cmakeconfig.h" && test -d "${WORK_DIR}/webkit-android/include/JavaScriptCore" && find "${WORK_DIR}/webkit-android/lib" -maxdepth 1 -type f -name '*.a' -size +0c -print -quit | grep -q .; then webkit=true; fi
+          if node_valid tinycc && test -s "${WORK_DIR}/webkit-android/lib/libtcc.a"; then tinycc=true; fi
           echo "icu_ready=$icu" >> "$GITHUB_OUTPUT"
           echo "webkit_ready=$webkit" >> "$GITHUB_OUTPUT"
           echo "tinycc_ready=$tinycc" >> "$GITHUB_OUTPUT"
@@ -276,9 +276,9 @@ jobs:
           icu=false
           webkit=false
           tinycc=false
-          if node_valid "${WORK_DIR}/state/nodes/icu.json" && test -s "${WORK_DIR}/deps-android/prefix/lib/libicuuc.a"; then icu=true; fi
-          if node_valid "${WORK_DIR}/state/nodes/webkit.json" && test -s "${WORK_DIR}/webkit-android/cmakeconfig.h" && test -d "${WORK_DIR}/webkit-android/include/JavaScriptCore" && find "${WORK_DIR}/webkit-android/lib" -maxdepth 1 -type f -name '*.a' -size +0c -print -quit | grep -q .; then webkit=true; fi
-          if node_valid "${WORK_DIR}/state/nodes/tinycc.json" && test -s "${WORK_DIR}/webkit-android/lib/libtcc.a"; then tinycc=true; fi
+          if node_valid icu && test -s "${WORK_DIR}/deps-android/prefix/lib/libicuuc.a"; then icu=true; fi
+          if node_valid webkit && test -s "${WORK_DIR}/webkit-android/cmakeconfig.h" && test -d "${WORK_DIR}/webkit-android/include/JavaScriptCore" && find "${WORK_DIR}/webkit-android/lib" -maxdepth 1 -type f -name '*.a' -size +0c -print -quit | grep -q .; then webkit=true; fi
+          if node_valid tinycc && test -s "${WORK_DIR}/webkit-android/lib/libtcc.a"; then tinycc=true; fi
           echo "icu_ready=$icu" >> "$GITHUB_OUTPUT"
           echo "webkit_ready=$webkit" >> "$GITHUB_OUTPUT"
           echo "tinycc_ready=$tinycc" >> "$GITHUB_OUTPUT"
