@@ -1,5 +1,2 @@
-# External sources that are fetched by the native build.
-# WebKit is intentionally not listed here: build-webkit.sh consumes the
-# current checkout and overlays the versioned Android source files from
-# bun/webkit.
-tinycc https://github.com/oven-sh/tinycc.git b91835d8701523e895a2b447713630069514e291
+# WebKit and TinyCC are repository-owned source trees. They are intentionally
+# absent from this file; the native build consumes bun/webkit and bun/tinycc.

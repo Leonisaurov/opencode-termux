@@ -24,7 +24,7 @@ env:
   ANDROID_NDK_VERSION: "28.1.13356709"
   ICU_VERSION: "75.1"
   ZIG_VERSION: "0.15.2"
-  TINYCC_COMMIT: "b91835d8701523e895a2b447713630069514e291"
+  TINYCC_SOURCE: "current"
   WORK_DIR: "${{ github.workspace }}/bun/build"
   ANDROID_NDK_HOME: "${{ github.workspace }}/bun/build/android-ndk"
   ANDROID_NDK_ROOT: "${{ github.workspace }}/bun/build/android-ndk"
@@ -80,9 +80,10 @@ jobs:
             --path .github/workflows/build-core.yml
             --path ci/external-sources.lock --path ci/source-manifest.json
             --path bun/webkit
+            --path bun/tinycc
             --path bun/cmake/webkit-android-toolchain.cmake
             --value "ICU_VERSION=$ICU_VERSION"
-            --value "TINYCC_COMMIT=$TINYCC_COMMIT")
+            --value "TINYCC_SOURCE=$TINYCC_SOURCE")
           core_key="$(python3 ci/scripts/cache-contract.py key "${core_args[@]}")"
           echo "core=$core_key" >> "$GITHUB_OUTPUT"
           key_args=(--root "$GITHUB_WORKSPACE" --product bun
@@ -90,7 +91,7 @@ jobs:
             --path ci/scripts/env.sh --path .github/workflows/build-bun.yml
             --path ci/source-manifest.json
             --value "BUN_VERSION=$BUN_VERSION"
-            --value "ICU_VERSION=$ICU_VERSION" --value "TINYCC_COMMIT=$TINYCC_COMMIT"
+            --value "ICU_VERSION=$ICU_VERSION"
             --value "BUN_SOURCE_COMMIT=$bun_source_commit"
             --value "CORE_CACHE_KEY=$core_key")
           bun_key="$(python3 ci/scripts/cache-contract.py key "${key_args[@]}")"
@@ -203,10 +204,10 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: restore-intermediate
-          key: ci-cache-v2-core-tinycc-intermediates-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-tinycc-${{ env.TINYCC_COMMIT }}-${{ steps.contract.outputs.core }}
-          restore-prefix: ci-cache-v2-core-tinycc-intermediates-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-tinycc-${{ env.TINYCC_COMMIT }}-
+          key: ci-cache-v2-core-tinycc-intermediates-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-tinycc-current-${{ steps.contract.outputs.core }}
+          restore-prefix: ci-cache-v2-core-tinycc-intermediates-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-tinycc-current-
           path: |
-            ${{ env.WORK_DIR }}/tinycc-src
+            ${{ env.WORK_DIR }}/tinycc-build-android
             ${{ env.WORK_DIR }}/webkit-android/lib/libtcc.a
             ${{ env.WORK_DIR }}/state/nodes/tinycc.json
             ${{ env.WORK_DIR }}/cache/ccache
@@ -250,11 +251,11 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: restore-checkpoint
-          checkpoint-prefix: ci-cache-v2-recovery-core-tinycc-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-tinycc-${{ env.TINYCC_COMMIT }}-
+          checkpoint-prefix: ci-cache-v2-recovery-core-tinycc-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-tinycc-current-
           checkpoint-path: |
             ${{ env.ANDROID_NDK_HOME }}
             ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
-            ${{ env.WORK_DIR }}/tinycc-src
+            ${{ env.WORK_DIR }}/tinycc-build-android
             ${{ env.WORK_DIR }}/webkit-android/lib/libtcc.a
             ${{ env.WORK_DIR }}/state/nodes/tinycc.json
             ${{ env.WORK_DIR }}/cache/ccache
@@ -501,9 +502,9 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: save-intermediate
-          key: ci-cache-v2-core-tinycc-intermediates-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-tinycc-${{ env.TINYCC_COMMIT }}-${{ steps.contract.outputs.core }}
+          key: ci-cache-v2-core-tinycc-intermediates-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-tinycc-current-${{ steps.contract.outputs.core }}
           path: |
-            ${{ env.WORK_DIR }}/tinycc-src
+            ${{ env.WORK_DIR }}/tinycc-build-android
             ${{ env.WORK_DIR }}/webkit-android/lib/libtcc.a
             ${{ env.WORK_DIR }}/state/nodes/tinycc.json
             ${{ env.WORK_DIR }}/cache/ccache
@@ -581,11 +582,11 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: save-checkpoint
-          checkpoint-prefix: ci-cache-v2-recovery-core-tinycc-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-tinycc-${{ env.TINYCC_COMMIT }}-
+          checkpoint-prefix: ci-cache-v2-recovery-core-tinycc-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-tinycc-current-
           checkpoint-path: |
             ${{ env.ANDROID_NDK_HOME }}
             ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
-            ${{ env.WORK_DIR }}/tinycc-src
+            ${{ env.WORK_DIR }}/tinycc-build-android
             ${{ env.WORK_DIR }}/webkit-android/lib/libtcc.a
             ${{ env.WORK_DIR }}/state/nodes/tinycc.json
             ${{ env.WORK_DIR }}/cache/ccache

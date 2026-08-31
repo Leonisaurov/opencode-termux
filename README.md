@@ -18,8 +18,8 @@ The build consumes the source trees declared in
 [`ci/source-manifest.json`](ci/source-manifest.json). Android changes live in
 those repository-owned trees and CI rejects missing or nested Git metadata.
 WebKit is cloned from its current branch during the native build and receives
-the versioned Android source overlay under `bun/webkit`; TinyCC remains an
-explicitly locked external dependency.
+the versioned Android source overlay under `bun/webkit`. TinyCC is likewise
+vendored under `bun/tinycc` and compiled directly from that tree.
 
 ## Install (Termux)
 

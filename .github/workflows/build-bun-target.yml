@@ -21,7 +21,7 @@ env:
   ANDROID_NDK_VERSION: "28.1.13356709"
   ICU_VERSION: "75.1"
   ZIG_VERSION: "0.15.2"
-  TINYCC_COMMIT: "b91835d8701523e895a2b447713630069514e291"
+  TINYCC_SOURCE: "current"
   PRODUCT: bun
   WORK_DIR: "${{ github.workspace }}/bun/build"
   ANDROID_NDK_HOME: "${{ github.workspace }}/bun/build/android-ndk"
@@ -54,16 +54,17 @@ jobs:
             --path .github/workflows/build-core.yml
             --path ci/external-sources.lock
             --path bun/webkit
+            --path bun/tinycc
             --path bun/cmake/webkit-android-toolchain.cmake
             --value "ICU_VERSION=$ICU_VERSION"
-            --value "TINYCC_COMMIT=$TINYCC_COMMIT")
+            --value "TINYCC_SOURCE=$TINYCC_SOURCE")
           core_key="$(python3 ci/scripts/cache-contract.py key "${core_args[@]}")"
           bun_args=(--root "$GITHUB_WORKSPACE" --product bun
             --path bun/scripts/build-bun.sh
             --path ci/scripts/env.sh --path .github/workflows/build-bun.yml
             --path ci/source-manifest.json
             --value "BUN_VERSION=$BUN_VERSION"
-            --value "ICU_VERSION=$ICU_VERSION" --value "TINYCC_COMMIT=$TINYCC_COMMIT"
+            --value "ICU_VERSION=$ICU_VERSION"
             --value "BUN_SOURCE_COMMIT=$bun_source_commit"
             --value "CORE_CACHE_KEY=$core_key")
           bun_key="$(python3 ci/scripts/cache-contract.py key "${bun_args[@]}")"
