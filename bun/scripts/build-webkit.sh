@@ -41,6 +41,16 @@ echo "ICU prefix:    $DEPS_PREFIX"
 echo "Toolchain:     $TOOLCHAIN"
 echo ""
 
+# The resumable cache intentionally preserves the source checkout after the
+# monorepo overlay was materialized. Restore that generated checkout to its
+# committed tree before validating it and materializing the overlay again.
+# This only touches the disposable build workspace, never a repository source
+# tree in the monorepo.
+if [ -d "$WEBKIT_SRC/.git" ]; then
+    git -C "$WEBKIT_SRC" reset --hard HEAD >/dev/null
+    git -C "$WEBKIT_SRC" clean -fd >/dev/null
+fi
+
 ensure_external_checkout \
     "$WEBKIT_SRC" \
     "https://github.com/oven-sh/WebKit.git" \
