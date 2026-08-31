@@ -156,6 +156,20 @@ cp -r "$WEBKIT_BUILD/WTF/Headers/wtf/"* "$WEBKIT_OUTPUT/include/wtf/" 2>/dev/nul
 # Copy bmalloc headers
 cp -r "$WEBKIT_BUILD/bmalloc/Headers/bmalloc/"* "$WEBKIT_OUTPUT/include/bmalloc/" 2>/dev/null || true
 
+# Bun's source includes a few JavaScriptCore implementation headers
+# directly.  They are intentionally not part of WebKit's public install set,
+# and recent WebKit builds do not copy them through
+# JavaScriptCore_CopyPrivateHeaders.  Export the headers from the checked-out
+# source tree into the local layout instead of synthesizing API shims.
+for header_name in CatchScope.h JSInternalPromise.h JSCast.h; do
+    source_header="$(find "$WEBKIT_SRC/Source/JavaScriptCore" -type f -name "$header_name" -print -quit)"
+    test -n "$source_header" || {
+        echo "ERROR: WebKit source does not contain JavaScriptCore/$header_name" >&2
+        exit 1
+    }
+    cp "$source_header" "$WEBKIT_OUTPUT/include/JavaScriptCore/$header_name"
+done
+
 # Copy ICU unicode headers
 cp -r "$DEPS_PREFIX/include/unicode/"* "$WEBKIT_OUTPUT/include/unicode/"
 
