@@ -23,6 +23,8 @@ incremental_exec webkit \
     --output "$WEBKIT_OUTPUT"
 
 TOOLCHAIN="$REPO_ROOT/bun/cmake/webkit-android-toolchain.cmake"
+ANDROID_COMPAT_HEADER="$REPO_ROOT/bun/cmake/webkit-android-compat.h"
+test -f "$ANDROID_COMPAT_HEADER"
 
 # Compiler flags matching oven-sh/WebKit's Dockerfile
 DEFAULT_CFLAGS="-fno-omit-frame-pointer -ffunction-sections -fdata-sections -faddrsig -DU_STATIC_IMPLEMENTATION=1"
@@ -80,8 +82,8 @@ cmake \
     -DENABLE_REMOTE_INSPECTOR=ON \
     -DALLOW_LINE_AND_COLUMN_NUMBER_IN_BUILTINS=ON \
     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-    -DCMAKE_C_FLAGS="$DEFAULT_CFLAGS" \
-    -DCMAKE_CXX_FLAGS="$DEFAULT_CFLAGS -fno-exceptions -fno-c++-static-destructors" \
+    -DCMAKE_C_FLAGS="$DEFAULT_CFLAGS -include $ANDROID_COMPAT_HEADER" \
+    -DCMAKE_CXX_FLAGS="$DEFAULT_CFLAGS -include $ANDROID_COMPAT_HEADER -fno-exceptions -fno-c++-static-destructors" \
     -DCMAKE_C_FLAGS_RELEASE="$RELEASE_FLAGS" \
     -DCMAKE_CXX_FLAGS_RELEASE="$RELEASE_FLAGS" \
     -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=lld" \
