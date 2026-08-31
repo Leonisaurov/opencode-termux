@@ -58,7 +58,7 @@ SOURCES=(
     tccrun.c
     arm64-gen.c
     arm64-link.c
-    arm-asm.c
+    arm64-asm.c
 )
 
 cd "$TINYCC_SRC"
