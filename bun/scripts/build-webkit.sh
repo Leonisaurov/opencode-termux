@@ -27,11 +27,7 @@ TOOLCHAIN="$REPO_ROOT/bun/cmake/webkit-android-toolchain.cmake"
 ANDROID_COMPAT_HEADER="$REPO_ROOT/bun/cmake/webkit-android-compat.h"
 test -f "$ANDROID_COMPAT_HEADER"
 test -d "$WEBKIT_SOURCE_OVERLAY"
-test -f "$WEBKIT_SOURCE_OVERLAY/Source/JavaScriptCore/runtime/InitializeThreading.cpp"
-test -f "$WEBKIT_SOURCE_OVERLAY/Source/bmalloc/bmalloc/SystemHeap.cpp"
-test -f "$WEBKIT_SOURCE_OVERLAY/Source/WTF/wtf/unix/MemoryPressureHandlerUnix.cpp"
-test -f "$WEBKIT_SOURCE_OVERLAY/Source/bmalloc/libpas/src/libpas/pas_thread_local_cache.c"
-test -f "$WEBKIT_SOURCE_OVERLAY/Source/JavaScriptCore/HandleSet.h"
+test -n "$(find "$WEBKIT_SOURCE_OVERLAY" -type f -print -quit)"
 
 # Compiler flags matching oven-sh/WebKit's Dockerfile
 DEFAULT_CFLAGS="-fno-omit-frame-pointer -ffunction-sections -fdata-sections -faddrsig -DU_STATIC_IMPLEMENTATION=1"
@@ -55,22 +51,12 @@ ensure_external_checkout \
 # Android changes live in the monorepo and are copied into that checkout as
 # source files, so the build never applies a patch or relies on a dirty source
 # repository.
-while IFS= read -r relative_path; do
-    source_file="$WEBKIT_SOURCE_OVERLAY/$relative_path"
+while IFS= read -r source_file; do
+    relative_path="${source_file#"$WEBKIT_SOURCE_OVERLAY"/}"
     target_file="$WEBKIT_SRC/$relative_path"
-    test -f "$source_file" || {
-        echo "ERROR: missing WebKit source overlay: $source_file" >&2
-        exit 1
-    }
     mkdir -p "$(dirname "$target_file")"
     cp "$source_file" "$target_file"
-done <<'EOF'
-Source/JavaScriptCore/runtime/InitializeThreading.cpp
-Source/bmalloc/bmalloc/SystemHeap.cpp
-Source/bmalloc/libpas/src/libpas/pas_thread_local_cache.c
-Source/WTF/wtf/unix/MemoryPressureHandlerUnix.cpp
-Source/JavaScriptCore/HandleSet.h
-EOF
+done < <(find "$WEBKIT_SOURCE_OVERLAY" -type f -print)
 
 # Verify ICU is built
 if [ ! -f "$DEPS_PREFIX/lib/libicuuc.a" ]; then
