@@ -22,6 +22,7 @@ env:
   BUN_VERSION: "${{ inputs.bun_version || '1.2.13' }}"
   ANDROID_API: "24"
   ANDROID_NDK_VERSION: "28.1.13356709"
+  WEBKIT_COMMIT: "017930ebf915121f8f593bef61cbbca82d78132d"
   ICU_VERSION: "75.1"
   ZIG_VERSION: "0.15.2"
   TINYCC_SOURCE: "current"
@@ -177,8 +178,8 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: restore-intermediate
-          key: ci-cache-v2-core-webkit-intermediates-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-current-${{ steps.contract.outputs.core }}
-          restore-prefix: ci-cache-v2-core-webkit-intermediates-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-current-
+          key: ci-cache-v2-core-webkit-intermediates-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-${{ steps.contract.outputs.core }}
+          restore-prefix: ci-cache-v2-core-webkit-intermediates-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-
           path: |
             ${{ env.WORK_DIR }}/webkit-src
             ${{ env.WORK_DIR }}/webkit-build
@@ -236,7 +237,7 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: restore-checkpoint
-          checkpoint-prefix: ci-cache-v2-recovery-core-webkit-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-current-
+          checkpoint-prefix: ci-cache-v2-recovery-core-webkit-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-
           checkpoint-path: |
             ${{ env.ANDROID_NDK_HOME }}
             ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
@@ -313,8 +314,8 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: restore-intermediate
-          key: ci-cache-v2-bun-intermediates-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-current-zig-${{ steps.contract.outputs.bun }}
-          restore-prefix: ci-cache-v2-bun-intermediates-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-current-zig-
+          key: ci-cache-v2-bun-intermediates-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-zig-${{ steps.contract.outputs.bun }}
+          restore-prefix: ci-cache-v2-bun-intermediates-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-zig-
           path: |
             ${{ env.WORK_DIR }}/bun-build
             ${{ env.WORK_DIR }}/cache
@@ -325,7 +326,7 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: restore-checkpoint
-          checkpoint-prefix: ci-cache-v2-recovery-bun-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-current-zig-${{ env.BUN_SOURCE_COMMIT }}-
+          checkpoint-prefix: ci-cache-v2-recovery-bun-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-zig-${{ env.BUN_SOURCE_COMMIT }}-
           checkpoint-path: |
             ${{ github.workspace }}/bun/src
             ${{ env.WORK_DIR }}/bun-build
@@ -461,7 +462,7 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: save-intermediate
-          key: ci-cache-v2-bun-intermediates-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-current-zig-${{ env.BUN_SOURCE_COMMIT }}-${{ steps.contract.outputs.bun }}
+          key: ci-cache-v2-bun-intermediates-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-zig-${{ env.BUN_SOURCE_COMMIT }}-${{ steps.contract.outputs.bun }}
           path: |
             ${{ env.WORK_DIR }}/bun-build
             ${{ env.WORK_DIR }}/cache
@@ -488,7 +489,7 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: save-intermediate
-          key: ci-cache-v2-core-webkit-intermediates-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-current-${{ steps.contract.outputs.core }}
+          key: ci-cache-v2-core-webkit-intermediates-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-${{ steps.contract.outputs.core }}
           path: |
             ${{ env.WORK_DIR }}/webkit-src
             ${{ env.WORK_DIR }}/webkit-build
@@ -566,7 +567,7 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: save-checkpoint
-          checkpoint-prefix: ci-cache-v2-recovery-core-webkit-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-current-
+          checkpoint-prefix: ci-cache-v2-recovery-core-webkit-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-
           checkpoint-path: |
             ${{ env.ANDROID_NDK_HOME }}
             ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
@@ -597,7 +598,7 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: save-checkpoint
-          checkpoint-prefix: ci-cache-v2-recovery-bun-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-current-zig-${{ env.BUN_SOURCE_COMMIT }}-
+          checkpoint-prefix: ci-cache-v2-recovery-bun-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-zig-${{ env.BUN_SOURCE_COMMIT }}-
           checkpoint-path: |
             ${{ github.workspace }}/bun/src
             ${{ env.WORK_DIR }}/bun-build

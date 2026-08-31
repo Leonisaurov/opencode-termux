@@ -1,2 +1,13 @@
-# WebKit and TinyCC are repository-owned source trees. They are intentionally
-# absent from this file; the native build consumes bun/webkit and bun/tinycc.
+{
+  "schema": 1,
+  "sources": {
+    "webkit": {
+      "remote": "https://github.com/oven-sh/WebKit.git",
+      "commit": "017930ebf915121f8f593bef61cbbca82d78132d"
+    },
+    "tinycc": {
+      "remote": "https://github.com/oven-sh/tinycc.git",
+      "commit": "b91835d8701523e895a2b447713630069514e291e"
+    }
+  }
+}

@@ -16,8 +16,9 @@ source "$SCRIPT_DIR/../../ci/scripts/env.sh"
 incremental_exec webkit \
     --input "$SCRIPT_DIR/build-webkit.sh" --input "$REPO_ROOT/ci/scripts/env.sh" \
     --input "$REPO_ROOT/bun/cmake/webkit-android-toolchain.cmake" \
+    --input "$REPO_ROOT/ci/external-sources.lock" \
     --input "$REPO_ROOT/bun/webkit" --input "$WEBKIT_SRC" \
-    --value "WEBKIT_SOURCE=current" --value "ANDROID_API=$ANDROID_API" \
+    --value "WEBKIT_COMMIT=$WEBKIT_COMMIT" --value "ANDROID_API=$ANDROID_API" \
     --value "ANDROID_NDK_VERSION=$ANDROID_NDK_VERSION" \
     --dep "$BUN_STATE_DIR/nodes/icu.json" \
     --output "$WEBKIT_OUTPUT"
@@ -44,10 +45,11 @@ echo "ICU prefix:    $DEPS_PREFIX"
 echo "Toolchain:     $TOOLCHAIN"
 echo ""
 
-if [ ! -f "$WEBKIT_SRC/CMakeLists.txt" ]; then
-    mkdir -p "$(dirname "$WEBKIT_SRC")"
-    git clone --depth=1 https://github.com/oven-sh/WebKit.git "$WEBKIT_SRC"
-fi
+ensure_external_checkout \
+    "$WEBKIT_SRC" \
+    "https://github.com/oven-sh/WebKit.git" \
+    "$WEBKIT_COMMIT" \
+    "WebKit"
 
 # The complete WebKit checkout is fetched into the build workspace. The
 # Android changes live in the monorepo and are copied into that checkout as
@@ -155,20 +157,6 @@ cp -r "$WEBKIT_BUILD/WTF/Headers/wtf/"* "$WEBKIT_OUTPUT/include/wtf/" 2>/dev/nul
 
 # Copy bmalloc headers
 cp -r "$WEBKIT_BUILD/bmalloc/Headers/bmalloc/"* "$WEBKIT_OUTPUT/include/bmalloc/" 2>/dev/null || true
-
-# Bun's source includes a few JavaScriptCore implementation headers
-# directly.  They are intentionally not part of WebKit's public install set,
-# and recent WebKit builds do not copy them through
-# JavaScriptCore_CopyPrivateHeaders.  Export the headers from the checked-out
-# source tree into the local layout instead of synthesizing API shims.
-for header_name in CatchScope.h JSInternalPromise.h JSCast.h; do
-    source_header="$(find "$WEBKIT_SRC/Source/JavaScriptCore" -type f -name "$header_name" -print -quit)"
-    test -n "$source_header" || {
-        echo "ERROR: WebKit source does not contain JavaScriptCore/$header_name" >&2
-        exit 1
-    }
-    cp "$source_header" "$WEBKIT_OUTPUT/include/JavaScriptCore/$header_name"
-done
 
 # Copy ICU unicode headers
 cp -r "$DEPS_PREFIX/include/unicode/"* "$WEBKIT_OUTPUT/include/unicode/"

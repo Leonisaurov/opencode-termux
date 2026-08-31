@@ -19,6 +19,7 @@ env:
   BUN_VERSION: "${{ github.event.inputs.bun_version || '1.2.13' }}"
   ANDROID_API: "24"
   ANDROID_NDK_VERSION: "28.1.13356709"
+  WEBKIT_COMMIT: "017930ebf915121f8f593bef61cbbca82d78132d"
   ICU_VERSION: "75.1"
   ZIG_VERSION: "0.15.2"
   TINYCC_SOURCE: "current"
@@ -122,7 +123,7 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: restore-checkpoint
-          checkpoint-prefix: ci-cache-v2-recovery-bun-target-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-webkit-current-contract-${{ steps.contract.outputs.target }}-
+          checkpoint-prefix: ci-cache-v2-recovery-bun-target-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-webkit-${{ env.WEBKIT_COMMIT }}-contract-${{ steps.contract.outputs.target }}-
           checkpoint-path: |
             ${{ env.WORK_DIR }}/bun-target
             ${{ env.WORK_DIR }}/${{ env.TARGET_NAME }}.tgz
@@ -196,7 +197,7 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: save-checkpoint
-          checkpoint-prefix: ci-cache-v2-recovery-bun-target-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-webkit-current-contract-${{ steps.contract.outputs.target }}-
+          checkpoint-prefix: ci-cache-v2-recovery-bun-target-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-webkit-${{ env.WEBKIT_COMMIT }}-contract-${{ steps.contract.outputs.target }}-
           checkpoint-path: |
             ${{ env.WORK_DIR }}/bun-target
             ${{ env.WORK_DIR }}/${{ env.TARGET_NAME }}.tgz
