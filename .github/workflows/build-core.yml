@@ -57,7 +57,7 @@ jobs:
             --path bun/scripts/build-icu.sh --path bun/scripts/build-webkit.sh
             --path bun/scripts/build-tinycc.sh --path ci/scripts/env.sh
             --path .github/workflows/build-core.yml
-            --path ci/external-sources.lock
+            --path ci/external-sources.lock --path ci/source-manifest.json
             --path bun/webkit
             --path bun/tinycc
             --path bun/cmake/webkit-android-toolchain.cmake
