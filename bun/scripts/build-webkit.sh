@@ -28,6 +28,7 @@ test -f "$ANDROID_COMPAT_HEADER"
 test -d "$WEBKIT_SOURCE_OVERLAY"
 test -f "$WEBKIT_SOURCE_OVERLAY/Source/JavaScriptCore/runtime/InitializeThreading.cpp"
 test -f "$WEBKIT_SOURCE_OVERLAY/Source/bmalloc/bmalloc/SystemHeap.cpp"
+test -f "$WEBKIT_SOURCE_OVERLAY/Source/WTF/wtf/unix/MemoryPressureHandlerUnix.cpp"
 test -f "$WEBKIT_SOURCE_OVERLAY/Source/bmalloc/libpas/src/libpas/pas_thread_local_cache.c"
 
 # Compiler flags matching oven-sh/WebKit's Dockerfile
@@ -64,6 +65,7 @@ done <<'EOF'
 Source/JavaScriptCore/runtime/InitializeThreading.cpp
 Source/bmalloc/bmalloc/SystemHeap.cpp
 Source/bmalloc/libpas/src/libpas/pas_thread_local_cache.c
+Source/WTF/wtf/unix/MemoryPressureHandlerUnix.cpp
 EOF
 
 # Verify ICU is built
