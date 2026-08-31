@@ -30,6 +30,7 @@ test -f "$WEBKIT_SOURCE_OVERLAY/Source/JavaScriptCore/runtime/InitializeThreadin
 test -f "$WEBKIT_SOURCE_OVERLAY/Source/bmalloc/bmalloc/SystemHeap.cpp"
 test -f "$WEBKIT_SOURCE_OVERLAY/Source/WTF/wtf/unix/MemoryPressureHandlerUnix.cpp"
 test -f "$WEBKIT_SOURCE_OVERLAY/Source/bmalloc/libpas/src/libpas/pas_thread_local_cache.c"
+test -f "$WEBKIT_SOURCE_OVERLAY/Source/JavaScriptCore/HandleSet.h"
 
 # Compiler flags matching oven-sh/WebKit's Dockerfile
 DEFAULT_CFLAGS="-fno-omit-frame-pointer -ffunction-sections -fdata-sections -faddrsig -DU_STATIC_IMPLEMENTATION=1"
@@ -66,6 +67,7 @@ Source/JavaScriptCore/runtime/InitializeThreading.cpp
 Source/bmalloc/bmalloc/SystemHeap.cpp
 Source/bmalloc/libpas/src/libpas/pas_thread_local_cache.c
 Source/WTF/wtf/unix/MemoryPressureHandlerUnix.cpp
+Source/JavaScriptCore/HandleSet.h
 EOF
 
 # Verify ICU is built
