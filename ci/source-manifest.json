@@ -30,6 +30,10 @@
       "path": "opentui/src/kilo",
       "mode": "vendored",
       "commit": "5b3d520550e118fd436f682bd67242b95a05318b"
+    },
+    "webkit-android-overlay": {
+      "path": "bun/webkit",
+      "mode": "vendored-overlay"
     }
   }
 }

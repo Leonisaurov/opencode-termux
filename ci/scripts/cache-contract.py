@@ -73,7 +73,7 @@ def contract(root: Path, product: str, paths: list[str], values: list[str]) -> d
         "ndk": value("ANDROID_NDK_VERSION"),
         "zig": value("ZIG_VERSION"),
         "rust": value("RUST_TOOLCHAIN", "unknown"),
-        "upstream": value("UPSTREAM_COMMIT", value("WEBKIT_COMMIT")),
+        "upstream": value("UPSTREAM_COMMIT", "current"),
         "values": dict(item.split("=", 1) for item in values),
         "cache_engine": {
             path: path_digest((root / path).resolve())

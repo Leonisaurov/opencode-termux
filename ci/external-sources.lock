@@ -1,4 +1,5 @@
-# External sources that are fetched by the native build. These are immutable
-# commits; the build scripts must verify the resolved commit before compiling.
-webkit https://github.com/oven-sh/WebKit.git 017930ebf915121f8f593bef61cbbca82d78132d
+# External sources that are fetched by the native build.
+# WebKit is intentionally not listed here: build-webkit.sh consumes the
+# current checkout and overlays the versioned Android source files from
+# bun/webkit.
 tinycc https://github.com/oven-sh/tinycc.git b91835d8701523e895a2b447713630069514e291

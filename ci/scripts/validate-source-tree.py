@@ -41,7 +41,7 @@ def main() -> int:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
-    print(f"validated {len(manifest['sources'])} pinned source checkouts")
+    print(f"validated {len(manifest['sources'])} repository-owned source trees")
     return 0
 
 

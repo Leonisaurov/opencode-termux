@@ -21,7 +21,6 @@ env:
   ANDROID_NDK_VERSION: "28.1.13356709"
   ICU_VERSION: "75.1"
   ZIG_VERSION: "0.15.2"
-  WEBKIT_COMMIT: "017930ebf915121f8f593bef61cbbca82d78132d"
   TINYCC_COMMIT: "b91835d8701523e895a2b447713630069514e291"
   PRODUCT: bun
   WORK_DIR: "${{ github.workspace }}/bun/build"
@@ -54,15 +53,16 @@ jobs:
             --path bun/scripts/build-tinycc.sh --path ci/scripts/env.sh
             --path .github/workflows/build-core.yml
             --path ci/external-sources.lock
+            --path bun/webkit
             --path bun/cmake/webkit-android-toolchain.cmake
-            --value "ICU_VERSION=$ICU_VERSION" --value "WEBKIT_COMMIT=$WEBKIT_COMMIT"
+            --value "ICU_VERSION=$ICU_VERSION"
             --value "TINYCC_COMMIT=$TINYCC_COMMIT")
           core_key="$(python3 ci/scripts/cache-contract.py key "${core_args[@]}")"
           bun_args=(--root "$GITHUB_WORKSPACE" --product bun
             --path bun/scripts/build-bun.sh
             --path ci/scripts/env.sh --path .github/workflows/build-bun.yml
             --path ci/source-manifest.json
-            --value "BUN_VERSION=$BUN_VERSION" --value "WEBKIT_COMMIT=$WEBKIT_COMMIT"
+            --value "BUN_VERSION=$BUN_VERSION"
             --value "ICU_VERSION=$ICU_VERSION" --value "TINYCC_COMMIT=$TINYCC_COMMIT"
             --value "BUN_SOURCE_COMMIT=$bun_source_commit"
             --value "CORE_CACHE_KEY=$core_key")
@@ -72,7 +72,7 @@ jobs:
             --path .github/workflows/build-bun-target.yml
             --path ci/scripts/env.sh
             --value "BUN_CACHE_KEY=$bun_key" --value "BUN_VERSION=$BUN_VERSION"
-            --value "WEBKIT_COMMIT=$WEBKIT_COMMIT")
+            --value "WEBKIT_SOURCE=current")
           target_key="$(python3 ci/scripts/cache-contract.py key "${target_args[@]}")"
           echo "target=$target_key" >> "$GITHUB_OUTPUT"
 
@@ -121,7 +121,7 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: restore-checkpoint
-          checkpoint-prefix: ci-cache-v2-recovery-bun-target-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-webkit-${{ env.WEBKIT_COMMIT }}-contract-${{ steps.contract.outputs.target }}-
+          checkpoint-prefix: ci-cache-v2-recovery-bun-target-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-webkit-current-contract-${{ steps.contract.outputs.target }}-
           checkpoint-path: |
             ${{ env.WORK_DIR }}/bun-target
             ${{ env.WORK_DIR }}/${{ env.TARGET_NAME }}.tgz
@@ -195,7 +195,7 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: save-checkpoint
-          checkpoint-prefix: ci-cache-v2-recovery-bun-target-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-webkit-${{ env.WEBKIT_COMMIT }}-contract-${{ steps.contract.outputs.target }}-
+          checkpoint-prefix: ci-cache-v2-recovery-bun-target-${{ runner.os }}-${{ runner.arch }}-bun-${{ env.BUN_VERSION }}-api-${{ env.ANDROID_API }}-webkit-current-contract-${{ steps.contract.outputs.target }}-
           checkpoint-path: |
             ${{ env.WORK_DIR }}/bun-target
             ${{ env.WORK_DIR }}/${{ env.TARGET_NAME }}.tgz

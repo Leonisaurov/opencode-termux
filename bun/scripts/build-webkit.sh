@@ -16,8 +16,8 @@ source "$SCRIPT_DIR/../../ci/scripts/env.sh"
 incremental_exec webkit \
     --input "$SCRIPT_DIR/build-webkit.sh" --input "$REPO_ROOT/ci/scripts/env.sh" \
     --input "$REPO_ROOT/bun/cmake/webkit-android-toolchain.cmake" \
-    --input "$REPO_ROOT/ci/external-sources.lock" --input "$WEBKIT_SRC" \
-    --value "WEBKIT_COMMIT=$WEBKIT_COMMIT" --value "ANDROID_API=$ANDROID_API" \
+    --input "$REPO_ROOT/bun/webkit" --input "$WEBKIT_SRC" \
+    --value "WEBKIT_SOURCE=current" --value "ANDROID_API=$ANDROID_API" \
     --value "ANDROID_NDK_VERSION=$ANDROID_NDK_VERSION" \
     --dep "$BUN_STATE_DIR/nodes/icu.json" \
     --output "$WEBKIT_OUTPUT"
@@ -25,6 +25,9 @@ incremental_exec webkit \
 TOOLCHAIN="$REPO_ROOT/bun/cmake/webkit-android-toolchain.cmake"
 ANDROID_COMPAT_HEADER="$REPO_ROOT/bun/cmake/webkit-android-compat.h"
 test -f "$ANDROID_COMPAT_HEADER"
+test -d "$WEBKIT_SOURCE_OVERLAY"
+test -f "$WEBKIT_SOURCE_OVERLAY/Source/JavaScriptCore/runtime/InitializeThreading.cpp"
+test -f "$WEBKIT_SOURCE_OVERLAY/Source/bmalloc/libpas/src/libpas/pas_thread_local_cache.c"
 
 # Compiler flags matching oven-sh/WebKit's Dockerfile
 DEFAULT_CFLAGS="-fno-omit-frame-pointer -ffunction-sections -fdata-sections -faddrsig -DU_STATIC_IMPLEMENTATION=1"
@@ -38,11 +41,28 @@ echo "ICU prefix:    $DEPS_PREFIX"
 echo "Toolchain:     $TOOLCHAIN"
 echo ""
 
-ensure_external_checkout \
-    "$WEBKIT_SRC" \
-    "https://github.com/oven-sh/WebKit.git" \
-    "$WEBKIT_COMMIT" \
-    "WebKit"
+if [ ! -f "$WEBKIT_SRC/CMakeLists.txt" ]; then
+    mkdir -p "$(dirname "$WEBKIT_SRC")"
+    git clone --depth=1 https://github.com/oven-sh/WebKit.git "$WEBKIT_SRC"
+fi
+
+# The complete WebKit checkout is fetched into the build workspace. The
+# Android changes live in the monorepo and are copied into that checkout as
+# source files, so the build never applies a patch or relies on a dirty source
+# repository.
+while IFS= read -r relative_path; do
+    source_file="$WEBKIT_SOURCE_OVERLAY/$relative_path"
+    target_file="$WEBKIT_SRC/$relative_path"
+    test -f "$source_file" || {
+        echo "ERROR: missing WebKit source overlay: $source_file" >&2
+        exit 1
+    }
+    mkdir -p "$(dirname "$target_file")"
+    cp "$source_file" "$target_file"
+done <<'EOF'
+Source/JavaScriptCore/runtime/InitializeThreading.cpp
+Source/bmalloc/libpas/src/libpas/pas_thread_local_cache.c
+EOF
 
 # Verify ICU is built
 if [ ! -f "$DEPS_PREFIX/lib/libicuuc.a" ]; then
@@ -135,10 +155,10 @@ cp -r "$DEPS_PREFIX/include/unicode/"* "$WEBKIT_OUTPUT/include/unicode/"
 # Create cmakeconfig.h at root of WEBKIT_OUTPUT (needed by SetupWebKit.cmake)
 cp "$WEBKIT_BUILD/cmakeconfig.h" "$WEBKIT_OUTPUT/"
 if grep -q '^#define BUN_WEBKIT_VERSION ' "$WEBKIT_OUTPUT/cmakeconfig.h"; then
-    sed -i "s|^#define BUN_WEBKIT_VERSION .*|#define BUN_WEBKIT_VERSION \"${WEBKIT_COMMIT}\"|" \
+    sed -i "s|^#define BUN_WEBKIT_VERSION .*|#define BUN_WEBKIT_VERSION \"current\"|" \
         "$WEBKIT_OUTPUT/cmakeconfig.h"
 else
-    echo "#define BUN_WEBKIT_VERSION \"${WEBKIT_COMMIT}\"" >> "$WEBKIT_OUTPUT/cmakeconfig.h"
+    echo '#define BUN_WEBKIT_VERSION "current"' >> "$WEBKIT_OUTPUT/cmakeconfig.h"
 fi
 
 # Set up directory structure that SetupWebKit.cmake expects for WEBKIT_LOCAL
