@@ -58,15 +58,23 @@ ensure_external_checkout \
     "WebKit"
 
 # The complete WebKit checkout is fetched into the build workspace. The
-# Android changes live in the monorepo and are copied into that checkout as
-# source files, so the build never applies a patch or relies on a dirty source
-# repository.
-while IFS= read -r source_file; do
-    relative_path="${source_file#"$WEBKIT_SOURCE_OVERLAY"/}"
+# Android source additions live in the monorepo and are copied into that
+# checkout; compiler-level Bionic adaptations are supplied by the versioned
+# compatibility header above. Keep the overlay list explicit so a source
+# file from a different WebKit layout cannot silently replace the pinned
+# Bun-compatible checkout.
+while IFS= read -r relative_path; do
+    source_file="$WEBKIT_SOURCE_OVERLAY/$relative_path"
     target_file="$WEBKIT_SRC/$relative_path"
+    test -f "$source_file" || {
+        echo "ERROR: missing WebKit source overlay: $source_file" >&2
+        exit 1
+    }
     mkdir -p "$(dirname "$target_file")"
     cp "$source_file" "$target_file"
-done < <(find "$WEBKIT_SOURCE_OVERLAY" -type f -print)
+done <<'EOF'
+Source/JavaScriptCore/HandleSet.h
+EOF
 
 # Verify ICU is built
 if [ ! -f "$DEPS_PREFIX/lib/libicuuc.a" ]; then
