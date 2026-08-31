@@ -176,6 +176,17 @@ mkdir -p "$WEBKIT_OUTPUT/WTF/Headers"
 # Copy headers into the WEBKIT_LOCAL layout
 cp -r "$WEBKIT_OUTPUT/include/JavaScriptCore/"* "$WEBKIT_OUTPUT/JavaScriptCore/Headers/JavaScriptCore/" 2>/dev/null || true
 cp -r "$WEBKIT_OUTPUT/include/JavaScriptCore/"* "$WEBKIT_OUTPUT/JavaScriptCore/PrivateHeaders/JavaScriptCore/" 2>/dev/null || true
+# Bun includes this JSC heap header directly, but some WebKit builds do not
+# expose it through JavaScriptCore_CopyPrivateHeaders. Export it from the
+# checked-out WebKit source into the same versioned local layout.
+HANDLE_SET_HEADER="$(find "$WEBKIT_SRC/Source/JavaScriptCore" -type f -name HandleSet.h -print -quit)"
+test -n "$HANDLE_SET_HEADER" || {
+    echo "ERROR: WebKit source does not contain JavaScriptCore/HandleSet.h" >&2
+    exit 1
+}
+cp "$HANDLE_SET_HEADER" "$WEBKIT_OUTPUT/include/JavaScriptCore/HandleSet.h"
+cp "$HANDLE_SET_HEADER" "$WEBKIT_OUTPUT/JavaScriptCore/Headers/JavaScriptCore/HandleSet.h"
+cp "$HANDLE_SET_HEADER" "$WEBKIT_OUTPUT/JavaScriptCore/PrivateHeaders/JavaScriptCore/HandleSet.h"
 find "$WEBKIT_BUILD/JavaScriptCore/DerivedSources/" -name "*.json" -exec cp {} "$WEBKIT_OUTPUT/JavaScriptCore/DerivedSources/inspector/" \; 2>/dev/null || true
 cp -r "$WEBKIT_OUTPUT/include/bmalloc" "$WEBKIT_OUTPUT/bmalloc/Headers/" 2>/dev/null || true
 cp -r "$WEBKIT_OUTPUT/include/wtf" "$WEBKIT_OUTPUT/WTF/Headers/" 2>/dev/null || true
