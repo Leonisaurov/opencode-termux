@@ -14,11 +14,12 @@ Android CLI, code-mode host, and sandbox helper.
 Bun `1.2.13`, OpenCode `1.3.13`, Android API 24, and the `aarch64` target are
 deliberately pinned for compatibility with the Android source ports.
 
-The build consumes the exact source trees declared in
+The build consumes the source trees declared in
 [`ci/source-manifest.json`](ci/source-manifest.json). Android changes live in
-those pinned commits and CI rejects missing, dirty, or unexpected source
-trees. WebKit and TinyCC are pinned in
-[`ci/external-sources.lock`](ci/external-sources.lock).
+those repository-owned trees and CI rejects missing or nested Git metadata.
+WebKit is cloned from its current branch during the native build and receives
+the versioned Android source overlay under `bun/webkit`; TinyCC remains an
+explicitly locked external dependency.
 
 ## Install (Termux)
 

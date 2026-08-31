@@ -252,7 +252,7 @@ jobs:
           source ci/scripts/env.sh && ./bun/scripts/build-icu.sh
           df -h .
 
-      - name: Build pinned WebKit/JSC source
+      - name: Build WebKit/JSC from current source
         if: steps.cache-webkit.outputs.cache-hit != 'true' || steps.validate-webkit.outputs.ready != 'true'
         run: |
           source ci/scripts/env.sh
