@@ -40,3 +40,4 @@ static inline int bun_android_pthread_getname_np(pthread_t, char*, size_t)
 #define pthread_getname_np bun_android_pthread_getname_np
 #endif
 #endif
+#endif
