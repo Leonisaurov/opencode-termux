@@ -43,7 +43,7 @@
 #endif
 
 /* PlayStation does not currently support the backtrace API. Android API versions < 33 don't, either. Windows does not either. MUSL also doesn't have execinfo.h. */
-#if !PAS_PLATFORM(PLAYSTATION) && (!PAS_OS(ANDROID) || __ANDROID_API__ >= 33) && !PAS_OS(WINDOWS) && __has_include(<execinfo.h>)
+#if !PAS_PLATFORM(PLAYSTATION) && (!defined(__ANDROID__) || __ANDROID_API__ >= 33) && !PAS_OS(WINDOWS) && __has_include(<execinfo.h>)
 #include <execinfo.h>
 #else
 size_t backtrace(void** buffer, size_t size)
