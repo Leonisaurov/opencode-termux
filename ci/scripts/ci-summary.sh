@@ -8,6 +8,8 @@ set -euo pipefail
 : "${COMPILER_CACHE_HITS:=0}"
 : "${COMPILER_CACHE_MISSES:=0}"
 : "${BUILD_START_SECONDS:=$(date +%s)}"
+: "${BUILD_SCENARIO:=unspecified}"
+: "${OUTPUT_VALIDATION:=not-run}"
 
 ci_cache_result() {
     local output_name="$1" cache_hit="${2:-false}"
@@ -38,9 +40,13 @@ ci_summary() {
     duration=$((now - BUILD_START_SECONDS))
     export BUILD_DURATION_SECONDS="$duration"
     {
+        echo "BUILD_SCENARIO=$BUILD_SCENARIO"
+        echo "RUNNER_OS=${RUNNER_OS:-unknown}"
+        echo "RUNNER_ARCH=${RUNNER_ARCH:-unknown}"
         echo "CACHE_DEPENDENCIES=$CACHE_DEPENDENCIES"
         echo "CACHE_INTERMEDIATES=$CACHE_INTERMEDIATES"
         echo "BUILD_STATE=$BUILD_STATE"
+        echo "OUTPUT_VALIDATION=$OUTPUT_VALIDATION"
         echo "COMPILER_CACHE_HITS=$COMPILER_CACHE_HITS"
         echo "COMPILER_CACHE_MISSES=$COMPILER_CACHE_MISSES"
         echo "BUILD_DURATION_SECONDS=$BUILD_DURATION_SECONDS"
