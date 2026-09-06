@@ -45,7 +45,7 @@ ci/zram.ko.zst
 tmp/
 
 # Session-local planning notes
-tasks/
+/tasks/
 
 # Local Bun test fixtures
 bun/test/*/node_modules/

@@ -16,6 +16,8 @@ def main() -> None:
     assert len(sources) == len(set(sources))
     assert "tccdbg.c" in sources
     assert all((TINYCC / source).is_file() for source in sources)
+    assert '--output "$TINYCC_BUILD/libtcc.a"' in script
+    assert 'ln -s "$TINYCC_LINK_TARGET" "$TINYCC_LINK"' in script
 
 
 if __name__ == "__main__":

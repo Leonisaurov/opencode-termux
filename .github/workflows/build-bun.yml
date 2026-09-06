@@ -154,6 +154,7 @@ jobs:
         with:
           path: |
             ${{ env.WORK_DIR }}/webkit-android
+            ${{ env.WORK_DIR }}/tinycc-build-android
             ${{ env.WORK_DIR }}/state/nodes/webkit.json
             ${{ env.WORK_DIR }}/state/nodes/tinycc.json
           key: ${{ steps.contract.outputs.core }}-webkit
@@ -530,6 +531,7 @@ jobs:
           key: ${{ steps.contract.outputs.core }}-webkit
           path: |
             ${{ env.WORK_DIR }}/webkit-android
+            ${{ env.WORK_DIR }}/tinycc-build-android
             ${{ env.WORK_DIR }}/state/nodes/webkit.json
             ${{ env.WORK_DIR }}/state/nodes/tinycc.json
 

@@ -112,6 +112,7 @@ jobs:
         with:
           path: |
             ${{ env.WORK_DIR }}/webkit-android
+            ${{ env.WORK_DIR }}/tinycc-build-android
             ${{ env.WORK_DIR }}/state/nodes/webkit.json
             ${{ env.WORK_DIR }}/state/nodes/tinycc.json
           key: ${{ steps.contract.outputs.key }}-webkit
@@ -226,7 +227,7 @@ jobs:
           set -euo pipefail
           node_valid() {
             python3 ci/scripts/build-state.py verify --root "$GITHUB_WORKSPACE" \
-              --state-dir "$WORK_DIR/state" --node "$1" >/dev/null 2>&1
+              --state-dir "$WORK_DIR/state" --node "$1"
           }
           icu=false
           webkit=false
@@ -272,7 +273,7 @@ jobs:
           set -euo pipefail
           node_valid() {
             python3 ci/scripts/build-state.py verify --root "$GITHUB_WORKSPACE" \
-              --state-dir "$WORK_DIR/state" --node "$1" >/dev/null 2>&1
+              --state-dir "$WORK_DIR/state" --node "$1"
           }
           icu=false
           webkit=false
@@ -366,6 +367,7 @@ jobs:
           key: ${{ steps.contract.outputs.key }}-webkit
           path: |
             ${{ env.WORK_DIR }}/webkit-android
+            ${{ env.WORK_DIR }}/tinycc-build-android
             ${{ env.WORK_DIR }}/state/nodes/webkit.json
             ${{ env.WORK_DIR }}/state/nodes/tinycc.json
 

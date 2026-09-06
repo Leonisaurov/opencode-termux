@@ -20,16 +20,16 @@ incremental_exec tinycc \
     --input "$SCRIPT_DIR/build-tinycc.sh" --input "$REPO_ROOT/ci/scripts/env.sh" --input "$TINYCC_SRC" \
     --value "TINYCC_SOURCE=current" --value "ANDROID_API=$ANDROID_API" \
     --dep "$BUN_STATE_DIR/nodes/webkit.json" \
-    --output "$WEBKIT_OUTPUT/lib/libtcc.a"
+    --output "$TINYCC_BUILD/libtcc.a"
 
 echo "=== Building TinyCC (libtcc.a) for Android aarch64 ==="
 
 # Check if already built and installed. The state wrapper exits before this
 # body on a validated hit; on a miss we must keep the objects and allow the
 # changed source/configuration to rebuild incrementally.
-if [ "${BUILD_STATE_MISS:-0}" != "1" ] && [ -f "$WEBKIT_OUTPUT/lib/libtcc.a" ]; then
-    echo ">>> libtcc.a already exists at $WEBKIT_OUTPUT/lib/libtcc.a"
-    ls -la "$WEBKIT_OUTPUT/lib/libtcc.a"
+if [ "${BUILD_STATE_MISS:-0}" != "1" ] && [ -f "$TINYCC_BUILD/libtcc.a" ]; then
+    echo ">>> libtcc.a already exists at $TINYCC_BUILD/libtcc.a"
+    ls -la "$TINYCC_BUILD/libtcc.a"
     exit 0
 fi
 
@@ -141,7 +141,16 @@ fi
 
 # Install to webkit-android output (where Bun's CMake expects it)
 mkdir -p "$WEBKIT_OUTPUT/lib"
-cp "$TINYCC_BUILD/libtcc.a" "$WEBKIT_OUTPUT/lib/"
+TINYCC_LINK="$WEBKIT_OUTPUT/lib/libtcc.a"
+TINYCC_LINK_TARGET="$(python3 - "$WEBKIT_OUTPUT/lib" "$TINYCC_BUILD/libtcc.a" <<'PY'
+import os
+import sys
+
+print(os.path.relpath(sys.argv[2], start=sys.argv[1]))
+PY
+)"
+rm -f "$TINYCC_LINK"
+ln -s "$TINYCC_LINK_TARGET" "$TINYCC_LINK"
 
 echo ""
 echo "=== TinyCC build complete ==="

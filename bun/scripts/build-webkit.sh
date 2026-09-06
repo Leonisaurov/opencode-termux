@@ -13,6 +13,20 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../../ci/scripts/env.sh"
 
+# TinyCC is a separate state node but Bun expects its archive in this directory.
+# Keep the exposure as a relative link so it does not change the WebKit digest.
+mkdir -p "$WEBKIT_OUTPUT/lib"
+TINYCC_LINK="$WEBKIT_OUTPUT/lib/libtcc.a"
+TINYCC_LINK_TARGET="$(python3 - "$WEBKIT_OUTPUT/lib" "$TINYCC_BUILD/libtcc.a" <<'PY'
+import os
+import sys
+
+print(os.path.relpath(sys.argv[2], start=sys.argv[1]))
+PY
+)"
+rm -f "$TINYCC_LINK"
+ln -s "$TINYCC_LINK_TARGET" "$TINYCC_LINK"
+
 incremental_exec webkit \
     --input "$SCRIPT_DIR/build-webkit.sh" --input "$REPO_ROOT/ci/scripts/env.sh" \
     --input "$REPO_ROOT/bun/cmake/webkit-android-toolchain.cmake" \
