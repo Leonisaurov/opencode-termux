@@ -74,6 +74,13 @@ while IFS= read -r relative_path; do
     cp "$source_file" "$target_file"
 done <<'EOF'
 Source/JavaScriptCore/HandleSet.h
+Source/JavaScriptCore/runtime/InitializeThreading.cpp
+Source/WTF/wtf/DebugHeap.cpp
+Source/WTF/wtf/unix/MemoryPressureHandlerUnix.cpp
+Source/bmalloc/bmalloc/SystemHeap.cpp
+Source/bmalloc/libpas/src/libpas/pas_min_heap.h
+Source/bmalloc/libpas/src/libpas/pas_probabilistic_guard_malloc_allocator.c
+Source/bmalloc/libpas/src/libpas/pas_thread_local_cache.c
 EOF
 
 # Verify ICU is built
