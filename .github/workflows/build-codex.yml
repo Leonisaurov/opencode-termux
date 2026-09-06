@@ -66,13 +66,23 @@ jobs:
         run: |
           set -euo pipefail
           test -f codex/src/codex-rs/Cargo.toml
-          CODEX_RESOLVED_COMMIT="$(git -C codex/src rev-parse HEAD)"
+          CODEX_RESOLVED_COMMIT="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          source = json.loads(Path("ci/source-manifest.json").read_text())['sources']['codex']
+          assert source['path'] == 'codex/src'
+          assert source['mode'] == 'vendored'
+          print(source['commit'])
+          PY
+          )"
           test "$CODEX_RESOLVED_COMMIT" = "${{ inputs.codex_ref || 'fee9a8d5f08291b72c580d15aa0b08c7c3ecb204' }}"
-          test -z "$(git -C codex/src status --porcelain --untracked-files=all)"
+          test -z "$(find codex/src -name .git -print -quit)"
+          test -z "$(git status --porcelain --untracked-files=all)"
           echo "CODEX_SRC=$GITHUB_WORKSPACE/codex/src" >> "$GITHUB_ENV"
           echo "CODEX_RESOLVED_COMMIT=$CODEX_RESOLVED_COMMIT" >> "$GITHUB_ENV"
           echo "CODEX_SOURCE_COMMIT=$CODEX_RESOLVED_COMMIT" >> "$GITHUB_ENV"
-          git -C codex/src log -1 --oneline
+          echo "Vendored Codex source: $CODEX_RESOLVED_COMMIT"
 
       - name: Resolve Codex Rust toolchain and cache contract
         id: contract

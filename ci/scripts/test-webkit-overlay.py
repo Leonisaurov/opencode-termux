@@ -19,9 +19,9 @@ def main() -> None:
     available = sorted(path.relative_to(OVERLAY).as_posix() for path in OVERLAY.rglob("*") if path.is_file())
     assert applied == available
     assert all((OVERLAY / relative_path).is_file() for relative_path in applied)
+    assert 'find "$WEBKIT_SRC/Source/JavaScriptCore" -type f -name HandleSet.h' in script
 
     expected = {
-        "Source/JavaScriptCore/HandleSet.h",
         "Source/JavaScriptCore/runtime/InitializeThreading.cpp",
         "Source/bmalloc/bmalloc/DebugHeap.cpp",
         "Source/bmalloc/libpas/src/libpas/pas_min_heap.h",

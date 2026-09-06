@@ -92,9 +92,19 @@ jobs:
         run: |
           set -euo pipefail
           test -f kilo/src/packages/opencode/package.json
-          commit="$(git -C kilo/src rev-parse HEAD)"
+          commit="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          source = json.loads(Path("ci/source-manifest.json").read_text())['sources']['kilo']
+          assert source['path'] == 'kilo/src'
+          assert source['mode'] == 'vendored'
+          print(source['commit'])
+          PY
+          )"
           test "$commit" = 'ea7ea9f91eacd2539929d53da9376828ca277aa2'
-          test -z "$(git -C kilo/src status --porcelain --untracked-files=all)"
+          test -z "$(find kilo/src -name .git -print -quit)"
+          test -z "$(git status --porcelain --untracked-files=all)"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
 
       - name: Compute Kilo cache contract

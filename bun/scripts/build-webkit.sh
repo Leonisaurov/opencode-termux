@@ -73,7 +73,6 @@ while IFS= read -r relative_path; do
     mkdir -p "$(dirname "$target_file")"
     cp "$source_file" "$target_file"
 done <<'EOF'
-Source/JavaScriptCore/HandleSet.h
 Source/JavaScriptCore/runtime/InitializeThreading.cpp
 Source/bmalloc/bmalloc/DebugHeap.cpp
 Source/bmalloc/libpas/src/libpas/pas_min_heap.h
