@@ -17,7 +17,7 @@ incremental_exec webkit \
     --input "$SCRIPT_DIR/build-webkit.sh" --input "$REPO_ROOT/ci/scripts/env.sh" \
     --input "$REPO_ROOT/bun/cmake/webkit-android-toolchain.cmake" \
     --input "$REPO_ROOT/ci/external-sources.lock" \
-    --input "$REPO_ROOT/bun/webkit" --input "$WEBKIT_SRC" \
+    --input "$REPO_ROOT/bun/webkit" \
     --value "WEBKIT_COMMIT=$WEBKIT_COMMIT" --value "ANDROID_API=$ANDROID_API" \
     --value "ANDROID_NDK_VERSION=$ANDROID_NDK_VERSION" \
     --dep "$BUN_STATE_DIR/nodes/icu.json" \

@@ -8,7 +8,10 @@ OVERLAY = ROOT / "bun/webkit"
 
 
 def main() -> None:
-    lines = SCRIPT.read_text(encoding="utf-8").splitlines()
+    script = SCRIPT.read_text(encoding="utf-8")
+    lines = script.splitlines()
+    assert '--input "$WEBKIT_SRC"' not in script
+    assert '--value "WEBKIT_COMMIT=$WEBKIT_COMMIT"' in script
     start = lines.index("done <<'EOF'") + 1
     end = lines.index("EOF", start)
     applied = [line for line in lines[start:end] if line]
