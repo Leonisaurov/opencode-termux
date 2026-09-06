@@ -51,6 +51,7 @@ mkdir -p "$TINYCC_BUILD"
 
 SOURCES=(
     libtcc.c
+    tccdbg.c
     tccpp.c
     tccgen.c
     tccelf.c
