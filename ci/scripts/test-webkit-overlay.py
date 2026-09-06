@@ -15,6 +15,7 @@ def main() -> None:
     start = lines.index("done <<'EOF'") + 1
     end = lines.index("EOF", start)
     applied = [line for line in lines[start:end] if line]
+    assert len(applied) == len(set(applied))
     available = sorted(path.relative_to(OVERLAY).as_posix() for path in OVERLAY.rglob("*") if path.is_file())
     assert applied == available
     assert all((OVERLAY / relative_path).is_file() for relative_path in applied)
