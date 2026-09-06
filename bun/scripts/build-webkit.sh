@@ -58,11 +58,11 @@ ensure_external_checkout \
     "WebKit"
 
 # The complete WebKit checkout is fetched into the build workspace. The
-# Android source additions live in the monorepo and are copied into that
-# checkout; compiler-level Bionic adaptations are supplied by the versioned
-# compatibility header above. Keep the overlay list explicit so a source
-# file from a different WebKit layout cannot silently replace the pinned
-# Bun-compatible checkout.
+# pinned-source Android adaptations and Bun compatibility headers live in the
+# monorepo and are copied into that checkout; compiler-level Bionic adaptations
+# are supplied by the versioned compatibility header above. Keep the overlay
+# list explicit so a source file from a different WebKit layout cannot silently
+# replace the pinned Bun-compatible checkout.
 while IFS= read -r relative_path; do
     source_file="$WEBKIT_SOURCE_OVERLAY/$relative_path"
     target_file="$WEBKIT_SRC/$relative_path"
@@ -75,9 +75,7 @@ while IFS= read -r relative_path; do
 done <<'EOF'
 Source/JavaScriptCore/HandleSet.h
 Source/JavaScriptCore/runtime/InitializeThreading.cpp
-Source/WTF/wtf/DebugHeap.cpp
-Source/WTF/wtf/unix/MemoryPressureHandlerUnix.cpp
-Source/bmalloc/bmalloc/SystemHeap.cpp
+Source/bmalloc/bmalloc/DebugHeap.cpp
 Source/bmalloc/libpas/src/libpas/pas_min_heap.h
 Source/bmalloc/libpas/src/libpas/pas_probabilistic_guard_malloc_allocator.c
 Source/bmalloc/libpas/src/libpas/pas_thread_local_cache.c

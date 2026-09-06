@@ -20,7 +20,7 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef PAS_MIN_HEAP_H
@@ -28,9 +28,8 @@
 
 #include "pas_allocation_config.h"
 #include "pas_utils.h"
-#include "pas_zero_memory.h"
 #include <stdio.h>
-#include <string.h>
+#include <string.h> /* for memcmp (bcmp replacement on Android) */
 
 PAS_BEGIN_EXTERN_C;
 
@@ -42,14 +41,14 @@ PAS_BEGIN_EXTERN_C;
 
 /* A min_heap is a complete binary tree, so it is representable as an array. It's easiest to
    see what is going on by using one-based array indices:
-   
+
                   1
            2            3
         4     5      6     7
        8 9  10 11  12 13 14 15
 
    This way, the indices of node X's children are at 2X and 2X+1.
-   
+
    This also has built-in support for heapsort, but because it's primarily designed as a heap
    not as a sort, it will sort descending. Heapsort has this property that it sorts in the
    opposite order of the heap, so an ascending heapsort will be based on a maxheap. If you want
@@ -421,4 +420,3 @@ PAS_BEGIN_EXTERN_C;
 PAS_END_EXTERN_C;
 
 #endif /* PAS_MIN_HEAP_H */
-

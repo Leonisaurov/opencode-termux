@@ -1,18 +1,18 @@
 /*
- * Copyright (C) 2008-2025 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2024 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1.  Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer. 
+ *     notice, this list of conditions and the following disclaimer.
  * 2.  Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
- *     documentation and/or other materials provided with the distribution. 
+ *     documentation and/or other materials provided with the distribution.
  * 3.  Neither the name of Apple Inc. ("Apple") nor the names of
  *     its contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission. 
+ *     from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY APPLE AND ITS CONTRIBUTORS "AS IS" AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -32,7 +32,7 @@
 #include "AssemblyComments.h"
 #include "AssertInvariants.h"
 #include "ExecutableAllocator.h"
-#include "IntlCache.h"
+#include "InPlaceInterpreter.h"
 #include "JITOperationList.h"
 #include "JSCConfig.h"
 #include "JSCPtrTag.h"
@@ -41,22 +41,21 @@
 #include "Options.h"
 #include "StructureAlignedMemoryAllocator.h"
 #include "SuperSampler.h"
-#include "VMManager.h"
 #include "VMTraps.h"
 #include "WasmCapabilities.h"
-#include "WasmExecutionHandler.h"
 #include "WasmFaultSignalHandler.h"
 #include "WasmThunks.h"
-#include <bmalloc/BPlatform.h>
 #include <mutex>
-#include <wtf/Condition.h>
 #include <wtf/Threading.h>
 #include <wtf/threads/Signals.h>
 
 WTF_IGNORE_WARNINGS_IN_THIRD_PARTY_CODE_BEGIN
 
+#if !USE(SYSTEM_MALLOC)
+#include <bmalloc/BPlatform.h>
 #if BUSE(LIBPAS)
 #include <bmalloc/pas_scavenger.h>
+#endif
 #endif
 
 WTF_IGNORE_WARNINGS_IN_THIRD_PARTY_CODE_END
@@ -78,18 +77,11 @@ enum class JSCProfileTag { };
 
 void initialize()
 {
-    initialize([] {
-        // No extra options customization needed by default.
-    });
-}
-
-void initializeWithOptionsCustomization(const ScopedLambda<void()>& optionsCustomizationCallback)
-{
     static std::once_flag onceFlag;
 
-    std::call_once(onceFlag, [&] {
+    std::call_once(onceFlag, [] {
         WTF::initialize();
-        Options::initialize(optionsCustomizationCallback);
+        Options::initialize();
 
         initializePtrTagLookup();
 
@@ -114,18 +106,22 @@ void initializeWithOptionsCustomization(const ScopedLambda<void()>& optionsCusto
         }
         Options::finalize();
 
+#if !USE(SYSTEM_MALLOC)
 #if BUSE(LIBPAS)
         if (Options::libpasScavengeContinuously())
             pas_scavenger_disable_shut_down();
+#endif
 #endif
 
         JITOperationList::populatePointersInJavaScriptCore();
 
         AssemblyCommentRegistry::initialize();
+#if ENABLE(WEBASSEMBLY)
+        if (Options::useWasmIPInt())
+            IPInt::initialize();
+#endif
         LLInt::initialize();
         AssertNoGC::initialize();
-
-        IntlCache::ensureLanguageChangeObserver();
 
         initializeSuperSampler();
         auto& thread = Thread::currentSingleton();
@@ -133,23 +129,32 @@ void initializeWithOptionsCustomization(const ScopedLambda<void()>& optionsCusto
 
         NativeCalleeRegistry::initialize();
 #if ENABLE(WEBASSEMBLY) && ENABLE(JIT)
-        if (Wasm::isSupported())
+        if (Wasm::isSupported()) {
             Wasm::Thunks::initialize();
+        }
 #endif
 
         if (VM::isInMiniMode())
             WTF::fastEnableMiniMode(Options::forceMiniVMMode());
 
+#if defined(__ANDROID__)
+        // Android app processes (e.g., Termux) run under a strict seccomp filter
+        // that blocks certain syscalls, and debuggerd intercepts SIGSEGV before
+        // the app's signal handler. Force polling traps and disable Wasm signal
+        // handler to avoid crashes.
+        {
+            Options::AllowUnfinalizedAccessScope scope;
+            Options::usePollingTraps() = true;
+            Options::useWasmFaultSignalHandler() = false;
+            Options::useWasmFastMemory() = false;
+        }
+#endif
+
         if (Wasm::isSupported() || !Options::usePollingTraps()) {
             if (!Options::usePollingTraps())
                 VMTraps::initializeSignals();
-            if (Wasm::isSupported()) {
+            if (Wasm::isSupported())
                 Wasm::prepareSignalingMemory();
-#if ENABLE(WEBASSEMBLY_DEBUGGER)
-                VMManager::setWasmDebuggerOnStop(Wasm::wasmDebuggerOnStopCallback);
-                VMManager::setWasmDebuggerOnResume(Wasm::wasmDebuggerOnResumeCallback);
-#endif
-            }
         }
 
         assertInvariants();
