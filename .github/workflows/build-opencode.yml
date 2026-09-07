@@ -71,6 +71,9 @@ jobs:
         with:
           ref: ${{ github.sha }}
 
+      - name: Validate downstream bundle contracts
+        run: python3 ci/scripts/test-downstream-bundle-contracts.py
+
       - name: Create work directory
         run: mkdir -p "$WORK_DIR"
 
@@ -113,7 +116,8 @@ jobs:
           opentui_key="$(UPSTREAM_COMMIT="$OPENTUI_COMMIT" python3 ci/scripts/cache-contract.py key "${opentui_args[@]}")"
           echo "opentui=$opentui_key" >> "$GITHUB_OUTPUT"
           args=(--root "$GITHUB_WORKSPACE" --product opencode
-            --path opencode/scripts/build-opencode.sh --path opencode/scripts/make-packages.sh
+            --path opencode/scripts/build-opencode.sh --path opencode/scripts/build-opencode-android.ts
+            --path opencode/scripts/make-packages.sh
             --path ci/scripts/env.sh --path .github/workflows/build-opencode.yml
             --path ci/source-manifest.json
             --value "OPENCODE_VERSION=$OPENCODE_VERSION" --value "BUN_VERSION=$BUN_VERSION"

@@ -57,6 +57,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Validate downstream bundle contracts
+        run: python3 ci/scripts/test-downstream-bundle-contracts.py
+
       - name: Receive Bun artifact
         uses: actions/download-artifact@v4
         with:
@@ -116,6 +119,8 @@ jobs:
           set -euo pipefail
           args=(--root "$GITHUB_WORKSPACE" --product kilo
             --path kilo/scripts/build.sh --path kilo/scripts/build-kilo-android.ts
+            --path opentui/src/kilo/packages/core/src/zig/build.zig.zon
+            --path ci/scripts/test-downstream-bundle-contracts.py
             --path ci/scripts/env.sh --path .github/workflows/build-kilo.yml
             --path ci/source-manifest.json
             --path bun/artifacts/bun-android

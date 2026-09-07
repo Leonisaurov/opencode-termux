@@ -71,6 +71,7 @@ incremental_exec kilo \
     --input "$SCRIPT_DIR/build.sh" --input "$REPO_ROOT/ci/scripts/env.sh" \
     --input "$SCRIPT_DIR/build-kilo-android.ts" --input "$KILO_SRC" \
     --input "$REPO_ROOT/ci/source-manifest.json" \
+    --input "$KILO_OPENTUI_SRC/packages/core/src/zig/build.zig.zon" \
     --input "$KILO_OPENTUI_SRC/packages/core/src/lib/$KILO_OPENTUI_TARGET/libopentui.so" \
     --input "$MODELS_CACHE" --input "$ANDROID_BUN" \
     --value "KILO_VERSION=$KILO_VERSION" \
@@ -125,7 +126,8 @@ compute_fingerprint() {
         "$REPO_ROOT/ci/scripts/env.sh" \
         "$SCRIPT_DIR/build-kilo-android.ts" \
         "$SCRIPT_DIR/build.sh" \
-        "$REPO_ROOT/opentui/scripts/build-opentui.sh"; do
+        "$REPO_ROOT/opentui/scripts/build-opentui.sh" \
+        "$KILO_OPENTUI_SRC/packages/core/src/zig/build.zig.zon"; do
         h="missing"
         if [ -f "$script" ]; then
             h="$(sha256sum "$script" 2>/dev/null | cut -c1-16)"
