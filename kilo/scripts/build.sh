@@ -1933,12 +1933,14 @@ PYEOF
     fi
 
     # ── Copiar libopentui.so (FALLBACK: .bun/ cache) ──
-    # Método principal: .so compilado con Zig (paso anterior).
-    # Este bloque solo se usa si el compilado no llegó a node_modules/.
-    # Bun descarga @opentui/core-linux-arm64-musl en .bun/ cache pero no lo copia
-    # a node_modules/ porque Android Bun no resuelve optionalDependencies
-    # para android-arm64 (busca core-android-arm64 que no existe en npm).
-    if [ ! -f "$KILO_SRC/node_modules/@opentui/core-linux-arm64-musl/libopentui.so" ]; then
+    # bun install puede reemplazar node_modules con el paquete musl descargado.
+    # El artefacto compilado contra Bionic siempre debe volver a imponerse después.
+    TARGET_SO="$KILO_SRC/node_modules/@opentui/core-linux-arm64-musl/libopentui.so"
+    if [ -n "$BUILT_SO" ] && [ -f "$BUILT_SO" ]; then
+        mkdir -p "$(dirname "$TARGET_SO")"
+        cmp -s "$BUILT_SO" "$TARGET_SO" || cp "$BUILT_SO" "$TARGET_SO"
+        echo "   .so Bionic restaurado desde OpenTUI compilado con Zig"
+    elif [ ! -f "$TARGET_SO" ]; then
         echo "   Preparando libopentui.so (fallback .bun/ cache)..."
         BUN_CACHE=$(find "$KILO_SRC/node_modules/.bun" -path "*/core-linux-arm64-musl/libopentui.so" -type f 2>/dev/null | head -1)
         if [ -z "$BUN_CACHE" ]; then
@@ -1946,14 +1948,14 @@ PYEOF
         fi
 
         if [ -n "$BUN_CACHE" ]; then
-            mkdir -p "$KILO_SRC/node_modules/@opentui/core-linux-arm64-musl"
-            cp "$BUN_CACHE" "$KILO_SRC/node_modules/@opentui/core-linux-arm64-musl/libopentui.so"
+            mkdir -p "$(dirname "$TARGET_SO")"
+            cp "$BUN_CACHE" "$TARGET_SO"
             # Copiar package.json y metadatos para que el require() funcione
             PKG_DIR="$(dirname "$BUN_CACHE")"
-            [ -f "$PKG_DIR/package.json" ] && cp "$PKG_DIR/package.json" "$KILO_SRC/node_modules/@opentui/core-linux-arm64-musl/"
-            [ -f "$PKG_DIR/index.js" ] && cp "$PKG_DIR/index.js" "$KILO_SRC/node_modules/@opentui/core-linux-arm64-musl/"
-            [ -f "$PKG_DIR/index.bun.js" ] && cp "$PKG_DIR/index.bun.js" "$KILO_SRC/node_modules/@opentui/core-linux-arm64-musl/"
-            echo "   .so copiado desde .bun/ cache ($(du -h "$KILO_SRC/node_modules/@opentui/core-linux-arm64-musl/libopentui.so" | cut -f1))"
+            [ -f "$PKG_DIR/package.json" ] && cp "$PKG_DIR/package.json" "$(dirname "$TARGET_SO")/"
+            [ -f "$PKG_DIR/index.js" ] && cp "$PKG_DIR/index.js" "$(dirname "$TARGET_SO")/"
+            [ -f "$PKG_DIR/index.bun.js" ] && cp "$PKG_DIR/index.bun.js" "$(dirname "$TARGET_SO")/"
+            echo "   .so copiado desde .bun/ cache ($(du -h "$TARGET_SO" | cut -f1))"
         else
             echo "   ⚠️  libopentui.so no encontrado en .bun/ cache"
         fi

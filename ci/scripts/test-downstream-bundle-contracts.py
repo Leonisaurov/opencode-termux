@@ -5,6 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 OPENCODE_BUNDLER = ROOT / "opencode/scripts/build-opencode-android.ts"
 KILO_BUNDLER = ROOT / "kilo/scripts/build-kilo-android.ts"
+KILO_BUILD = ROOT / "kilo/scripts/build.sh"
 KILO_ZIG_MANIFEST = ROOT / "opentui/src/kilo/packages/core/src/zig/build.zig.zon"
 OPENCODE_WORKER = ROOT / "opencode/src/packages/opencode/src/cli/tui/worker.ts"
 KILO_WORKER = ROOT / "kilo/src/packages/opencode/src/cli/tui/worker.ts"
@@ -17,6 +18,7 @@ UUCODE_PACKAGE = ROOT / (
 def main() -> None:
     opencode = OPENCODE_BUNDLER.read_text(encoding="utf-8")
     kilo = KILO_BUNDLER.read_text(encoding="utf-8")
+    kilo_build = KILO_BUILD.read_text(encoding="utf-8")
     manifest = KILO_ZIG_MANIFEST.read_text(encoding="utf-8")
 
     assert 'const workerPath = "./src/cli/tui/worker.ts"' in opencode
@@ -24,6 +26,12 @@ def main() -> None:
     assert 'const workerPath = "./src/cli/tui/worker.ts"' in kilo
     assert OPENCODE_WORKER.is_file()
     assert KILO_WORKER.is_file()
+
+    restore = 'if [ -n "$BUILT_SO" ] && [ -f "$BUILT_SO" ]; then'
+    fallback = 'elif [ ! -f "$TARGET_SO" ]; then'
+    assert restore in kilo_build
+    assert fallback in kilo_build
+    assert kilo_build.index(restore) < kilo_build.index(fallback)
 
     assert '.path = "zig-pkg/uucode-0.1.0-ZZjBPtA_TQCWp5PIKmfm5tu1WOkKWFmBGFEMxircPfkA"' in manifest
     assert ".url = \"file://" not in manifest
