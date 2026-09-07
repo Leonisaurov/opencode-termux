@@ -20,11 +20,12 @@ extern fn bun_warn_avx_missing(url: [*:0]const u8) void;
 pub extern "c" var _environ: ?*anyopaque;
 pub extern "c" var environ: ?*anyopaque;
 
-// bionic mallopt to disable heap pointer tagging (Scudo/TBI). Not in
-// Zig's stdlib; declared manually. Available since API 31.
+// Bionic exposes mallopt from API 26, while the heap-tagging opcode is only
+// available from API 31. Resolve it at runtime so the API 24 binary has no
+// direct reference to a newer libc symbol.
 const M_BIONIC_SET_HEAP_TAGGING_LEVEL: c_int = -204;
 const M_HEAP_TAGGING_LEVEL_NONE: c_int = 0;
-extern "c" fn mallopt(option: c_int, value: c_int) c_int;
+const Mallopt = *const fn (option: c_int, value: c_int) callconv(.c) c_int;
 
 // On Android ARM64, bionic/Scudo tags heap pointers in the top byte by
 // default (Top Byte Ignore). Bun and JavaScriptCore pack tagged pointers
@@ -36,7 +37,9 @@ extern "c" fn mallopt(option: c_int, value: c_int) c_int;
 // in .init_array runs after libc init and before main(), before Bun's own
 // allocations. It is irreversible per process by design.
 fn android_disable_heap_tagging() callconv(.c) void {
-    _ = mallopt(M_BIONIC_SET_HEAP_TAGGING_LEVEL, M_HEAP_TAGGING_LEVEL_NONE);
+    const mallopt = bun.sys.dlsymImpl(null, "mallopt") orelse return;
+    const mallopt_fn = bun.cast(Mallopt, mallopt);
+    _ = mallopt_fn(M_BIONIC_SET_HEAP_TAGGING_LEVEL, M_HEAP_TAGGING_LEVEL_NONE);
 }
 
 // The .init_array constructor. @export with .section does not emit the

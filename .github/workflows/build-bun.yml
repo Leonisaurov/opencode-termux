@@ -39,6 +39,9 @@ jobs:
         with:
           ref: ${{ github.sha }}
 
+      - name: Validate Android heap-tagging compatibility
+        run: python3 ci/scripts/test-android-heap-tagging.py
+
       - name: Create work directory
         run: mkdir -p "$WORK_DIR"
 
