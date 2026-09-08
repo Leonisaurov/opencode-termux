@@ -22,6 +22,7 @@
 import path from "path"
 import fs from "fs"
 import { fileURLToPath } from "url"
+import { patchAndroidModuleGraph, validateAndroidModuleGraph, validateAndroidStandalone } from "../../ci/scripts/module-graph-patch"
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -230,7 +231,11 @@ const hostRuntimeSize = hostBytes.length - 8 - graphSize
 if (hostRuntimeSize <= 0 || hostRuntimeSize >= hostBytes.length) {
   throw new Error(`build-kilo-android: tamaño de runtime host inválido: ${hostRuntimeSize}`)
 }
-const moduleGraph = hostBytes.slice(hostRuntimeSize, hostBytes.length - 8)
+const extractedModuleGraph = hostBytes.slice(hostRuntimeSize, hostBytes.length - 8)
+const patchedModuleGraph = patchAndroidModuleGraph(extractedModuleGraph, "kilo")
+validateAndroidModuleGraph(patchedModuleGraph.graph, "kilo")
+console.log(`build-kilo-android: undici repairs: ${patchedModuleGraph.patchCount}`)
+const moduleGraph = patchedModuleGraph.graph
 const androidBun = new Uint8Array(await Bun.file(androidBunPath).arrayBuffer())
 const outputSize = androidBun.length + moduleGraph.length + 8
 const output = new Uint8Array(outputSize)
@@ -241,5 +246,6 @@ total.setUint32(0, outputSize & 0xffffffff, true)
 total.setUint32(4, Math.floor(outputSize / 0x100000000), true)
 await Bun.write(outputPath, output)
 fs.chmodSync(outputPath, 0o755)
+validateAndroidStandalone(output, "kilo")
 await Bun.write(hostPath, "")
 console.log(`✅ Build complete: kilo-android (${(outputSize / 1024 / 1024).toFixed(1)} MB, Android Bun embebido)`)

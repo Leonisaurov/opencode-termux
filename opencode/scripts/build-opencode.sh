@@ -18,6 +18,7 @@ source "$SCRIPT_DIR/../../ci/scripts/env.sh"
 
 incremental_exec opencode \
     --input "$SCRIPT_DIR/build-opencode.sh" --input "$SCRIPT_DIR/build-opencode-android.ts" \
+    --input "$REPO_ROOT/ci/scripts/module-graph-patch.ts" \
     --input "$REPO_ROOT/ci/scripts/env.sh" --input "$OPENCODE_SRC" \
     --input "$BUN_BUILD/bun" \
     --input "$OPENTUI_SRC/packages/core/src/lib/aarch64-linux-android.24/libopentui.so" \
@@ -74,6 +75,7 @@ done
 
 BACKUP_FILE=""
 BUILD_SCRIPT_LOCAL=""
+PATCH_SCRIPT_LOCAL=""
 
 restore_x64_opentui() {
     # If bundling aborts after the swap, never leave the cached dependency
@@ -84,6 +86,9 @@ restore_x64_opentui() {
     fi
     if [ -n "$BUILD_SCRIPT_LOCAL" ]; then
         rm -f "$BUILD_SCRIPT_LOCAL"
+    fi
+    if [ -n "$PATCH_SCRIPT_LOCAL" ]; then
+        rm -f "$PATCH_SCRIPT_LOCAL"
     fi
 }
 trap restore_x64_opentui EXIT
@@ -108,7 +113,9 @@ mkdir -p "$DIST_DIR"
 echo ">>> Building OpenCode standalone binary..."
 BUILD_SCRIPT="$SCRIPT_DIR/build-opencode-android.ts"
 BUILD_SCRIPT_LOCAL="$OPENCODE_PKG/build-opencode-android.ts"
+PATCH_SCRIPT_LOCAL="$OPENCODE_PKG/module-graph-patch.ts"
 cp "$BUILD_SCRIPT" "$BUILD_SCRIPT_LOCAL"
+cp "$REPO_ROOT/ci/scripts/module-graph-patch.ts" "$PATCH_SCRIPT_LOCAL"
 cd "$OPENCODE_PKG"
 
 OPENCODE_VERSION="$OPENCODE_VERSION" \
@@ -117,8 +124,8 @@ OPENCODE_VERSION="$OPENCODE_VERSION" \
     OPENCODE_DIR="$OPENCODE_PKG" \
     "$HOST_BUN" run "$BUILD_SCRIPT_LOCAL"
 
-# Clean up copied script
-rm -f "$BUILD_SCRIPT_LOCAL"
+# Clean up copied scripts
+rm -f "$BUILD_SCRIPT_LOCAL" "$PATCH_SCRIPT_LOCAL"
 
 # Restore original libopentui.so
 if [ -n "$BACKUP_FILE" ] && [ -f "$BACKUP_FILE" ]; then

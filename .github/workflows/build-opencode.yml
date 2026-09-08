@@ -117,6 +117,7 @@ jobs:
           echo "opentui=$opentui_key" >> "$GITHUB_OUTPUT"
           args=(--root "$GITHUB_WORKSPACE" --product opencode
             --path opencode/scripts/build-opencode.sh --path opencode/scripts/build-opencode-android.ts
+            --path ci/scripts/module-graph-patch.ts --path ci/scripts/validate-android-bundle.py
             --path opencode/scripts/make-packages.sh
             --path ci/scripts/env.sh --path .github/workflows/build-opencode.yml
             --path ci/source-manifest.json
@@ -146,6 +147,7 @@ jobs:
           if test -s "${WORK_DIR}/dist/opencode" \
              && test "$(readelf -h "${WORK_DIR}/dist/opencode" | sed -n 's/^ *Class: *//p')" = ELF64 \
              && test "$(readelf -h "${WORK_DIR}/dist/opencode" | sed -n 's/^ *Machine: *//p')" = AArch64 \
+             && python3 ci/scripts/validate-android-bundle.py opencode "${WORK_DIR}/dist/opencode" >/dev/null 2>&1 \
              && python3 ci/scripts/build-state.py verify --root "$GITHUB_WORKSPACE" \
                   --state-dir "$WORK_DIR/state" --node opencode >/dev/null 2>&1; then
             echo ready=true >> "$GITHUB_OUTPUT"
@@ -375,7 +377,8 @@ jobs:
              && python3 ci/scripts/build-state.py verify --root "$GITHUB_WORKSPACE" \
                   --state-dir "$WORK_DIR/state" --node opencode >/dev/null 2>&1 \
              && test "$(readelf -h "$BINARY" | sed -n 's/^ *Class: *//p')" = ELF64 \
-             && test "$(readelf -h "$BINARY" | sed -n 's/^ *Machine: *//p')" = AArch64; then
+             && test "$(readelf -h "$BINARY" | sed -n 's/^ *Machine: *//p')" = AArch64 \
+             && python3 ci/scripts/validate-android-bundle.py opencode "$BINARY" >/dev/null 2>&1; then
             ready=true
           fi
           echo "ready=$ready" >> "$GITHUB_OUTPUT"

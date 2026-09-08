@@ -31,6 +31,7 @@ ENGINE_PATHS = (
     "ci/scripts/cache-contract.py",
     "ci/scripts/build-state.py",
     "ci/scripts/validate-source-tree.py",
+    "ci/scripts/validate-android-bundle.py",
     "ci/actions/incremental-cache/action.yml",
 )
 

@@ -69,7 +69,8 @@ mkdir -p "$MARKERS"
 # authoritative cross-run decision and dependency boundary.
 incremental_exec kilo \
     --input "$SCRIPT_DIR/build.sh" --input "$REPO_ROOT/ci/scripts/env.sh" \
-    --input "$SCRIPT_DIR/build-kilo-android.ts" --input "$KILO_SRC" \
+    --input "$SCRIPT_DIR/build-kilo-android.ts" \
+    --input "$REPO_ROOT/ci/scripts/module-graph-patch.ts" --input "$KILO_SRC" \
     --input "$REPO_ROOT/ci/source-manifest.json" \
     --input "$KILO_OPENTUI_SRC/packages/core/src/zig/build.zig.zon" \
     --input "$KILO_OPENTUI_SRC/packages/core/src/lib/$KILO_OPENTUI_TARGET/libopentui.so" \
@@ -125,6 +126,7 @@ compute_fingerprint() {
     for script in \
         "$REPO_ROOT/ci/scripts/env.sh" \
         "$SCRIPT_DIR/build-kilo-android.ts" \
+        "$REPO_ROOT/ci/scripts/module-graph-patch.ts" \
         "$SCRIPT_DIR/build.sh" \
         "$REPO_ROOT/opentui/scripts/build-opentui.sh" \
         "$KILO_OPENTUI_SRC/packages/core/src/zig/build.zig.zon"; do

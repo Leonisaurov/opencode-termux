@@ -14,6 +14,7 @@ import { $ } from "bun"
 import fs from "fs"
 import path from "path"
 import { createSolidTransformPlugin } from "@opentui/solid/bun-plugin"
+import { patchAndroidModuleGraph, validateAndroidModuleGraph, validateAndroidStandalone } from "./module-graph-patch"
 
 // These are set by the build-opencode.sh wrapper script
 const OPENCODE_DIR = process.env.OPENCODE_DIR || (() => { throw new Error("OPENCODE_DIR env var not set") })()
@@ -133,7 +134,7 @@ const hostBinaryPath = path.join(OUTPUT_DIR, "opencode-host")
 
 console.log("Building standalone binary for host platform...")
 const result = await Bun.build({
-  conditions: ["browser"],
+  conditions: ["bun", "node"],
   tsconfig: "./tsconfig.json",
   plugins: [plugin],
   compile: {
@@ -275,8 +276,13 @@ console.log(`Module graph: trailer at ${trailerPosInMg}, offsets at ${mgOffsetsS
 console.log(`byte_count=${byteCount}, modules_ptr=(${modOff},${modLen}), entry_id=${entryId}`)
 console.log(`String data region: [0, ${modOff}), Module list: [${modOff}, ${modOff + modLen})`)
 
-const finalModuleGraph = mgBuf.slice(0, trailerPosInMg + mgTrailerBuf.length)
-console.log(`Module graph size: ${finalModuleGraph.length} bytes (unchanged)`)
+const patchedModuleGraph = patchAndroidModuleGraph(
+  mgBuf.slice(0, trailerPosInMg + mgTrailerBuf.length),
+  "opencode",
+)
+validateAndroidModuleGraph(patchedModuleGraph.graph, "opencode")
+const finalModuleGraph = patchedModuleGraph.graph
+console.log(`Module graph size: ${finalModuleGraph.length} bytes; undici repairs: ${patchedModuleGraph.patchCount}`)
 
 // Step 6: Create Android standalone binary
 console.log("\n=== Step 6: Creating Android standalone binary ===")
@@ -319,6 +325,8 @@ console.log(`Verification: total_byte_count=${verifyTotal}, file_size=${verifyBy
 // Check ELF header
 const elfMagic = String.fromCharCode(verifyBytes[0], verifyBytes[1], verifyBytes[2], verifyBytes[3])
 console.log(`ELF magic: ${elfMagic === "\x7fELF" ? "OK" : "INVALID"}`)
+validateAndroidStandalone(verifyBytes, "opencode")
+console.log("Module graph validation: OK")
 
 console.log("\n=== Build complete! ===")
 console.log(`Output: ${androidOutputPath}`)

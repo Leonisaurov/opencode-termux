@@ -259,7 +259,6 @@ jobs:
 
       # ── Artifact ───────────────────────────────────────────────
       - name: Write build info
-        if: steps.validate-opentui.outputs.ready != 'true'
         run: |
           LIB_DIR="$OPENTUI_SRC/packages/core/src/lib/$OPENTUI_TARGET"
           {

@@ -119,6 +119,7 @@ jobs:
           set -euo pipefail
           args=(--root "$GITHUB_WORKSPACE" --product kilo
             --path kilo/scripts/build.sh --path kilo/scripts/build-kilo-android.ts
+            --path ci/scripts/module-graph-patch.ts --path ci/scripts/validate-android-bundle.py
             --path opentui/src/kilo/packages/core/src/zig/build.zig.zon
             --path ci/scripts/test-downstream-bundle-contracts.py
             --path ci/scripts/env.sh --path .github/workflows/build-kilo.yml
@@ -148,6 +149,7 @@ jobs:
           if test -s kilo/artifacts/kilo-android \
              && test "$(readelf -h kilo/artifacts/kilo-android | sed -n 's/^ *Class: *//p')" = ELF64 \
              && test "$(readelf -h kilo/artifacts/kilo-android | sed -n 's/^ *Machine: *//p')" = AArch64 \
+             && python3 ci/scripts/validate-android-bundle.py kilo kilo/artifacts/kilo-android >/dev/null 2>&1 \
              && python3 ci/scripts/build-state.py verify --root "$GITHUB_WORKSPACE" \
                   --state-dir "$WORK_DIR/state" --node kilo >/dev/null 2>&1; then
             echo ready=true >> "$GITHUB_OUTPUT"
@@ -208,7 +210,8 @@ jobs:
              && python3 ci/scripts/build-state.py verify --root "$GITHUB_WORKSPACE" \
                   --state-dir "$WORK_DIR/state" --node kilo >/dev/null 2>&1 \
              && test "$(readelf -h "$BINARY" | sed -n 's/^ *Class: *//p')" = ELF64 \
-             && test "$(readelf -h "$BINARY" | sed -n 's/^ *Machine: *//p')" = AArch64; then
+             && test "$(readelf -h "$BINARY" | sed -n 's/^ *Machine: *//p')" = AArch64 \
+             && python3 ci/scripts/validate-android-bundle.py kilo "$BINARY" >/dev/null 2>&1; then
             ready=true
           fi
           echo "ready=$ready" >> "$GITHUB_OUTPUT"
