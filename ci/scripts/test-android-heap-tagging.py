@@ -32,6 +32,7 @@ def main() -> None:
     assert "std.os.environ.len > 0 or !Environment.isAndroid" in env_loader
     assert 'if (comptime Environment.isAndroid) "/data/data/com.termux/files/usr/tmp" else "/tmp"' in bun_fs
     assert "RealFS.getDefaultTempDir()" in run_command
+    assert "std.fmt.bufPrintZ" in run_command
     assert "pub fn bunNodeDir()" in run_command
     assert "bun_node_dir ++" not in run_command
     assert "force_using_bun or !found_node or (comptime Environment.isAndroid)" in run_command

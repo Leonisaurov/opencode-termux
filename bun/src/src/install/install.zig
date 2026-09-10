@@ -4650,37 +4650,39 @@ pub const PackageManager = struct {
         install_peer: bool,
         comptime successFn: SuccessFn,
     ) !?ResolvedPackageResult {
-        if (comptime Environment.isAndroid and version.tag.isNPM()) {
-            const name_str = this.lockfile.str(&name);
-            if (strings.eqlComptime(name_str, "bun")) {
-                var ghost_buf: bun.PathBuffer = undefined;
-                if (ensureBunGhostPackageExists(this, &ghost_buf) catch |err| blk: {
-                    Output.prettyErrorln("bun-ghost: failed to create ghost package: {s}", .{@errorName(err)});
-                    break :blk null;
-                }) |ghost_dir| {
-                    var name_slice = this.lockfile.str(&name);
-                    var package = Lockfile.Package{};
-                    {
-                        var builder = this.lockfile.stringBuilder();
-                        builder.count(name_slice);
-                        builder.count(ghost_dir);
-                        bun.handleOom(builder.allocate());
-                        name_slice = this.lockfile.str(&name);
-                        package.name = builder.append(String, name_slice);
-                        package.name_hash = name_hash;
-                        package.resolution = Resolution.init(.{
-                            .folder = builder.append(String, ghost_dir),
-                        });
-                        package.scripts.filled = true;
-                        package.meta.setHasInstallScript(false);
-                        builder.clamp();
+        if (comptime Environment.isAndroid) {
+            if (version.tag.isNPM()) {
+                const name_str = this.lockfile.str(&name);
+                if (strings.eqlComptime(name_str, "bun")) {
+                    var ghost_buf: bun.PathBuffer = undefined;
+                    if (ensureBunGhostPackageExists(this, &ghost_buf) catch |err| blk: {
+                        Output.prettyErrorln("bun-ghost: failed to create ghost package: {s}", .{@errorName(err)});
+                        break :blk null;
+                    }) |ghost_dir| {
+                        var name_slice = this.lockfile.str(&name);
+                        var package = Lockfile.Package{};
+                        {
+                            var builder = this.lockfile.stringBuilder();
+                            builder.count(name_slice);
+                            builder.count(ghost_dir);
+                            bun.handleOom(builder.allocate());
+                            name_slice = this.lockfile.str(&name);
+                            package.name = builder.append(String, name_slice);
+                            package.name_hash = name_hash;
+                            package.resolution = Resolution.init(.{
+                                .folder = builder.append(String, ghost_dir),
+                            });
+                            package.scripts.filled = true;
+                            package.meta.setHasInstallScript(false);
+                            builder.clamp();
+                        }
+                        package = this.lockfile.appendPackage(package) catch bun.outOfMemory();
+                        successFn(this, dependency_id, package.meta.id);
+                        return .{
+                            .package = this.lockfile.packages.get(package.meta.id),
+                            .is_first_time = true,
+                        };
                     }
-                    package = this.lockfile.appendPackage(package) catch bun.outOfMemory();
-                    successFn(this, dependency_id, package.meta.id);
-                    return .{
-                        .package = this.lockfile.packages.get(package.meta.id),
-                        .is_first_time = true,
-                    };
                 }
             }
         }

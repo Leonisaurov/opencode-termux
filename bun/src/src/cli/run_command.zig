@@ -644,8 +644,7 @@ pub const RunCommand = struct {
                 "/bun-node" ++ if (Environment.git_sha_short.len > 0) "-" ++ Environment.git_sha_short else ""
             else
                 "/bun-node-debug";
-            const len = std.fmt.bufPrint(&bun_node_dir_buf, "{s}{s}", .{ base, suffix }) catch unreachable;
-            return bun_node_dir_buf[0..len];
+            return std.fmt.bufPrintZ(&bun_node_dir_buf, "{s}{s}", .{ base, suffix }) catch unreachable;
         }
     }.once);
 
