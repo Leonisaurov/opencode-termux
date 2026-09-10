@@ -100,7 +100,8 @@ jobs:
           core_key="$(env -u OPENTUI_COMMIT python3 ci/scripts/cache-contract.py key "${core_args[@]}")"
           bun_args=(--root "$GITHUB_WORKSPACE" --product bun
             --path bun/scripts/build-bun.sh
-            --path ci/scripts/env.sh --path .github/workflows/build-bun.yml
+            --path ci/scripts/env.sh --path ci/scripts/test-android-heap-tagging.py
+            --path .github/workflows/build-bun.yml
             --path ci/source-manifest.json
             --value "BUN_VERSION=$BUN_VERSION"
             --value "ICU_VERSION=$ICU_VERSION"

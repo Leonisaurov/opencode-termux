@@ -53,6 +53,9 @@ def main() -> None:
     assert 'module graph contains vulnerable' in bundle_validator
     assert 'python3 ci/scripts/validate-android-bundle.py' in (ROOT / ".github/workflows/build-opencode.yml").read_text(encoding="utf-8")
     assert 'python3 ci/scripts/validate-android-bundle.py' in (ROOT / ".github/workflows/build-kilo.yml").read_text(encoding="utf-8")
+    for workflow in ("build-bun.yml", "build-bun-target.yml", "build-opencode.yml"):
+        workflow_text = (ROOT / ".github/workflows" / workflow).read_text(encoding="utf-8")
+        assert "ci/scripts/test-android-heap-tagging.py" in workflow_text
 
     assert '.path = "zig-pkg/uucode-0.1.0-ZZjBPtA_TQCWp5PIKmfm5tu1WOkKWFmBGFEMxircPfkA"' in manifest
     assert ".url = \"file://" not in manifest
