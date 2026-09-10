@@ -585,7 +585,7 @@ pub const FileSystem = struct {
                     return value;
                 },
                 .mac => "/private/tmp",
-                else => "/tmp",
+                else => if (comptime Environment.isAndroid) "/data/data/com.termux/files/usr/tmp" else "/tmp",
             };
         }
 

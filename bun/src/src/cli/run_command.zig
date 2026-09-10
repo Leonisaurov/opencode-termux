@@ -636,22 +636,25 @@ pub const RunCommand = struct {
         this_transpiler.configureLinker();
     }
 
-    pub const bun_node_dir = switch (Environment.os) {
-        // This path is almost always a path to a user directory. So it cannot be inlined like
-        // our uses of /tmp. You can use one of these functions instead:
-        // - bun.windows.GetTempPathW (native)
-        // - bun.fs.FileSystem.RealFS.platformTempDir (any platform)
-        .windows => @compileError("Do not use RunCommand.bun_node_dir on Windows"),
+    var bun_node_dir_buf: bun.PathBuffer = undefined;
+    var bun_node_dir_once = bun.once(struct {
+        fn once() []const u8 {
+            const base = bun.fs.FileSystem.RealFS.getDefaultTempDir();
+            const suffix = if (!Environment.isDebug)
+                "/bun-node" ++ if (Environment.git_sha_short.len > 0) "-" ++ Environment.git_sha_short else ""
+            else
+                "/bun-node-debug";
+            const len = std.fmt.bufPrint(&bun_node_dir_buf, "{s}{s}", .{ base, suffix }) catch unreachable;
+            return bun_node_dir_buf[0..len];
+        }
+    }.once);
 
-        .mac => "/private/tmp",
-        else => "/tmp",
-    } ++ if (!Environment.isDebug)
-        "/bun-node" ++ if (Environment.git_sha_short.len > 0) "-" ++ Environment.git_sha_short else ""
-    else
-        "/bun-node-debug";
+    pub fn bunNodeDir() []const u8 {
+        return bun_node_dir_once.call(.{});
+    }
 
     pub fn bunNodeFileUtf8(allocator: std.mem.Allocator) ![:0]const u8 {
-        if (!Environment.isWindows) return bun_node_dir;
+        if (!Environment.isWindows) return bunNodeDir();
         var temp_path_buffer: bun.WPathBuffer = undefined;
         var target_path_buffer: bun.PathBuffer = undefined;
         const len = bun.windows.GetTempPathW(
@@ -702,9 +705,9 @@ pub const RunCommand = struct {
             }
 
             if (Environment.isDebug) {
-                std.fs.deleteTreeAbsolute(bun_node_dir) catch {};
+                std.fs.deleteTreeAbsolute(bunNodeDir()) catch {};
             }
-            const paths = .{ bun_node_dir ++ "/node", bun_node_dir ++ "/bun" };
+            const paths = .{ bunNodeDir() ++ "/node", bunNodeDir() ++ "/bun" };
             inline for (paths) |path| {
                 var retried = false;
                 while (true) {
@@ -714,7 +717,7 @@ pub const RunCommand = struct {
                             if (retried)
                                 return;
 
-                            std.fs.makeDirAbsoluteZ(bun_node_dir) catch {};
+                            std.fs.makeDirAbsoluteZ(bunNodeDir()) catch {};
 
                             retried = true;
                             continue;
@@ -728,9 +731,9 @@ pub const RunCommand = struct {
             }
 
             // The reason for the extra delim is because we are going to append the system PATH
-            // later on. this is done by the caller, and explains why we are adding bun_node_dir
+            // later on. this is done by the caller, and explains why we are adding bunNodeDir()
             // to the end of the path slice rather than the start.
-            try PATH.appendSlice(bun_node_dir ++ .{std.fs.path.delimiter});
+            try PATH.appendSlice(bunNodeDir() ++ .{std.fs.path.delimiter});
         } else if (Environment.isWindows) {
             var target_path_buffer: bun.WPathBuffer = undefined;
 
@@ -918,7 +921,7 @@ pub const RunCommand = struct {
             if (force_using_bun) bun_node_exe else "",
         ) catch false;
 
-        var needs_to_force_bun = force_using_bun or !found_node;
+        var needs_to_force_bun = force_using_bun or !found_node or (comptime Environment.isAndroid);
         var optional_bun_self_path: string = "";
 
         var new_path_len: usize = PATH.len + 2;
@@ -1682,7 +1685,25 @@ pub const RunCommand = struct {
             );
         };
 
-        Run.boot(ctx, normalized_filename, null) catch |err| {
+        var entry_z_buf: bun.PathBuffer = undefined;
+        var link_target_buf: bun.PathBuffer = undefined;
+        var resolved_buf: bun.PathBuffer = undefined;
+        const boot_entry = brk: {
+            const link_target = switch (bun.sys.readlink(bun.path.z(normalized_filename, &entry_z_buf), &link_target_buf)) {
+                .result => |target| target,
+                .err => break :brk normalized_filename,
+            };
+            if (std.fs.path.isAbsolute(link_target)) break :brk link_target;
+            const entry_dir = bun.path.dirname(normalized_filename, .posix);
+            break :brk bun.path.joinAbsStringBufChecked(
+                entry_dir,
+                resolved_buf[0 .. resolved_buf.len - 1],
+                &.{link_target},
+                .posix,
+            ) orelse normalized_filename;
+        };
+
+        Run.boot(ctx, boot_entry, null) catch |err| {
             ctx.log.print(Output.errorWriter()) catch {};
 
             Output.err(err, "Failed to run script \"<b>{s}<r>\"", .{std.fs.path.basename(normalized_filename)});

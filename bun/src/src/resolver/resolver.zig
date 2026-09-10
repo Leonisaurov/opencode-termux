@@ -506,6 +506,7 @@ pub const Resolver = struct {
     generation: bun.Generation = 0,
 
     package_manager: ?*PackageManager = null,
+    bun_cache_path: ?[]const u8 = null,
     onWakePackageManager: PackageManager.WakeHandler = .{},
     env_loader: ?*DotEnv.Loader = null,
     store_fd: bool = false,
@@ -585,6 +586,29 @@ pub const Resolver = struct {
             this.package_manager = pm;
             break :brk pm;
         };
+    }
+
+    fn isBunCachePath(this: *ThisResolver, abs_path: string) bool {
+        if (abs_path.len == 0) return false;
+        if (this.bun_cache_path) |cache_path| {
+            if (cache_path.len == 0 or cache_path.len > abs_path.len) return false;
+            if (!bun.strings.hasPrefix(abs_path, cache_path)) return false;
+            if (abs_path.len > cache_path.len and abs_path[cache_path.len] != std.fs.path.sep) return false;
+            return true;
+        }
+
+        const resolved = if (this.env_loader) |env_loader|
+            PackageManager.fetchCacheDirectoryPath(env_loader, null).path
+        else
+            "";
+        this.bun_cache_path = if (resolved.len > 0) blk: {
+            var path_buf = bun.default_allocator.dupe(u8, resolved) catch bun.outOfMemory();
+            while (path_buf.len > 0 and path_buf[path_buf.len - 1] == std.fs.path.sep) {
+                path_buf = path_buf[0 .. path_buf.len - 1];
+            }
+            break :blk path_buf;
+        } else "";
+        return this.isBunCachePath(abs_path);
     }
 
     pub inline fn usePackageManager(self: *const ThisResolver) bool {
@@ -1023,7 +1047,9 @@ pub const Resolver = struct {
                 if (entries.get(path.name.filename)) |query| {
                     const symlink_path = query.entry.symlink(&r.fs.fs, r.store_fd);
                     if (symlink_path.len > 0) {
-                        path.setRealpath(symlink_path);
+                        if (!r.isBunCachePath(symlink_path)) {
+                            path.setRealpath(symlink_path);
+                        }
                         if (!result.file_fd.isValid()) result.file_fd = query.entry.cache.fd;
 
                         if (r.debug_logs) |*debug| {
@@ -1074,10 +1100,11 @@ pub const Resolver = struct {
                         if (r.debug_logs) |*debug| {
                             debug.addNoteFmt("Resolved symlink \"{s}\" to \"{s}\"", .{ symlink, path.text });
                         }
-                        query.entry.cache.symlink = PathString.init(symlink);
+                        if (!r.isBunCachePath(dir.abs_real_path)) {
+                            query.entry.cache.symlink = PathString.init(symlink);
+                            path.setRealpath(symlink);
+                        }
                         if (!result.file_fd.isValid() and store_fd) result.file_fd = query.entry.cache.fd;
-
-                        path.setRealpath(symlink);
                     }
                 }
             }

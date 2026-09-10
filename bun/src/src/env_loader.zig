@@ -500,18 +500,39 @@ pub const Loader = struct {
     pub fn loadProcess(this: *Loader) void {
         if (this.did_load_process) return;
 
-        this.map.map.ensureTotalCapacity(std.os.environ.len) catch unreachable;
-        for (std.os.environ) |_env| {
-            var env = bun.span(_env);
-            if (strings.indexOfChar(env, '=')) |i| {
-                const key = env[0..i];
-                const value = env[i + 1 ..];
-                if (key.len > 0) {
-                    this.map.put(key, value) catch unreachable;
+        if (std.os.environ.len > 0 or !Environment.isAndroid) {
+            this.map.map.ensureTotalCapacity(std.os.environ.len) catch unreachable;
+            for (std.os.environ) |_env| {
+                var env = bun.span(_env);
+                if (strings.indexOfChar(env, '=')) |i| {
+                    const key = env[0..i];
+                    const value = env[i + 1 ..];
+                    if (key.len > 0) {
+                        this.map.put(key, value) catch unreachable;
+                    }
+                } else {
+                    if (env.len > 0) {
+                        this.map.put(env, "") catch unreachable;
+                    }
                 }
-            } else {
-                if (env.len > 0) {
-                    this.map.put(env, "") catch unreachable;
+            }
+        } else {
+            // Bionic exposes libc environ here even when Zig's std.os.environ is empty.
+            const environ = std.mem.span(std.c.environ);
+            this.map.map.ensureTotalCapacity(environ.len) catch unreachable;
+            for (environ) |entry| {
+                const line = entry orelse continue;
+                var env = bun.span(line);
+                if (strings.indexOfChar(env, '=')) |i| {
+                    const key = env[0..i];
+                    const value = env[i + 1 ..];
+                    if (key.len > 0) {
+                        this.map.put(key, value) catch unreachable;
+                    }
+                } else {
+                    if (env.len > 0) {
+                        this.map.put(env, "") catch unreachable;
+                    }
                 }
             }
         }

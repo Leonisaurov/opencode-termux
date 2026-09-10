@@ -2642,6 +2642,48 @@ pub const CacheLevel = struct {
 // The easy way would be:
 // 1. Download all packages, parsing their dependencies and enqueuing all dependencies for resolution
 // 2.
+fn ensureBunGhostPackageExists(this: *PackageManager, buf: *bun.PathBuffer) ![]const u8 {
+    _ = this;
+    var home_buf: bun.PathBuffer = undefined;
+    const home = bun.getenvZ("XDG_CACHE_HOME") orelse (bun.getenvZ("HOME") orelse return error.MissingPackageJSON);
+    const base = bun.getenvZ("BUN_INSTALL") orelse Path.joinAbsStringBuf(home, &home_buf, &.{".bun"}, .auto);
+    const ghost_dir = Path.joinAbsStringBuf(base, buf, &.{"bun-ghost"}, .auto);
+
+    var pkg_json_buf: bun.PathBuffer = undefined;
+    const pkg_json = Path.joinAbsStringBuf(ghost_dir, &pkg_json_buf, &.{"package.json"}, .auto);
+    if (bun.sys.exists(pkg_json)) return ghost_dir;
+
+    var ghost_root = try std.fs.cwd().makeOpenPath(ghost_dir, .{});
+    defer ghost_root.close();
+
+    var bin_dir_buf: bun.PathBuffer = undefined;
+    const bin_dir_path = Path.joinAbsStringBuf(ghost_dir, &bin_dir_buf, &.{"bin"}, .auto);
+    var bin_dir = try std.fs.cwd().makeOpenPath(bin_dir_path, .{});
+    defer bin_dir.close();
+
+    {
+        const f = try std.fs.cwd().createFile(pkg_json, .{});
+        defer f.close();
+        try f.writeAll("{\"name\":\"bun\",\"version\":\"" ++ bun.Global.package_json_version ++ "\",\"main\":\"index.js\",\"bin\":{\"bun\":\"bin/bun\"}}\n");
+    }
+    {
+        var index_buf: bun.PathBuffer = undefined;
+        const index_path = Path.joinAbsStringBuf(ghost_dir, &index_buf, &.{"index.js"}, .auto);
+        const f = try std.fs.cwd().createFile(index_path, .{});
+        defer f.close();
+        try f.writeAll("export * from \"bun\";\n");
+    }
+    {
+        const exe = try bun.selfExePath();
+        std.posix.symlinkat(exe, bin_dir.fd, "bun") catch |err| switch (err) {
+            error.PathAlreadyExists => {},
+            else => return err,
+        };
+    }
+
+    return ghost_dir;
+}
+
 pub const PackageManager = struct {
     cache_directory_: ?std.fs.Dir = null,
 
@@ -4608,6 +4650,41 @@ pub const PackageManager = struct {
         install_peer: bool,
         comptime successFn: SuccessFn,
     ) !?ResolvedPackageResult {
+        if (comptime Environment.isAndroid and version.tag.isNPM()) {
+            const name_str = this.lockfile.str(&name);
+            if (strings.eqlComptime(name_str, "bun")) {
+                var ghost_buf: bun.PathBuffer = undefined;
+                if (ensureBunGhostPackageExists(this, &ghost_buf) catch |err| blk: {
+                    Output.prettyErrorln("bun-ghost: failed to create ghost package: {s}", .{@errorName(err)});
+                    break :blk null;
+                }) |ghost_dir| {
+                    var name_slice = this.lockfile.str(&name);
+                    var package = Lockfile.Package{};
+                    {
+                        var builder = this.lockfile.stringBuilder();
+                        builder.count(name_slice);
+                        builder.count(ghost_dir);
+                        bun.handleOom(builder.allocate());
+                        name_slice = this.lockfile.str(&name);
+                        package.name = builder.append(String, name_slice);
+                        package.name_hash = name_hash;
+                        package.resolution = Resolution.init(.{
+                            .folder = builder.append(String, ghost_dir),
+                        });
+                        package.scripts.filled = true;
+                        package.meta.setHasInstallScript(false);
+                        builder.clamp();
+                    }
+                    package = this.lockfile.appendPackage(package) catch bun.outOfMemory();
+                    successFn(this, dependency_id, package.meta.id);
+                    return .{
+                        .package = this.lockfile.packages.get(package.meta.id),
+                        .is_first_time = true,
+                    };
+                }
+            }
+        }
+
         if (install_peer and behavior.isPeer()) {
             if (this.lockfile.package_index.get(name_hash)) |index| {
                 const resolutions: []Resolution = this.lockfile.packages.items(.resolution);

@@ -1627,6 +1627,33 @@ pub fn resolveMaybeNeedsTrailingSlash(
         jsc_vm.transpiler.resolver.log = old_log;
     }
     jsc_vm._resolve(&result, specifier_utf8.slice(), normalizeSource(source_utf8.slice()), is_esm, is_a_file_path) catch |err_| {
+        if (comptime bun.Environment.isAndroid) {
+            const spec_slice = specifier_utf8.slice();
+            if (bun.strings.indexOf(spec_slice, "android-arm64")) |pos| {
+                const before = spec_slice[0..pos];
+                const after = spec_slice[pos + "android-arm64".len ..];
+                var buf: [bun.MAX_PATH_BYTES]u8 = undefined;
+                const linux_spec = std.fmt.bufPrint(&buf, "{s}linux-arm64{s}", .{ before, after }) catch null;
+                if (linux_spec) |ls| {
+                    result = .{ .path = "", .result = null };
+                    jsc_vm._resolve(
+                        &result,
+                        ls,
+                        normalizeSource(source_utf8.slice()),
+                        is_esm,
+                        is_a_file_path,
+                    ) catch {};
+                    if (result.path.len > 0) {
+                        if (query_string) |query| {
+                            query.* = ZigString.init(result.query_string);
+                        }
+                        res.* = ErrorableString.ok(bun.String.init(result.path));
+                        return;
+                    }
+                }
+            }
+        }
+
         var err = err_;
         const msg: logger.Msg = brk: {
             const msgs: []logger.Msg = log.msgs.items;

@@ -690,7 +690,7 @@ pub const OperatingSystem = enum(u16) {
     pub const all_value: u16 = aix | darwin | freebsd | linux | openbsd | sunos | win32 | android;
 
     pub const current: OperatingSystem = switch (Environment.os) {
-        .linux => @enumFromInt(linux),
+        .linux => @enumFromInt(linux | if (Environment.isAndroid) android else 0),
         .mac => @enumFromInt(darwin),
         .windows => @enumFromInt(win32),
         else => @compileError("Unsupported operating system: " ++ @tagName(Environment.os)),
