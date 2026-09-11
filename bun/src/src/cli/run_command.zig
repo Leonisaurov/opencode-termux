@@ -1699,12 +1699,12 @@ pub const RunCommand = struct {
             };
             if (std.fs.path.isAbsolute(link_target)) break :brk link_target;
             const entry_dir = bun.path.dirname(normalized_filename, .posix);
-            break :brk bun.path.joinAbsStringBufChecked(
+            break :brk bun.path.joinAbsStringBuf(
                 entry_dir,
                 resolved_buf[0 .. resolved_buf.len - 1],
                 &.{link_target},
                 .posix,
-            ) orelse normalized_filename;
+            );
         };
 
         Run.boot(ctx, boot_entry, null) catch |err| {
