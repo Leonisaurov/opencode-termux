@@ -4665,7 +4665,7 @@ pub const PackageManager = struct {
                             var builder = this.lockfile.stringBuilder();
                             builder.count(name_slice);
                             builder.count(ghost_dir);
-                            bun.handleOom(builder.allocate());
+                            builder.allocate() catch bun.outOfMemory();
                             name_slice = this.lockfile.str(&name);
                             package.name = builder.append(String, name_slice);
                             package.name_hash = name_hash;

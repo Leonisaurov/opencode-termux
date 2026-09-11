@@ -638,7 +638,7 @@ pub const RunCommand = struct {
 
     var bun_node_dir_buf: bun.PathBuffer = undefined;
     var bun_node_dir_once = bun.once(struct {
-        fn once() []const u8 {
+        fn once() [:0]const u8 {
             const base = bun.fs.FileSystem.RealFS.getDefaultTempDir();
             const suffix = if (!Environment.isDebug)
                 "/bun-node" ++ if (Environment.git_sha_short.len > 0) "-" ++ Environment.git_sha_short else ""
@@ -648,7 +648,7 @@ pub const RunCommand = struct {
         }
     }.once);
 
-    pub fn bunNodeDir() []const u8 {
+    pub fn bunNodeDir() [:0]const u8 {
         return bun_node_dir_once.call(.{});
     }
 

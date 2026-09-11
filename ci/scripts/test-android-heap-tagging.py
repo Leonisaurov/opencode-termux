@@ -33,7 +33,8 @@ def main() -> None:
     assert 'if (comptime Environment.isAndroid) "/data/data/com.termux/files/usr/tmp" else "/tmp"' in bun_fs
     assert "RealFS.getDefaultTempDir()" in run_command
     assert "std.fmt.bufPrintZ" in run_command
-    assert "pub fn bunNodeDir()" in run_command
+    assert "fn once() [:0]const u8" in run_command
+    assert "pub fn bunNodeDir() [:0]const u8" in run_command
     assert "bun_node_dir ++" not in run_command
     assert "force_using_bun or !found_node or (comptime Environment.isAndroid)" in run_command
     assert 'strings.indexOf(spec_slice, "android-arm64")' in virtual_machine
