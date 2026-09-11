@@ -35,7 +35,7 @@ def main() -> None:
     assert "std.fmt.bufPrintZ" in run_command
     assert "fn once() [:0]const u8" in run_command
     assert "pub fn bunNodeDir() [:0]const u8" in run_command
-    assert "bun_node_dir ++" not in run_command
+    assert "bunNodeDir() ++" not in run_command
     assert "force_using_bun or !found_node or (comptime Environment.isAndroid)" in run_command
     assert 'strings.indexOf(spec_slice, "android-arm64")' in virtual_machine
     assert '"{s}linux-arm64{s}"' in virtual_machine

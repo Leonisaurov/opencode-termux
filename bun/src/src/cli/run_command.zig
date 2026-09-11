@@ -706,7 +706,11 @@ pub const RunCommand = struct {
             if (Environment.isDebug) {
                 std.fs.deleteTreeAbsolute(bunNodeDir()) catch {};
             }
-            const paths = .{ bunNodeDir() ++ "/node", bunNodeDir() ++ "/bun" };
+            var node_path_buf: [bun.MAX_PATH_BYTES]u8 = undefined;
+            var bun_path_buf: [bun.MAX_PATH_BYTES]u8 = undefined;
+            const node_path = std.fmt.bufPrintZ(&node_path_buf, "{s}/node", .{bunNodeDir()}) catch unreachable;
+            const bun_path = std.fmt.bufPrintZ(&bun_path_buf, "{s}/bun", .{bunNodeDir()}) catch unreachable;
+            const paths = .{ node_path, bun_path };
             inline for (paths) |path| {
                 var retried = false;
                 while (true) {
@@ -732,7 +736,8 @@ pub const RunCommand = struct {
             // The reason for the extra delim is because we are going to append the system PATH
             // later on. this is done by the caller, and explains why we are adding bunNodeDir()
             // to the end of the path slice rather than the start.
-            try PATH.appendSlice(bunNodeDir() ++ .{std.fs.path.delimiter});
+            try PATH.appendSlice(bunNodeDir());
+            try PATH.append(std.fs.path.delimiter);
         } else if (Environment.isWindows) {
             var target_path_buffer: bun.WPathBuffer = undefined;
 
