@@ -501,16 +501,16 @@ pub const Loader = struct {
         if (this.did_load_process) return;
         this.did_load_process = true;
 
-        if (comptime Environment.isAndroid) {
+        if (comptime Environment.isLinux) {
             // Bionic can leave both Zig's std.os.environ and the libc `environ`
-            // global empty or unreachable. Recover the initial process
-            // environment from procfs, which is always readable for the
-            // current process.
+            // global empty or unreachable, while /proc/self/environ is readable
+            // by the process itself. Prefer it on Linux; the libc views below
+            // remain the fallback for other platforms and edge cases.
             this.loadProcSelfEnviron();
             if (this.map.map.count() > 0) return;
         }
 
-        if (std.os.environ.len > 0 or !Environment.isAndroid) {
+        if (std.os.environ.len > 0 or !Environment.isLinux) {
             this.map.map.ensureTotalCapacity(std.os.environ.len) catch unreachable;
             for (std.os.environ) |_env| {
                 var env = bun.span(_env);

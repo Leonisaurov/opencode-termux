@@ -522,6 +522,12 @@ pub const Transpiler = struct {
     }
 
     pub fn runEnvLoader(this: *Transpiler, skip_default_env: bool) !void {
+        // Load the process environment before touching the filesystem. On
+        // Android/Bionic an execute-only ancestor can make the project root
+        // unreadable, and the early return below would then leave process.env
+        // empty even though the values are available from the kernel.
+        this.env.loadProcess();
+
         switch (this.options.env.behavior) {
             .prefix, .load_all, .load_all_without_inlining => {
                 // Step 1. Load the project root.
@@ -535,7 +541,6 @@ pub const Transpiler = struct {
 
                 // Process always has highest priority.
                 const was_production = this.options.production;
-                this.env.loadProcess();
                 const has_production_env = this.env.isProduction();
                 if (!was_production and has_production_env) {
                     this.options.setProduction(true);
@@ -551,7 +556,6 @@ pub const Transpiler = struct {
                 }
             },
             .disable => {
-                this.env.loadProcess();
                 if (this.env.isProduction()) {
                     this.options.setProduction(true);
                     this.resolver.opts.setProduction(true);
