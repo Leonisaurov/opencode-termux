@@ -67,7 +67,7 @@ jobs:
           set -euo pipefail
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
             echo 'changed_products=manual' >> "$GITHUB_OUTPUT"
-            for product in core opentui bun opencode; do
+            for product in core opentui bun opencode kilo; do
               echo "build_${product}=true" >> "$GITHUB_OUTPUT"
             done
             exit 0
