@@ -27,7 +27,7 @@ Opciones:
 | Opción | Descripción |
 | --- | --- |
 | `--size WxH` | Tamaño del panel (default `120x32`). |
-| `--wait S` | Segundos antes de capturar (default 8; OpenCode 1.18.x tarda ~30 s en pintar en un dispositivo lento). |
+| `--wait S` | Segundos antes de capturar (default 8; OpenCode 1.18.x tarda ~30 s y Kilo 7.4.20 ~90 s por el fetch de modelos que bloquea el primer paint). |
 | `--send STRING` | Envía teclas tras la espera (repetible), p. ej. para interactuar o salir. |
 | `--grep REGEX` | Falla si el panel **no** coincide. |
 | `--reject REGEX` | Falla si el panel coincide (útil para detectar errores). |
@@ -200,6 +200,12 @@ resolvió el aborto.
   `build-android.yml` y se guardó el DAG completo en
   `ci/workflows/build-android.full.yml`. `publish` y el instalador toleran la
   ausencia de `codex`.
+- **Kilo a base de fuente**: `kilo/scripts/build.sh` compila `libopentui.so`
+  (0.3.4) y el bundle desde `opentui/src/kilo` y `kilo/src`. Las adaptaciones
+  Android de Zig viven en el árbol vendorizado; el build las **verifica por
+  marcador** y falla si faltan, en vez de mutar el checkout con parches (se
+  eliminó el bloque legacy `if false`). La TUI tarda ~90 s en pintar por el
+  fetch inicial de modelos; su `global.ts` también usa `TMPDIR`/`PREFIX`.
 
 ## 7. Comandos de verificación útiles
 

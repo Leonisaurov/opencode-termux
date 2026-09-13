@@ -24,7 +24,14 @@ const cache = path.join(clean(xdgCache)!, app)
 const config = path.join(clean(xdgConfig)!, app)
 const state = path.join(clean(xdgState)!, app)
 // kilocode_change end
-const tmp = path.join(os.tmpdir(), app)
+// kilocode_change start - Android/Termux: TMPDIR may be exported by the shell
+// but not visible to the app process; fall back to the Termux prefix instead
+// of the unwritable /tmp so temp paths stay inside the app sandbox.
+const tmp = path.join(
+  process.env.TMPDIR ?? (process.env.PREFIX ? path.join(process.env.PREFIX, "tmp") : os.tmpdir()),
+  app,
+)
+// kilocode_change end
 
 const paths = {
   get home() {
