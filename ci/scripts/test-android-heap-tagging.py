@@ -5,6 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "bun/src/src/main.zig"
 ENV_LOADER = ROOT / "bun/src/src/env_loader.zig"
+TRANSPILER = ROOT / "bun/src/src/transpiler.zig"
 BUN_FS = ROOT / "bun/src/src/fs.zig"
 RUN_COMMAND = ROOT / "bun/src/src/cli/run_command.zig"
 VIRTUAL_MACHINE = ROOT / "bun/src/src/bun.js/VirtualMachine.zig"
@@ -15,6 +16,7 @@ NPM = ROOT / "bun/src/src/install/npm.zig"
 def main() -> None:
     source = SOURCE.read_text(encoding="utf-8")
     env_loader = ENV_LOADER.read_text(encoding="utf-8")
+    transpiler = TRANSPILER.read_text(encoding="utf-8")
     bun_fs = BUN_FS.read_text(encoding="utf-8")
     run_command = RUN_COMMAND.read_text(encoding="utf-8")
     virtual_machine = VIRTUAL_MACHINE.read_text(encoding="utf-8")
@@ -29,7 +31,12 @@ def main() -> None:
     assert "linksection(\".init_array\")" in source
     assert source.count("android_disable_heap_tagging();") == 1
     assert "std.mem.span(std.c.environ)" in env_loader
-    assert "std.os.environ.len > 0 or !Environment.isAndroid" in env_loader
+    assert "std.os.environ.len > 0 or !Environment.isLinux" in env_loader
+    assert "this.loadProcSelfEnviron();" in env_loader
+    # process.env must be loaded before the project root is read so an
+    # unreadable ancestor directory cannot leave the environment empty.
+    assert "Load the process environment before touching the filesystem" in transpiler
+    assert transpiler.index("this.env.loadProcess();") < transpiler.index("this.resolver.readDirInfo(this.fs.top_level_dir)")
     assert 'if (comptime Environment.isAndroid) "/data/data/com.termux/files/usr/tmp" else "/tmp"' in bun_fs
     assert "RealFS.getDefaultTempDir()" in run_command
     assert "std.fmt.bufPrintZ" in run_command
