@@ -22,7 +22,6 @@
 #include <stdarg.h>
 #include <string.h>
 #include <setjmp.h>
-#include <stdatomic.h>
 
 #if !defined(__FreeBSD__) \
  && !defined(__FreeBSD_kernel__) \
@@ -37,8 +36,6 @@
 #include <unistd.h>
 #include <sys/syscall.h>
 #endif
-
-#include "config.h"
 
 #define BOUND_DEBUG             (1)
 #define BOUND_STATISTIC         (1)
@@ -164,7 +161,7 @@ static pthread_spinlock_t bounds_spin;
 #define HAVE_TLS_FUNC          (1)
 #define HAVE_TLS_VAR           (0)
 #endif
-#if defined CONFIG_TCC_MUSL || defined __ANDROID__
+#if defined TCC_MUSL || defined __ANDROID__
 # undef HAVE_CTYPE
 #endif
 #endif
@@ -326,7 +323,7 @@ DLL_EXPORT void *__aeabi_memset(void *dst, int c, size_t size);
 #define BOUND_REALLOC(a,b)       realloc(a,b)
 #define BOUND_CALLOC(a,b)        calloc(a,b)
 DLL_EXPORT void *__bound_malloc(size_t size, const void *caller);
-DLL_EXPORT void *__bound_memalign(size_t align, size_t size, const void *caller);
+DLL_EXPORT void *__bound_memalign(size_t size, size_t align, const void *caller);
 DLL_EXPORT void __bound_free(void *ptr, const void *caller);
 DLL_EXPORT void *__bound_realloc(void *ptr, size_t size, const void *caller);
 DLL_EXPORT void *__bound_calloc(size_t nmemb, size_t size);
@@ -351,7 +348,7 @@ static unsigned char print_heap;
 static unsigned char print_statistic;
 static unsigned char no_strdup;
 static unsigned char use_sem;
-static _Atomic int never_fatal;
+static int never_fatal;
 #if HAVE_TLS_FUNC
 #if defined(_WIN32)
 static int no_checking = 0;
@@ -393,7 +390,7 @@ static __thread int no_checking = 0;
 #define NO_CHECKING_GET()  no_checking
 #define NO_CHECKING_SET(v) no_checking = v 
 #else
-static _Atomic int no_checking = 0;
+static int no_checking = 0;
 #define NO_CHECKING_GET()  no_checking
 #define NO_CHECKING_SET(v) no_checking = v 
 #endif
@@ -484,13 +481,35 @@ static void bound_not_found_warning(const char *file, const char *function,
     dprintf(stderr, "%s%s, %s(): Not found %p\n", exec, file, function, ptr);
 }
 
+static void fetch_and_add(int* variable, int value)
+{
+#if defined __i386__ || defined __x86_64__
+      __asm__ volatile("lock; addl %0, %1"
+        : "+r" (value), "+m" (*variable) // input+output
+        : // No input-only
+        : "memory"
+      );
+#elif defined __arm__
+      extern void fetch_and_add_arm(int* variable, int value);
+      fetch_and_add_arm(variable, value);
+#elif defined __aarch64__
+      extern void fetch_and_add_arm64(int* variable, int value);
+      fetch_and_add_arm64(variable, value);
+#elif defined __riscv
+      extern void fetch_and_add_riscv64(int* variable, int value);
+      fetch_and_add_riscv64(variable, value);
+#else
+      *variable += value;
+#endif
+}
+
 /* enable/disable checking. This can be used in signal handlers. */
 void __bounds_checking (int no_check)
 {
 #if HAVE_TLS_FUNC || HAVE_TLS_VAR
     NO_CHECKING_SET(NO_CHECKING_GET() + no_check);
 #else
-    atomic_fetch_add (&no_checking, no_check);
+    fetch_and_add (&no_checking, no_check);
 #endif
 }
 
@@ -507,7 +526,7 @@ void __bound_checking_unlock(void)
 /* enable/disable checking. This can be used in signal handlers. */
 void __bound_never_fatal (int neverfatal)
 {
-    atomic_fetch_add (&never_fatal, neverfatal);
+    fetch_and_add (&never_fatal, neverfatal);
 }
 
 /* return '(p + offset)' for pointer arithmetic (a pointer can reach
@@ -540,9 +559,7 @@ void * __bound_ptr_add(void *p, size_t offset)
             if (tree->is_invalid || addr + offset > tree->size) {
                 POST_SEM ();
                 if (print_warn_ptr_add)
-                    bound_warning("%p is outside of the region (0x%lx..0x%lx)",
-                                  p + offset, (long)tree->start,
-                                  (long)(tree->start + tree->size - 1));
+                    bound_warning("%p is outside of the region", p + offset);
                 if (never_fatal <= 0)
                     return INVALID_POINTER; /* return an invalid pointer */
                 return p + offset;
@@ -588,10 +605,7 @@ void * __bound_ptr_indir ## dsize (void *p, size_t offset)                     \
         if (addr <= tree->size) {                                              \
             if (tree->is_invalid || addr + offset + dsize > tree->size) {      \
                 POST_SEM ();                                                   \
-                bound_warning("%p (size %d) is outside of the region "         \
-                              "(0x%lx..0x%lx)",                                \
-                              p + offset, dsize, (long)tree->start,            \
-                              (long)(tree->start + tree->size - 1));           \
+                bound_warning("%p is outside of the region", p + offset); \
                 if (never_fatal <= 0)                                          \
                     return INVALID_POINTER; /* return an invalid pointer */    \
                 return p + offset;                                             \
@@ -1091,9 +1105,11 @@ add_bounds:
     while (p[0] != 0) {
         tree = splay_insert(p[0], p[1], tree);
 #if BOUND_DEBUG
-        dprintf(stderr, "%s, %s(): static var %p 0x%lx\n",
-                __FILE__, __FUNCTION__,
-                (void *) p[0], (unsigned long) p[1]);
+        if (print_calls) {
+            dprintf(stderr, "%s, %s(): static var %p 0x%lx\n",
+                    __FILE__, __FUNCTION__,
+                    (void *) p[0], (unsigned long) p[1]);
+        }
 #endif
         p += 2;
     }
@@ -1169,7 +1185,7 @@ void __attribute__((destructor)) __bound_exit(void)
     dprintf(stderr, "%s, %s():\n", __FILE__, __FUNCTION__);
 
     if (inited) {
-#if !defined(_WIN32) && !defined(__APPLE__) && !defined CONFIG_TCC_MUSL && \
+#if !defined(_WIN32) && !defined(__APPLE__) && !defined TCC_MUSL && \
     !defined(__OpenBSD__) && !defined(__FreeBSD__) && !defined(__NetBSD__) && \
     !defined(__ANDROID__)
         if (print_heap) {
@@ -1503,9 +1519,9 @@ void *__bound_malloc(size_t size, const void *caller)
 }
 
 #if MALLOC_REDIR
-void *memalign(size_t align, size_t size)
+void *memalign(size_t size, size_t align)
 #else
-void *__bound_memalign(size_t align, size_t size, const void *caller)
+void *__bound_memalign(size_t size, size_t align, const void *caller)
 #endif
 {
     void *ptr;
@@ -1514,7 +1530,7 @@ void *__bound_memalign(size_t align, size_t size, const void *caller)
     /* we allocate one more byte to ensure the regions will be
        separated by at least one byte. With the glibc malloc, it may
        be in fact not necessary */
-    ptr = BOUND_MEMALIGN(align, size + 1);
+    ptr = BOUND_MEMALIGN(size + 1, align);
 #else
     if (align > 4) {
         /* XXX: handle it ? */

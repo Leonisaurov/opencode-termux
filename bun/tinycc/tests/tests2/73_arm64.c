@@ -38,11 +38,6 @@ struct hfa32 { long double a, b; } hfa32 = { 32.1, 32.2 };
 struct hfa33 { long double a, b, c; } hfa33 = { 33.1, 33.2, 33.3 };
 struct hfa34 { long double a, b, c, d; } hfa34 = { 34.1, 34.2, 34.3, 34.4 };
 
-struct empty { };
-/* Keep the top-level offsets at zero without changing the type into a union. */
-struct hfae12 { struct empty e; struct hfa12 h; } hfae12 = { { }, { 112.1, 112.2 } };
-struct hfae22 { struct empty e; struct hfa22 h; } hfae22 = { { }, { 122.1, 122.2 } };
-
 void fa_s1(struct s1 a) { printf("%.1s\n", a.x); }
 void fa_s2(struct s2 a) { printf("%.2s\n", a.x); }
 void fa_s3(struct s3 a) { printf("%.3s\n", a.x); }
@@ -87,10 +82,6 @@ void fa_hfa33(struct hfa33 a)
 { printf("%.1Lf %.1Lf %.1Lf\n", a.a, a.b, a.c); }
 void fa_hfa34(struct hfa34 a)
 { printf("%.1Lf %.1Lf %.1Lf %.1Lf\n", a.a, a.b, a.c, a.d); }
-void fa_hfae12(struct hfae12 a)
-{ printf("%.1f %.1f\n", a.h.a, a.h.b); }
-void fa_hfae22(struct hfae22 a)
-{ printf("%.1f %.1f\n", a.h.a, a.h.b); }
 
 void fa1(struct s8 a, struct s9 b, struct s10 c, struct s11 d,
          struct s12 e, struct s13 f)
@@ -149,8 +140,6 @@ void arg(void)
     fa_hfa32(hfa32);
     fa_hfa33(hfa33);
     fa_hfa34(hfa34);
-    fa_hfae12(hfae12);
-    fa_hfae22(hfae22);
     fa1(s8, s9, s10, s11, s12, s13);
     fa2(s9, s10, s11, s12, s13, s14);
     fa3(hfa14, hfa23, hfa32);
@@ -189,8 +178,6 @@ struct hfa31 fr_hfa31(void) { return hfa31; }
 struct hfa32 fr_hfa32(void) { return hfa32; }
 struct hfa33 fr_hfa33(void) { return hfa33; }
 struct hfa34 fr_hfa34(void) { return hfa34; }
-struct hfae12 fr_hfae12(void) { return hfae12; }
-struct hfae22 fr_hfae22(void) { return hfae22; }
 
 void ret(void)
 {
@@ -241,8 +228,6 @@ void ret(void)
     printf("%.1Lf %.1Lf\n", fr_hfa32().a, fr_hfa32().b);
     printf("%.1Lf %.1Lf\n", fr_hfa33().a, fr_hfa33().c);
     printf("%.1Lf %.1Lf\n", fr_hfa34().a, fr_hfa34().d);
-    printf("%.1f %.1f\n", fr_hfae12().h.a, fr_hfae12().h.b);
-    printf("%.1f %.1f\n", fr_hfae22().h.a, fr_hfae22().h.b);
 }
 
 void*
@@ -464,10 +449,6 @@ static uint64_t sublp4095(uint64_t x) { return x - 4095; }
 static uint32_t subim503808(uint32_t x) { return x - -503808; }
 static uint64_t addp12345(uint64_t x) { return x + 12345; }
 static uint32_t subp12345(uint32_t x) { return x - 12345; }
-/* LLP64 guard: these drop the high bits (print 3e8) when arm64_gen_opic's
-   fits-in-immediate mask truncates to 32 bits on an LLP64-built tcc. */
-static uint64_t addlpbit49(uint64_t x) { return x + (1ll << 49); }
-static uint64_t addlp4g(uint64_t x) { return x + 0x100000000ll; }
 
 static uint32_t mvni(uint32_t x) { return 0xffffffff - x; }
 static uint64_t negl(uint64_t x) { return 0 - x; }
@@ -511,8 +492,6 @@ void opi(void)
     pll(subim503808(x));
     pll(addp12345(x));
     pll(subp12345(x));
-    pll(addlpbit49(x));
-    pll(addlp4g(x));
     pll(mvni(x));
     pll(negl(x));
     pll(rsbi123(x));

@@ -702,7 +702,7 @@ static void check_relocs(TCCState *s1, struct macho *mo)
 	 	    goti = tcc_realloc(goti, (mo->n_got + 1) * sizeof(*goti));
                     if (ELFW(ST_BIND)(sym->st_info) == STB_LOCAL) {
                         if (sym->st_shndx == SHN_UNDEF)
-                          tcc_error("unresolved local reference to '%s'",
+                          tcc_error("undefined local symbo: '%s'",
 				    (char *) symtab_section->link->data + sym->st_name);
 			goti[mo->n_got++] = INDIRECT_SYMBOL_LOCAL;
                     } else {
@@ -859,7 +859,7 @@ static void check_relocs(TCCState *s1, struct macho *mo)
 		    goti = tcc_realloc(goti, (mo->n_got + 1) * sizeof(*goti));
                     if (ELFW(ST_BIND)(sym->st_info) == STB_LOCAL) {
                         if (sym->st_shndx == SHN_UNDEF)
-                          tcc_error("unresolved local reference to '%s'",
+                          tcc_error("undefined local symbo: '%s'",
 				    (char *) symtab_section->link->data + sym->st_name);
 			goti[mo->n_got++] = INDIRECT_SYMBOL_LOCAL;
                     } else {
@@ -1042,7 +1042,7 @@ static int check_symbols(TCCState *s1, struct macho *mo)
                 sym->st_shndx = SHN_FROMDLL;
                 continue;
             }
-            tcc_error_noabort("unresolved reference to '%s'", name);
+            tcc_error_noabort("undefined symbol '%s'", name);
             ret = -1;
         }
     }
@@ -1058,7 +1058,6 @@ static void convert_symbol(TCCState *s1, struct macho *mo, struct nlist_64 *pn)
     case STT_NOTYPE:
     case STT_OBJECT:
     case STT_FUNC:
-    case STT_TLS:
     case STT_SECTION:
         n.n_type = N_SECT;
         break;
@@ -2196,6 +2195,9 @@ ST_FUNC int macho_output_file(TCCState *s1, const char *filename)
         tcc_error_noabort("could not write '%s: %s'", filename, strerror(errno));
         return -1;
     }
+    if (s1->verbose)
+        printf("<- %s\n", filename);
+
     tcc_add_runtime(s1);
     tcc_macho_add_destructor(s1);
     resolve_common_syms(s1);
@@ -2220,8 +2222,6 @@ ST_FUNC int macho_output_file(TCCState *s1, const char *filename)
 	bind_rebase_import(s1, &mo);
 #endif
         convert_symbols(s1, &mo);
-        if (s1->verbose)
-            printf("<- %s\n", filename);
         macho_write(s1, &mo, fp);
     }
 
@@ -2267,8 +2267,8 @@ static uint32_t macho_swap32(uint32_t x)
 // since we technically only need to call this once, we can just keep it around
 // it should be faster that way anyhow since it means we only call 
 // dlopen() just once
-static char* xcode_select_sdkroot;
-static int xcode_select_loaded;
+char* xcode_select_sdkroot;
+bool xcode_select_loaded = false;
 #ifdef TCC_TARGET_MACHO
 ST_FUNC char* tcc_search_darwin_framework(TCCState* s, const char* include_name) {
     // "<Security/Security.h>" 
@@ -2301,7 +2301,7 @@ ST_FUNC char* tcc_search_darwin_framework(TCCState* s, const char* include_name)
 ST_FUNC void tcc_add_macos_framework_path(TCCState* s, const char* framework_name, const char* base_path) {
     // if this is a system framework, we need to add it via /System/Library/Frameworks/
     char path_buffer[2048];
-    pstrcpy(path_buffer, sizeof(path_buffer), "/System/Library/Frameworks/");
+    pstrcat(path_buffer, sizeof(path_buffer), "/System/Library/Frameworks/");
     pstrcat(path_buffer, sizeof(path_buffer), framework_name);
     pstrcat(path_buffer, sizeof(path_buffer), ".framework/");
     pstrcat(path_buffer, sizeof(path_buffer), framework_name);
@@ -2343,7 +2343,7 @@ ST_FUNC void tcc_add_macos_sdkpath(TCCState* s)
         void* xcs = dlopen("libxcselect.dylib", RTLD_GLOBAL | RTLD_LAZY);
         int (*f)(unsigned int, char**) = dlsym(xcs, "xcselect_host_sdk_path");
         if (f) f(1, &xcode_select_sdkroot);
-        xcode_select_loaded = 1;
+        xcode_select_loaded = true;
     }
     
     char *pos = NULL;
@@ -2388,9 +2388,12 @@ ST_FUNC void tcc_add_macos_sdkpath(TCCState* s)
     cstr_free(&path);
 }
 
-ST_FUNC char* macho_tbd_soname(int fd) {
+ST_FUNC const char* macho_tbd_soname(const char* filename) {
     char *soname, *data, *pos;
-    char *ret = 0;
+    const char *ret = filename;
+
+    int fd = open(filename,O_RDONLY);
+    if (fd<0) return ret;
     pos = data = tcc_load_text(fd);
     if (!tbd_parse_movepast("install-name: ")) goto the_end;
     tbd_parse_skipws;

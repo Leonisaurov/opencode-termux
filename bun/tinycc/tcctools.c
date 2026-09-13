@@ -48,13 +48,25 @@ static unsigned long le2belong(unsigned long ul) {
         ((ul & 0xFF)<<24)+((ul & 0xFF00)<<8);
 }
 
+/* Returns 1 if s contains any of the chars of list, else 0 */
+static int contains_any(const char *s, const char *list) {
+  const char *l;
+  for (; *s; s++) {
+      for (l = list; *l; l++) {
+          if (*s == *l)
+              return 1;
+      }
+  }
+  return 0;
+}
+
 static int ar_usage(int ret) {
     fprintf(stderr, "usage: tcc -ar [crstvx] lib [files]\n");
     fprintf(stderr, "create library ([abdiopN] not supported).\n");
     return ret;
 }
 
-ST_FUNC int tcc_tool_ar(int argc, char **argv)
+ST_FUNC int tcc_tool_ar(TCCState *s1, int argc, char **argv)
 {
     static const ArHdr arhdr_init = {
         "/               ",
@@ -75,7 +87,7 @@ ST_FUNC int tcc_tool_ar(int argc, char **argv)
     ElfW(Shdr) *shdr;
     ElfW(Sym) *sym;
     int i, fsize, i_lib, i_obj;
-    char *buf, *shstr, *symtab, *strtab;
+    char *buf, *shstr, *symtab = NULL, *strtab = NULL;
     int symtabsize = 0;//, strtabsize = 0;
     char *anames = NULL;
     int *afpos = NULL;
@@ -91,16 +103,16 @@ ST_FUNC int tcc_tool_ar(int argc, char **argv)
     i_lib = 0; i_obj = 0;  // will hold the index of the lib and first obj
     for (i = 1; i < argc; i++) {
         const char *a = argv[i];
-        if (*a == '-' && strchr(a, '.'))
+        if (*a == '-' && strstr(a, "."))
             ret = 1; // -x.y is always invalid (same as gnu ar)
-        if ((*a == '-') || (i == 1 && !strchr(a, '.'))) {  // options argument
-            if (strpbrk(a, ops_conflict))
+        if ((*a == '-') || (i == 1 && !strstr(a, "."))) {  // options argument
+            if (contains_any(a, ops_conflict))
                 ret = 1;
-            if (strchr(a, 'x'))
+            if (strstr(a, "x"))
                 extract = 1;
-            if (strchr(a, 't'))
+            if (strstr(a, "t"))
                 table = 1;
-            if (strchr(a, 'v'))
+            if (strstr(a, "v"))
                 verbose = 1;
         } else {  // lib or obj files: don't abort - keep validating all args.
             if (!i_lib)  // first file is the lib
@@ -162,8 +174,6 @@ no_ar:
 		    /* ignore date/uid/gid/mode */
 		}
 	    }
-            if (fsize & 1)
-                fgetc(fh);
             tcc_free(buf);
 	}
 	ret = 0;
@@ -222,7 +232,6 @@ finish:
 
         shdr = (ElfW(Shdr) *) (buf + ehdr->e_shoff + ehdr->e_shstrndx * ehdr->e_shentsize);
         shstr = (char *)(buf + shdr->sh_offset);
-        symtab = strtab = NULL;
         for (i = 0; i < ehdr->e_shnum; i++)
         {
             shdr = (ElfW(Shdr) *) (buf + ehdr->e_shoff + i * ehdr->e_shentsize);
@@ -243,7 +252,7 @@ finish:
             }
         }
 
-        if (symtab && strtab)
+        if (symtab && symtabsize)
         {
             int nsym = symtabsize / sizeof(ElfW(Sym));
             //printf("symtab: info size shndx name\n");
@@ -289,8 +298,6 @@ finish:
         tcc_free(buf);
         i_obj++;
         fpos += (fsize + sizeof(arhdro));
-        if (fpos & 1)
-            fputc(0, fo), ++fpos;
     }
     hofs = 8 + sizeof(arhdr) + strpos + (funccnt+1) * sizeof(int);
     fpos = 0;
@@ -360,7 +367,7 @@ the_end:
 
 #ifdef TCC_TARGET_PE
 
-ST_FUNC int tcc_tool_impdef(int argc, char **argv)
+ST_FUNC int tcc_tool_impdef(TCCState *s1, int argc, char **argv)
 {
     int ret, v, i;
     char infile[260];
@@ -487,9 +494,9 @@ the_end:
 
 #if !defined TCC_TARGET_I386 && !defined TCC_TARGET_X86_64
 
-ST_FUNC int tcc_tool_cross(char **argv, int option)
+ST_FUNC int tcc_tool_cross(TCCState *s1, char **argv, int option)
 {
-    fprintf(stderr, "tcc -m%d not implemented\n", option);
+    tcc_error_noabort("-m%d not implemented.", option);
     return 1;
 }
 
@@ -497,38 +504,28 @@ ST_FUNC int tcc_tool_cross(char **argv, int option)
 #ifdef _WIN32
 #include <process.h>
 
-/* - Empty argument or with space/tab (not newline) requires quoting.
- * - Double-quotes at the value require '\'-escape, regardless of quoting.
- * - Consecutive (or 1) backslashes at the value all need '\'-escape only if
- *   followed by [escaped] double quote, else taken literally, e.g. <x\\y\>
- *   remains literal without quoting or esc, but <x\\"y\> becomes <x\\\\\"y\>.
- * - This "before double quote" rule applies also before delimiting quoting,
- *   e.g. <x\y \"z\> becomes <"x\y \\\"z\\"> (quoting required because space).
- *
- * https://learn.microsoft.com/en-us/cpp/c-language/parsing-c-command-line-arguments
- */
-static char *quote_win32(const char *s)
+static char *str_replace(const char *str, const char *p, const char *r)
 {
-    char *o, *r = tcc_malloc(2 * strlen(s) + 3);   /* max-esc, quotes, \0 */
-    int cbs = 0, quoted = !*s;  /* consecutive backslashes before current */
+    const char *s, *s0;
+    char *d, *d0;
+    int sl, pl, rl;
 
-    for (o = r; *s; *o++ = *s++) {
-        quoted |= *s == ' ' || *s == '\t';
-        if (*s == '\\' || *s == '"')
-            *o++ = '\\';
-        else
-            o -= cbs;  /* undo cbs escapes, if any (not followed by DQ) */
-        cbs = *s == '\\' ? cbs + 1 : 0;
+    sl = strlen(str);
+    pl = strlen(p);
+    rl = strlen(r);
+    for (d0 = NULL;; d0 = tcc_malloc(sl + 1)) {
+        for (d = d0, s = str; s0 = s, s = strstr(s, p), s; s += pl) {
+            if (d) {
+                memcpy(d, s0, sl = s - s0), d += sl;
+                memcpy(d, r, rl), d += rl;
+            } else
+                sl += rl - pl;
+        }
+        if (d) {
+            strcpy(d, s0);
+            return d0;
+        }
     }
-    if (quoted) {
-        memmove(r + 1, r, o++ - r);
-        *r = *o++ = '"';
-    } else {
-        o -= cbs;
-    }
-
-    *o = 0;
-    return r; /* don't bother with realloc(r, o-r+1) */
 }
 
 static int execvp_win32(const char *prog, char **argv)
@@ -536,7 +533,8 @@ static int execvp_win32(const char *prog, char **argv)
     int ret; char **p;
     /* replace all " by \" */
     for (p = argv; *p; ++p)
-        *p = quote_win32(*p);
+        if (strchr(*p, '"'))
+            *p = str_replace(*p, "\"", "\\\"");
     ret = _spawnvp(P_NOWAIT, prog, (const char *const*)argv);
     if (-1 == ret)
         return ret;
@@ -546,7 +544,7 @@ static int execvp_win32(const char *prog, char **argv)
 #define execvp execvp_win32
 #endif /* _WIN32 */
 
-ST_FUNC int tcc_tool_cross(char **argv, int target)
+ST_FUNC int tcc_tool_cross(TCCState *s1, char **argv, int target)
 {
     char program[4096];
     char *a0 = argv[0];
@@ -565,7 +563,7 @@ ST_FUNC int tcc_tool_cross(char **argv, int target)
 
     if (strcmp(a0, program))
         execvp(argv[0] = program, argv);
-    fprintf(stderr, "tcc: could not run '%s'\n", program);
+    tcc_error_noabort("could not run '%s'", program);
     return 1;
 }
 

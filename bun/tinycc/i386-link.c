@@ -15,11 +15,7 @@
 #define ELF_START_ADDR 0x08048000
 #define ELF_PAGE_SIZE  0x1000
 
-#if defined CONFIG_TCC_PIC
-#define PCRELATIVE_DLLPLT 1
-#else
 #define PCRELATIVE_DLLPLT 0
-#endif
 #define RELOCATE_DLLPLT 1
 
 #else /* !TARGET_DEFS_ONLY */
@@ -29,7 +25,7 @@
 #ifdef NEED_RELOC_TYPE
 /* Returns 1 for a code relocation, 0 for a data relocation. For unknown
    relocations, returns -1. */
-ST_FUNC int code_reloc (int reloc_type)
+int code_reloc (int reloc_type)
 {
     switch (reloc_type) {
 	case R_386_RELATIVE:
@@ -59,7 +55,7 @@ ST_FUNC int code_reloc (int reloc_type)
 /* Returns an enumerator to describe whether and when the relocation needs a
    GOT and/or PLT entry to be created. See tcc.h for a description of the
    different values. */
-ST_FUNC int gotplt_entry_type (int reloc_type)
+int gotplt_entry_type (int reloc_type)
 {
     switch (reloc_type) {
 	case R_386_RELATIVE:
@@ -175,7 +171,7 @@ ST_FUNC void relocate_plt(TCCState *s1)
 #endif
 #endif
 
-ST_FUNC void relocate(TCCState *s1, ElfW_Rel *rel, int type, unsigned char *ptr, addr_t addr, addr_t val)
+void relocate(TCCState *s1, ElfW_Rel *rel, int type, unsigned char *ptr, addr_t addr, addr_t val)
 {
     int sym_index, esym_index;
 
@@ -305,6 +301,7 @@ ST_FUNC void relocate(TCCState *s1, ElfW_Rel *rel, int type, unsigned char *ptr,
             }
             return;
         case R_386_TLS_LDO_32:
+        case R_386_TLS_LE:
             {
                 ElfW(Sym) *sym;
                 Section *sec;
@@ -313,38 +310,6 @@ ST_FUNC void relocate(TCCState *s1, ElfW_Rel *rel, int type, unsigned char *ptr,
                 sym = &((ElfW(Sym) *)symtab_section->data)[sym_index];
                 sec = s1->sections[sym->st_shndx];
                 x = val - sec->sh_addr - sec->data_offset;
-                add32le(ptr, x);
-            }
-            return;
-        case R_386_TLS_LE:
-            {
-                ElfW(Sym) *sym;
-                Section *sec;
-                int32_t x;
-                addr_t tls_start = 0, tls_end = 0, tls_align = 1;
-                int i;
-
-                sym = &((ElfW(Sym) *)symtab_section->data)[sym_index];
-                sec = s1->sections[sym->st_shndx];
-
-                for (i = 1; i < s1->nb_sections; i++) {
-                    Section *s = s1->sections[i];
-                    if (s->sh_flags & SHF_TLS && s->sh_size) {
-                        if (!tls_start || s->sh_addr < tls_start)
-                            tls_start = s->sh_addr;
-                        if (s->sh_addr + s->sh_size > tls_end)
-                            tls_end = s->sh_addr + s->sh_size;
-                        if (s->sh_addralign > tls_align)
-                            tls_align = s->sh_addralign;
-                    }
-                }
-                if (tls_end > tls_start) {
-                    addr_t tls_size = tls_end - tls_start;
-                    addr_t aligned_size = (tls_size + tls_align - 1) & ~(tls_align - 1);
-                    x = val - (tls_start + aligned_size);
-                } else {
-                    x = val - sec->sh_addr - sec->data_offset;
-                }
                 add32le(ptr, x);
             }
             return;

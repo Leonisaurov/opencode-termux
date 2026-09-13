@@ -7,7 +7,7 @@
     },
     "tinycc": {
       "remote": "https://github.com/oven-sh/tinycc.git",
-      "commit": "b91835d8701523e895a2b447713630069514e291e"
+      "commit": "29985a3b59898861442fa3b43f663fc1af2591d7"
     }
   }
 }

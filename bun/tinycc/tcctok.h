@@ -1,24 +1,23 @@
 /*********************************************************************/
 /* keywords */
+     DEF(TOK_INT, "int")
+     DEF(TOK_VOID, "void")
+     DEF(TOK_CHAR, "char")
      DEF(TOK_IF, "if")
      DEF(TOK_ELSE, "else")
      DEF(TOK_WHILE, "while")
-     DEF(TOK_FOR, "for")
-     DEF(TOK_DO, "do")
-     DEF(TOK_CONTINUE, "continue")
      DEF(TOK_BREAK, "break")
      DEF(TOK_RETURN, "return")
-     DEF(TOK_GOTO, "goto")
-     DEF(TOK_SWITCH, "switch")
-     DEF(TOK_CASE, "case")
-     DEF(TOK_DEFAULT, "default")
-     DEF(TOK_ASM1, "asm")
-     DEF(TOK_ASM2, "__asm")
-     DEF(TOK_ASM3, "__asm__")
-
+     DEF(TOK_FOR, "for")
      DEF(TOK_EXTERN, "extern")
      DEF(TOK_STATIC, "static")
      DEF(TOK_UNSIGNED, "unsigned")
+     DEF(TOK_GOTO, "goto")
+     DEF(TOK_DO, "do")
+     DEF(TOK_CONTINUE, "continue")
+     DEF(TOK_SWITCH, "switch")
+     DEF(TOK_CASE, "case")
+
      DEF(TOK__Atomic, "_Atomic")
      DEF(TOK_CONST1, "const")
      DEF(TOK_CONST2, "__const") /* gcc keyword */
@@ -26,6 +25,7 @@
      DEF(TOK_VOLATILE1, "volatile")
      DEF(TOK_VOLATILE2, "__volatile") /* gcc keyword */
      DEF(TOK_VOLATILE3, "__volatile__") /* gcc keyword */
+     DEF(TOK_LONG, "long")
      DEF(TOK_REGISTER, "register")
      DEF(TOK_SIGNED1, "signed")
      DEF(TOK_SIGNED2, "__signed") /* gcc keyword */
@@ -39,23 +39,19 @@
      DEF(TOK_RESTRICT3, "__restrict__")
      DEF(TOK_EXTENSION, "__extension__") /* gcc keyword */
      DEF(TOK_THREAD_LOCAL, "_Thread_local") /* C11 thread-local storage */
-     DEF(TOK___thread, "__thread") /* GCC thread-local storage extension */
 
      DEF(TOK_GENERIC, "_Generic")
      DEF(TOK_STATIC_ASSERT, "_Static_assert")
 
-     DEF(TOK_VOID, "void")
-     DEF(TOK_CHAR, "char")
-     DEF(TOK_INT, "int")
      DEF(TOK_FLOAT, "float")
      DEF(TOK_DOUBLE, "double")
      DEF(TOK_BOOL, "_Bool")
      DEF(TOK_COMPLEX, "_Complex")
      DEF(TOK_SHORT, "short")
-     DEF(TOK_LONG, "long")
      DEF(TOK_STRUCT, "struct")
      DEF(TOK_UNION, "union")
      DEF(TOK_TYPEDEF, "typedef")
+     DEF(TOK_DEFAULT, "default")
      DEF(TOK_ENUM, "enum")
      DEF(TOK_SIZEOF, "sizeof")
      DEF(TOK_ATTRIBUTE1, "__attribute")
@@ -68,6 +64,13 @@
      DEF(TOK_TYPEOF2, "__typeof")
      DEF(TOK_TYPEOF3, "__typeof__")
      DEF(TOK_LABEL, "__label__")
+     DEF(TOK_ASM1, "asm")
+     DEF(TOK_ASM2, "__asm")
+     DEF(TOK_ASM3, "__asm__")
+
+#ifdef TCC_TARGET_ARM64
+     DEF(TOK_UINT128, "__uint128_t")
+#endif
 
 /*********************************************************************/
 /* the following are not keywords. They are included to ease parsing */
@@ -102,6 +105,10 @@
      DEF(TOK___NAN__, "__nan__")
      DEF(TOK___SNAN__, "__snan__")
      DEF(TOK___INF__, "__inf__")
+#if defined TCC_TARGET_X86_64
+     DEF(TOK___mzerosf, "__mzerosf") /* -0.0 */
+     DEF(TOK___mzerodf, "__mzerodf") /* -0.0 */
+#endif
 
 /* attribute identifiers */
 /* XXX: handle all tokens generically since speed is not critical */
@@ -115,12 +122,8 @@
      DEF(TOK_WEAK2, "__weak__")
      DEF(TOK_ALIAS1, "alias")
      DEF(TOK_ALIAS2, "__alias__")
-     DEF(TOK_USED1, "used")
-     DEF(TOK_USED2, "__used__")
      DEF(TOK_UNUSED1, "unused")
      DEF(TOK_UNUSED2, "__unused__")
-     DEF(TOK_FORMAT1, "format")
-     DEF(TOK_FORMAT2, "__format__")
      DEF(TOK_NODEBUG1, "nodebug")
      DEF(TOK_NODEBUG2, "__nodebug__")
      DEF(TOK_CDECL1, "cdecl")
@@ -132,9 +135,6 @@
      DEF(TOK_FASTCALL1, "fastcall")
      DEF(TOK_FASTCALL2, "__fastcall")
      DEF(TOK_FASTCALL3, "__fastcall__")
-     DEF(TOK_THISCALL1, "thiscall")
-     DEF(TOK_THISCALL2, "__thiscall")
-     DEF(TOK_THISCALL3, "__thiscall__")
      DEF(TOK_REGPARM1, "regparm")
      DEF(TOK_REGPARM2, "__regparm__")
      DEF(TOK_CLEANUP1, "cleanup")
@@ -146,9 +146,6 @@
      DEF(TOK_DEPRECATED1, "deprecated")
      DEF(TOK_ALWAYS_INLINE1, "always_inline")
      DEF(TOK_ALWAYS_INLINE2, "__always_inline__")
-     DEF(TOK_NOINLINE, "__noinline__")
-     DEF(TOK_PURE1, "pure")
-     DEF(TOK_PURE2, "__pure__")
 
      DEF(TOK_MODE, "__mode__")
      DEF(TOK_MODE_QI, "__QI__")
@@ -172,7 +169,6 @@
      DEF(TOK_builtin_frame_address, "__builtin_frame_address")
      DEF(TOK_builtin_return_address, "__builtin_return_address")
      DEF(TOK_builtin_expect, "__builtin_expect")
-     DEF(TOK_builtin_unreachable, "__builtin_unreachable")
      /*DEF(TOK_builtin_va_list, "__builtin_va_list")*/
 #if defined TCC_TARGET_PE && defined TCC_TARGET_X86_64
      DEF(TOK_builtin_va_start, "__builtin_va_start")
@@ -207,8 +203,7 @@
 /* pragma */
      DEF(TOK_pack, "pack")
 #if !defined(TCC_TARGET_I386) && !defined(TCC_TARGET_X86_64) && \
-    !defined(TCC_TARGET_ARM) && !defined(TCC_TARGET_ARM64) && \
-    !defined(TCC_TARGET_RISCV64)
+    !defined(TCC_TARGET_ARM) && !defined(TCC_TARGET_ARM64)
      /* already defined for assembler */
      DEF(TOK_ASM_push, "push")
      DEF(TOK_ASM_pop, "pop")
@@ -299,22 +294,16 @@
      DEF(TOK___fixdfdi, "__fixdfdi")
      DEF(TOK___fixxfdi, "__fixxfdi")
 #endif
-#if defined TCC_TARGET_X86_64
-     DEF(TOK___fixxfdi, "__fixxfdi")
-#endif
 
+#if defined TCC_TARGET_I386 || defined TCC_TARGET_X86_64
      DEF(TOK_alloca, "alloca")
+#endif
 
 #if defined TCC_TARGET_PE
      DEF(TOK___chkstk, "__chkstk")
 #endif
-#ifdef TCC_TARGET_ARM64
-     DEF(TOK___arm64_clear_cache, "__arm64_clear_cache")
-#endif
-#ifdef TCC_TARGET_RISCV64
-     DEF(TOK___riscv64_clear_cache, "__riscv64_clear_cache")
-#endif
 #if defined TCC_TARGET_ARM64 || defined TCC_TARGET_RISCV64
+     DEF(TOK___arm64_clear_cache, "__arm64_clear_cache")
      DEF(TOK___addtf3, "__addtf3")
      DEF(TOK___subtf3, "__subtf3")
      DEF(TOK___multf3, "__multf3")
@@ -323,7 +312,6 @@
      DEF(TOK___extenddftf2, "__extenddftf2")
      DEF(TOK___trunctfsf2, "__trunctfsf2")
      DEF(TOK___trunctfdf2, "__trunctfdf2")
-     DEF(TOK___negtf2, "__negtf2")
      DEF(TOK___fixtfsi, "__fixtfsi")
      DEF(TOK___fixtfdi, "__fixtfdi")
      DEF(TOK___fixunstfsi, "__fixunstfsi")
@@ -409,32 +397,23 @@
  DEF_ASMDIR(endr)
  DEF_ASMDIR(org)
  DEF_ASMDIR(quad)
-#if PTR_SIZE == 4
+#if defined(TCC_TARGET_I386)
  DEF_ASMDIR(code16)
  DEF_ASMDIR(code32)
-#else
+#elif defined(TCC_TARGET_X86_64)
  DEF_ASMDIR(code64)
-#endif
-#if defined(TCC_TARGET_RISCV64)
- DEF_ASMDIR(option)
 #endif
  DEF_ASMDIR(short)
  DEF_ASMDIR(long)
  DEF_ASMDIR(int)
- DEF_ASMDIR(symver)
- DEF_ASMDIR(reloc)
  DEF_ASMDIR(section)    /* must be last directive */
 
 #if defined TCC_TARGET_I386 || defined TCC_TARGET_X86_64
 #include "i386-tok.h"
 #endif
 
-#if defined TCC_TARGET_ARM
+#if defined TCC_TARGET_ARM || defined TCC_TARGET_ARM64
 #include "arm-tok.h"
-#endif
-
-#if defined TCC_TARGET_ARM64
-#include "arm64-tok.h"
 #endif
 
 #if defined TCC_TARGET_RISCV64

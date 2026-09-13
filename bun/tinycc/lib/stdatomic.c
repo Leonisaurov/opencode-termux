@@ -15,6 +15,42 @@
 #define __ATOMIC_SEQ_CST 5
 typedef __SIZE_TYPE__ size_t;
 
+#if defined __i386__ || defined __x86_64__
+#define ATOMIC_COMPARE_EXCHANGE(TYPE, MODE, SUFFIX) \
+    bool __atomic_compare_exchange_##MODE \
+        (volatile void *atom, void *ref, TYPE xchg, \
+         bool weak, int success_memorder, int failure_memorder) \
+    { \
+        TYPE rv; \
+        TYPE cmp = *(TYPE *)ref; \
+        __asm__ volatile( \
+            "lock cmpxchg" SUFFIX " %2,%1\n" \
+            : "=a" (rv), "+m" (*(TYPE *)atom) \
+            : "q" (xchg), "0" (cmp) \
+            : "memory" \
+        ); \
+        *(TYPE *)ref = rv; \
+        return (rv == cmp); \
+    }
+#else
+#define ATOMIC_COMPARE_EXCHANGE(TYPE, MODE, SUFFIX) \
+    extern bool __atomic_compare_exchange_##MODE \
+        (volatile void *atom, void *ref, TYPE xchg, \
+         bool weak, int success_memorder, int failure_memorder);
+#endif
+
+#define ATOMIC_LOAD(TYPE, MODE) \
+    TYPE __atomic_load_##MODE(const volatile void *atom, int memorder) \
+    { \
+        return *(volatile TYPE *)atom; \
+    }
+
+#define ATOMIC_STORE(TYPE, MODE) \
+    void __atomic_store_##MODE(volatile void *atom, TYPE value, int memorder) \
+    { \
+        *(volatile TYPE *)atom = value; \
+    }
+
 #define ATOMIC_GEN_OP(TYPE, MODE, NAME, OP, RET) \
     TYPE __atomic_##NAME##_##MODE(volatile void *atom, TYPE value, int memorder) \
     { \
@@ -54,7 +90,10 @@ typedef __SIZE_TYPE__ size_t;
 #define ATOMIC_FETCH_NAND(TYPE, MODE) \
     ATOMIC_GEN_OP(TYPE, MODE, fetch_nand, ~(cmp & value), cmp)
 
-#define ATOMIC_GEN(TYPE, SIZE) \
+#define ATOMIC_GEN(TYPE, SIZE, SUFFIX) \
+    ATOMIC_STORE(TYPE, SIZE) \
+    ATOMIC_LOAD(TYPE, SIZE) \
+    ATOMIC_COMPARE_EXCHANGE(TYPE, SIZE, SUFFIX) \
     ATOMIC_EXCHANGE(TYPE, SIZE) \
     ATOMIC_ADD_FETCH(TYPE, SIZE) \
     ATOMIC_SUB_FETCH(TYPE, SIZE) \
@@ -69,10 +108,12 @@ typedef __SIZE_TYPE__ size_t;
     ATOMIC_FETCH_XOR(TYPE, SIZE) \
     ATOMIC_FETCH_NAND(TYPE, SIZE)
 
-ATOMIC_GEN(uint8_t, 1)
-ATOMIC_GEN(uint16_t, 2)
-ATOMIC_GEN(uint32_t, 4)
-ATOMIC_GEN(uint64_t, 8)
+ATOMIC_GEN(uint8_t, 1, "b")
+ATOMIC_GEN(uint16_t, 2, "w")
+ATOMIC_GEN(uint32_t, 4, "l")
+#if defined __x86_64__ || defined __aarch64__ || defined __riscv
+ATOMIC_GEN(uint64_t, 8, "q")
+#endif
 
 /* uses alias to allow building with gcc/clang */
 #ifdef __TINYC__
@@ -80,6 +121,25 @@ ATOMIC_GEN(uint64_t, 8)
 #else
 #define ATOMIC(x)      __tcc_atomic_##x
 #endif
+
+void ATOMIC(signal_fence) (int memorder)
+{
+}
+
+void ATOMIC(thread_fence) (int memorder)
+{
+#if defined __i386__
+        __asm__ volatile("lock orl $0, (%esp)");
+#elif defined __x86_64__
+        __asm__ volatile("lock orq $0, (%rsp)");
+#elif defined __arm__
+        __asm__ volatile(".int 0xee070fba"); // mcr p15, 0, r0, c7, c10, 5
+#elif defined __aarch64__
+        __asm__ volatile(".int 0xd5033bbf"); // dmb ish
+#elif defined __riscv
+        __asm__ volatile(".int 0x0ff0000f"); // fence iorw,iorw
+#endif
+}
 
 bool ATOMIC(is_lock_free) (unsigned long size, const volatile void *ptr)
 {
@@ -100,5 +160,7 @@ bool ATOMIC(is_lock_free) (unsigned long size, const volatile void *ptr)
 }
 
 #ifndef __TINYC__
+void __atomic_signal_fence(int memorder) __attribute__((alias("__tcc_atomic_signal_fence")));
+void __atomic_thread_fence(int memorder) __attribute__((alias("__tcc_atomic_thread_fence")));
 bool __atomic_is_lock_free(unsigned long size, const volatile void *ptr) __attribute__((alias("__tcc_atomic_is_lock_free")));
 #endif

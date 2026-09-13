@@ -6,6 +6,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "bun/scripts/build-tinycc.sh"
 TINYCC = ROOT / "bun/tinycc"
+LOCK = ROOT / "ci/external-sources.lock"
+TCC_ZIG = ROOT / "bun/src/src/deps/tcc.zig"
+BUN_TINYCC_COMMIT = "29985a3b59898861442fa3b43f663fc1af2591d7"
 
 
 def main() -> None:
@@ -23,6 +26,20 @@ def main() -> None:
     assert "#define CONFIG_TCC_PREDEFS 1" in script
     assert '"$HOST_CC" -DC2STR "$TINYCC_SRC/conftest.c" -o "$C2STR_BIN"' in script
     assert '"$C2STR_BIN" "$TINYCC_SRC/include/tccdefs.h" "$TCCDEFS_H"' in script
+
+    # The vendored TinyCC must match the commit Bun 1.2.13 pins (see
+    # cmake/targets/BuildTinyCC.cmake) and keep the two-argument
+    # tcc_relocate(TCCState*, void*) ABI used by bun/src/src/deps/tcc.zig.
+    # A newer TinyCC changed it to one argument and aborts with exit(-1) when
+    # Bun performs the size query followed by the relocation.
+    lock = LOCK.read_text(encoding="utf-8")
+    assert BUN_TINYCC_COMMIT in lock
+    libtcc_h = (TINYCC / "libtcc.h").read_text(encoding="utf-8")
+    assert "LIBTCCAPI int tcc_relocate(TCCState *s1, void *ptr);" in libtcc_h
+    tccrun_c = (TINYCC / "tccrun.c").read_text(encoding="utf-8")
+    assert "twice is no longer supported" not in tccrun_c
+    tcc_zig = TCC_ZIG.read_text(encoding="utf-8")
+    assert "fn tcc_relocate(s1: *NativeState, ptr: ?*anyopaque) c_int;" in tcc_zig
 
 
 if __name__ == "__main__":

@@ -4,8 +4,8 @@
 
 TOP = ..
 include $(TOP)/Makefile
-VPATH = $(TOPSRC)/tests $(TOPSRC)
-CFLAGS := $(filter-out -g% -O%,$(CFLAGS)) -I$(TOPSRC) -I$(TOP) $(LDFLAGS)
+VPATH = $(TOPSRC)/tests $(TOPSRC) $(TOP)
+CFLAGS := $(filter-out -g% -O%,$(CFLAGS)) -I$(TOPSRC) $(LDFLAGS)
 
 # what tests to run
 TESTS = \
@@ -14,22 +14,20 @@ TESTS = \
  libtest \
  libtest_mt \
  test3 \
+ memtest \
+ dlltest \
  abitest \
  asm-c-connect-test \
  vla_test-run \
+ cross-test \
  tests2-dir \
- pp-dir \
- memtest \
- dlltest \
- cross-test
+ pp-dir
 
 # test4_static -- Not all relocation types are implemented yet.
 # asmtest / asmtest2 -- minor differences with gcc
 
-ifeq ($(CONFIG_backtrace),no)
- TESTS := $(filter-out libtest_mt, $(TESTS))
-else ifneq ($(CONFIG_bcheck),no)
- TESTS += btest test1b tccb
+ifneq ($(CONFIG_bcheck),no)
+ TESTS += btest test1b
 endif
 ifeq ($(CONFIG_dll),no)
  TESTS := $(filter-out dlltest, $(TESTS))
@@ -69,22 +67,17 @@ ifneq (,$(filter FreeBSD NetBSD,$(TARGETOS)))
   TESTS += test1
 endif
 
-RUN_TCC = -run $(TOPSRC)/tcc.c $(TCCFLAGS)
+RUN_TCC = $(NATIVE_DEFINES) -run $(TOPSRC)/tcc.c $(TCCFLAGS)
 DISAS = objdump -d
 ifdef CONFIG_OSX
-DUMPTCC = (set -x; $(TCC_LOCAL) -vv; otool -L $(TCC_LOCAL); exit 1)
+DUMPTCC = (set -x; $(TOP)/tcc -vv; otool -L $(TOP)/tcc; exit 1)
 else
-DUMPTCC = (set -x; $(TCC_LOCAL) -vv; ldd $(TCC_LOCAL); exit 1)
+DUMPTCC = (set -x; $(TOP)/tcc -vv; ldd $(TOP)/tcc; exit 1)
 endif
 
 all test :
-	@echo ------------ version ------------
-	@$(TCC_LOCAL) -v
 	@$(MAKE) --no-print-directory -s clean
-	@$(MAKE) --no-print-directory -s -r _all
-	@echo ------- ALL TESTS PASSED --------
-
-_all : $(TESTS)
+	@$(MAKE) --no-print-directory -s -r $(TESTS)
 
 hello-exe: ../examples/ex1.c
 	@echo ------------ $@ ------------
@@ -96,13 +89,13 @@ hello-run: ../examples/ex1.c
 
 libtes%: libtcc_tes%$(EXESUF)
 	@echo ------------ $@ ------------
-	./libtcc_tes$*$(EXESUF) $(TOPSRC)/tcc.c $(TCCFLAGS)
+	./libtcc_tes$*$(EXESUF) $(TOPSRC)/tcc.c $(TCCFLAGS) $(NATIVE_DEFINES)
 
-libtcc_test$(EXESUF): libtcc_test.c
-	$(CC) -o $@ $< $(CFLAGS) $(-LTCC) $(LIBS)
+libtcc_test$(EXESUF): libtcc_test.c $(LIBTCC)
+	$(CC) -o $@ $^ $(CFLAGS) $(LIBS)
 
-libtcc_test_mt$(EXESUF): libtcc_test_mt.c
-	$(CC) -o $@ $< $(CFLAGS) $(-LTCC) $(LIBS)
+libtcc_test_mt$(EXESUF): libtcc_test_mt.c $(LIBTCC)
+	$(CC) -o $@ $^ $(CFLAGS) $(LIBS)
 
 %-dir:
 	@echo ------------ $@ ------------
@@ -110,8 +103,8 @@ libtcc_test_mt$(EXESUF): libtcc_test_mt.c
 
 # test.ref - generate using cc
 test.ref: tcctest.c
-	$(CC) -o tcctest.gcc$(EXESUF) $< $(CFLAGS) -w -O0 -std=gnu99 -fno-omit-frame-pointer
-	./tcctest.gcc$(EXESUF) > $@
+	$(CC) -o tcctest.gcc $< $(NATIVE_DEFINES) $(CFLAGS) -w -O0 -std=gnu99 -fno-omit-frame-pointer
+	./tcctest.gcc > $@
 
 # auto test
 test1 test1b: tcctest.c test.ref
@@ -162,23 +155,23 @@ test4_static: tcctest.c test.ref
 # use tcc to create libtcc.so/.dll and the tcc(.exe) frontend and run them
 dlltest:
 	@echo ------------ $@ ------------
-	$(TCC) -DLIBTCC_AS_DLL $(TOPSRC)/libtcc.c $(LIBS) -shared -o libtcc2$(DLLSUF)
-	$(TCC) -DONE_SOURCE=0 $(TOPSRC)/tcc.c libtcc2$(DLLSUF) $(LIBS) -Wl,-rpath=. -o tcc2$(EXESUF)
+	$(TCC) $(NATIVE_DEFINES) -DLIBTCC_AS_DLL $(TOPSRC)/libtcc.c $(LIBS) -shared -o libtcc2$(DLLSUF)
+	$(TCC) $(NATIVE_DEFINES) -DONE_SOURCE=0 $(TOPSRC)/tcc.c libtcc2$(DLLSUF) $(LIBS) -Wl,-rpath=. -o tcc2$(EXESUF)
 	./tcc2$(EXESUF) $(TCCFLAGS) $(RUN_TCC) -run $(TOPSRC)/examples/ex1.c
 ifeq (,$(filter Darwin WIN32,$(TARGETOS)))
 	@echo ------------ $@ with PIC ------------
-	$(CC) $(CFLAGS) -fPIC -DLIBTCC_AS_DLL -c $(TOPSRC)/libtcc.c
+	$(CC) $(CFLAGS) -fPIC $(NATIVE_DEFINES) -DLIBTCC_AS_DLL -c $(TOPSRC)/libtcc.c
 	$(TCC) libtcc.o $(LIBS) -shared -o libtcc2$(DLLSUF)
-	$(TCC) -DONE_SOURCE=0 $(TOPSRC)/tcc.c libtcc2$(DLLSUF) $(LIBS) -Wl,-rpath=. -o tcc2$(EXESUF)
+	$(TCC) $(NATIVE_DEFINES) -DONE_SOURCE=0 $(TOPSRC)/tcc.c libtcc2$(DLLSUF) $(LIBS) -Wl,-rpath=. -o tcc2$(EXESUF)
 	./tcc2$(EXESUF) $(TCCFLAGS) $(RUN_TCC) -run $(TOPSRC)/examples/ex1.c
 endif
 	@rm tcc2$(EXESUF) libtcc2$(DLLSUF)
 
 memtest:
 	@echo ------------ $@ ------------
-	$(CC) $(CFLAGS) -DMEM_DEBUG=2 $(TOPSRC)/tcc.c $(LIBS) -o memtest-tcc$(EXESUF)
-	./memtest-tcc$(EXESUF) $(TCCFLAGS) $(TOPSRC)/tcc.c $(LIBS)
-	./memtest-tcc$(EXESUF) $(TCCFLAGS) -run $(TOPSRC)/tcc.c $(TCCFLAGS) -w $(TOPSRC)/tests/tcctest.c
+	$(CC) $(CFLAGS) $(NATIVE_DEFINES) -DMEM_DEBUG=2 $(TOPSRC)/tcc.c $(LIBS) -o memtest-tcc$(EXESUF)
+	./memtest-tcc$(EXESUF) $(TCCFLAGS) $(NATIVE_DEFINES) $(TOPSRC)/tcc.c $(LIBS)
+	./memtest-tcc$(EXESUF) $(TCCFLAGS) $(NATIVE_DEFINES) -run $(TOPSRC)/tcc.c $(TCCFLAGS) -w $(TOPSRC)/tests/tcctest.c
 	@echo OK
 
 # memory and bound check auto test
@@ -201,15 +194,7 @@ btest: boundtest.c
 	       echo "Test $$i failed as expected" ; \
 	   fi ;\
 	done ;\
-	echo Bound-Test OK
-
-tccb:
-	@echo ------------ $@ ------------
-	$(TCC) -b $(TOPSRC)/tcc.c $(TCCFLAGS) $(LIBS) -o tccb1.exe
-	mv tccb1.exe tccb2.exe
-	./tccb2.exe -b $(TOPSRC)/tcc.c $(TCCFLAGS) $(LIBS) -o tccb1.exe
-	cmp -s tccb1.exe tccb2.exe && echo "Exe Bound-Test OK"
-
+	echo Bound test OK
 
 # speed test
 speedtest: ex2 ex3
@@ -222,7 +207,7 @@ speedtest: ex2 ex3
 weaktest: tcctest.c test.ref
 	@echo ------------ $@ ------------
 	$(TCC) -c $< -o weaktest.tcc.o
-	$(CC) -c $< -o weaktest.gcc.o $(CFLAGS) -w -O0 -std=gnu99 -fno-omit-frame-pointer
+	$(CC) -c $< -o weaktest.gcc.o $(NATIVE_DEFINES) $(CFLAGS) -w -O0 -std=gnu99 -fno-omit-frame-pointer
 	objdump -t weaktest.tcc.o | grep ' w ' | sed -e 's/.* \([a-zA-Z0-9_]*\)$$/\1/' | LC_ALL=C sort > weaktest.tcc.o.txt
 	objdump -t weaktest.gcc.o | grep ' w ' | sed -e 's/.* \([a-zA-Z0-9_]*\)$$/\1/' | LC_ALL=C sort > weaktest.gcc.o.txt
 	diff weaktest.gcc.o.txt weaktest.tcc.o.txt && echo "Weak Auto Test OK"
@@ -251,11 +236,11 @@ asmtest2: MAYBE_RUN_TCC = $(RUN_TCC)
 
 # Check that code generated by libtcc is binary compatible with
 # that generated by CC
-abitest-cc.exe: abitest.c
-	$(CC) -o $@ $^ $(CFLAGS) $(-LTCC) $(LIBS) -w
+abitest-cc.exe: abitest.c $(LIBTCC)
+	$(CC) -o $@ $^ $(CFLAGS) $(LIBS) -w
 
 abitest-tcc.exe: abitest.c libtcc.c
-	$(TCC) -o $@ $^ $(LIBS)
+	$(TCC) -o $@ $^ $(NATIVE_DEFINES) $(LIBS)
 
 abitest-% : abitest-%.exe
 	@echo ------------ $@ ------------
@@ -273,7 +258,7 @@ vla_test-run: vla_test$(EXESUF)
 	@echo ------------ $@ ------------
 	./vla_test$(EXESUF)
 
-.PHONY: abitest vla_test tccb
+.PHONY: abitest vla_test
 
 asm-c-connect$(EXESUF): asm-c-connect-1.c asm-c-connect-2.c
 	$(TCC) -o $@ $^
@@ -310,7 +295,6 @@ CROSS-TGTS = \
  arm-NetBSD \
  arm-wince \
  arm64 \
- arm64-win32 \
  arm64-osx \
  arm64-FreeBSD \
  arm64-NetBSD \
@@ -344,7 +328,7 @@ cache: tcc_g
 clean:
 	rm -f *~ *.o *.a *.bin *.i *.ref *.out *.out? *.out?b *.cc *.gcc
 	rm -f *-cc *-gcc *-tcc *.exe hello libtcc_test vla_test tcctest[1234]
-	rm -f asm-c-connect asm-c-connect-sep
+	rm -f asm-c-connect$(EXESUF) asm-c-connect-sep$(EXESUF)
 	rm -f ex? tcc_g weaktest.*.txt *.def *.pdb *.obj libtcc_test_mt
 	@$(MAKE) -C tests2 $@
 	@$(MAKE) -C pp $@

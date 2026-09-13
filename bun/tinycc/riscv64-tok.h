@@ -8,12 +8,6 @@
 #define DEF_ASM_WITH_SUFFIX(x, y) \
   DEF(TOK_ASM_ ## x ## _ ## y, #x "." #y)
 
-#define DEF_ASM_WITH_SUFFIXES(x, y, z) \
-  DEF(TOK_ASM_ ## x ## _ ## y ## _ ## z, #x "." #y "." #z)
-
-#define DEF_ASM_FENCE(x) \
-  DEF(TOK_ASM_ ## x ## _fence, #x)
-
 /* register */
  /* integer */
  DEF_ASM(x0)
@@ -266,56 +260,7 @@
  DEF_ASM(remw)
  DEF_ASM(remuw)
 
-/* "F"/"D" Extension for Single/Double-Precision Floating Point Arithmetic, V2.2 */
- /* enough implemented for musl */
- DEF_ASM_WITH_SUFFIX(fsgnj, s)
- DEF_ASM_WITH_SUFFIX(fsgnj, d)
- DEF_ASM_WITH_SUFFIX(fadd, s)
- DEF_ASM_WITH_SUFFIX(fadd, d)
- DEF_ASM_WITH_SUFFIX(fsub, s)
- DEF_ASM_WITH_SUFFIX(fsub, d)
- DEF_ASM_WITH_SUFFIX(fmul, s)
- DEF_ASM_WITH_SUFFIX(fmul, d)
- DEF_ASM_WITH_SUFFIX(fdiv, s)
- DEF_ASM_WITH_SUFFIX(fdiv, d)
- DEF_ASM_WITH_SUFFIX(fmadd, s)
- DEF_ASM_WITH_SUFFIX(fmadd, d)
- DEF_ASM_WITH_SUFFIX(fmax, s)
- DEF_ASM_WITH_SUFFIX(fmax, d)
- DEF_ASM_WITH_SUFFIX(fmin, s)
- DEF_ASM_WITH_SUFFIX(fmin, d)
- DEF_ASM_WITH_SUFFIX(fsqrt, s)
- DEF_ASM_WITH_SUFFIX(fsqrt, d)
-
- /* F/D comparison and conversion (not needed by musl, added for completeness) */
- DEF_ASM_WITH_SUFFIX(feq, s)
- DEF_ASM_WITH_SUFFIX(feq, d)
- DEF_ASM_WITH_SUFFIX(flt, s)
- DEF_ASM_WITH_SUFFIX(flt, d)
- DEF_ASM_WITH_SUFFIX(fle, s)
- DEF_ASM_WITH_SUFFIX(fle, d)
- DEF_ASM_WITH_SUFFIX(fclass, s)
- DEF_ASM_WITH_SUFFIX(fclass, d)
- DEF_ASM_WITH_SUFFIXES(fcvt, w, s)
- DEF_ASM_WITH_SUFFIXES(fcvt, wu, s)
- DEF_ASM_WITH_SUFFIXES(fcvt, l, s)
- DEF_ASM_WITH_SUFFIXES(fcvt, lu, s)
- DEF_ASM_WITH_SUFFIXES(fcvt, s, w)
- DEF_ASM_WITH_SUFFIXES(fcvt, s, wu)
- DEF_ASM_WITH_SUFFIXES(fcvt, s, l)
- DEF_ASM_WITH_SUFFIXES(fcvt, s, lu)
- DEF_ASM_WITH_SUFFIXES(fcvt, w, d)
- DEF_ASM_WITH_SUFFIXES(fcvt, wu, d)
- DEF_ASM_WITH_SUFFIXES(fcvt, l, d)
- DEF_ASM_WITH_SUFFIXES(fcvt, lu, d)
- DEF_ASM_WITH_SUFFIXES(fcvt, d, w)
- DEF_ASM_WITH_SUFFIXES(fcvt, d, wu)
- DEF_ASM_WITH_SUFFIXES(fcvt, d, l)
- DEF_ASM_WITH_SUFFIXES(fcvt, d, lu)
- DEF_ASM_WITH_SUFFIXES(fcvt, s, d)
- DEF_ASM_WITH_SUFFIXES(fcvt, d, s)
-
- /* "C" Extension for Compressed Instructions, V2.0 */
+/* "C" Extension for Compressed Instructions, V2.0 */
  DEF_ASM_WITH_SUFFIX(c, nop)
 /* Loads */
  DEF_ASM_WITH_SUFFIX(c, li)
@@ -448,8 +393,6 @@
  DEF_ASM(fsd)
  DEF_ASM(fsw)
  DEF_ASM(j)
- DEF_ASM(jump)
- DEF_ASM(jr)
  DEF_ASM(la)
  DEF_ASM(li)
  DEF_ASM(lla)
@@ -466,147 +409,4 @@
  DEF_ASM(snez)
  DEF_ASM(tail)
 
-/* Possible values for .option directive */
- DEF_ASM(arch)
- DEF_ASM(rvc)
- DEF_ASM(norvc)
- DEF_ASM(pic)
- DEF_ASM(nopic)
- DEF_ASM(relax)
- DEF_ASM(norelax)
- DEF_ASM(push)
- DEF_ASM(pop)
-
-/* “A” Standard Extension for Atomic Instructions, Version 2.1 */
- /* XXX: Atomic memory operations */
- DEF_ASM_WITH_SUFFIX(lr, w)
- DEF_ASM_WITH_SUFFIXES(lr, w, aq)
- DEF_ASM_WITH_SUFFIXES(lr, w, rl)
- DEF_ASM_WITH_SUFFIXES(lr, w, aqrl)
-
- DEF_ASM_WITH_SUFFIX(lr, d)
- DEF_ASM_WITH_SUFFIXES(lr, d, aq)
- DEF_ASM_WITH_SUFFIXES(lr, d, rl)
- DEF_ASM_WITH_SUFFIXES(lr, d, aqrl)
-
-
- DEF_ASM_WITH_SUFFIX(sc, w)
- DEF_ASM_WITH_SUFFIXES(sc, w, aq)
- DEF_ASM_WITH_SUFFIXES(sc, w, rl)
- DEF_ASM_WITH_SUFFIXES(sc, w, aqrl)
-
- DEF_ASM_WITH_SUFFIX(sc, d)
- DEF_ASM_WITH_SUFFIXES(sc, d, aq)
- DEF_ASM_WITH_SUFFIXES(sc, d, rl)
- DEF_ASM_WITH_SUFFIXES(sc, d, aqrl)
-
- /* "A" Extension for Atomic Operations, V2.1 (base, no aq/rl suffixes) */
- DEF_ASM_WITH_SUFFIX(amoadd, w)
- DEF_ASM_WITH_SUFFIX(amoadd, d)
- DEF_ASM_WITH_SUFFIX(amoswap, w)
- DEF_ASM_WITH_SUFFIX(amoswap, d)
- DEF_ASM_WITH_SUFFIX(amoand, w)
- DEF_ASM_WITH_SUFFIX(amoand, d)
- DEF_ASM_WITH_SUFFIX(amoor, w)
- DEF_ASM_WITH_SUFFIX(amoor, d)
- DEF_ASM_WITH_SUFFIX(amoxor, w)
- DEF_ASM_WITH_SUFFIX(amoxor, d)
- DEF_ASM_WITH_SUFFIX(amomax, w)
- DEF_ASM_WITH_SUFFIX(amomax, d)
- DEF_ASM_WITH_SUFFIX(amomaxu, w)
- DEF_ASM_WITH_SUFFIX(amomaxu, d)
- DEF_ASM_WITH_SUFFIX(amomin, w)
- DEF_ASM_WITH_SUFFIX(amomin, d)
- DEF_ASM_WITH_SUFFIX(amominu, w)
- DEF_ASM_WITH_SUFFIX(amominu, d)
-
-
- /* AMO aq/rl ordering suffixes */
- DEF_ASM_WITH_SUFFIXES(amoadd, w, aq)
- DEF_ASM_WITH_SUFFIXES(amoadd, w, rl)
- DEF_ASM_WITH_SUFFIXES(amoadd, w, aqrl)
- DEF_ASM_WITH_SUFFIXES(amoadd, d, aq)
- DEF_ASM_WITH_SUFFIXES(amoadd, d, rl)
- DEF_ASM_WITH_SUFFIXES(amoadd, d, aqrl)
- /* Complete AMO aq/rl ordering suffixes (all ops) */
- DEF_ASM_WITH_SUFFIXES(amoswap, w, aq)
- DEF_ASM_WITH_SUFFIXES(amoswap, w, rl)
- DEF_ASM_WITH_SUFFIXES(amoswap, w, aqrl)
- DEF_ASM_WITH_SUFFIXES(amoswap, d, aq)
- DEF_ASM_WITH_SUFFIXES(amoswap, d, rl)
- DEF_ASM_WITH_SUFFIXES(amoswap, d, aqrl)
- DEF_ASM_WITH_SUFFIXES(amoand, w, aq)
- DEF_ASM_WITH_SUFFIXES(amoand, w, rl)
- DEF_ASM_WITH_SUFFIXES(amoand, w, aqrl)
- DEF_ASM_WITH_SUFFIXES(amoand, d, aq)
- DEF_ASM_WITH_SUFFIXES(amoand, d, rl)
- DEF_ASM_WITH_SUFFIXES(amoand, d, aqrl)
- DEF_ASM_WITH_SUFFIXES(amoor, w, aq)
- DEF_ASM_WITH_SUFFIXES(amoor, w, rl)
- DEF_ASM_WITH_SUFFIXES(amoor, w, aqrl)
- DEF_ASM_WITH_SUFFIXES(amoor, d, aq)
- DEF_ASM_WITH_SUFFIXES(amoor, d, rl)
- DEF_ASM_WITH_SUFFIXES(amoor, d, aqrl)
- DEF_ASM_WITH_SUFFIXES(amoxor, w, aq)
- DEF_ASM_WITH_SUFFIXES(amoxor, w, rl)
- DEF_ASM_WITH_SUFFIXES(amoxor, w, aqrl)
- DEF_ASM_WITH_SUFFIXES(amoxor, d, aq)
- DEF_ASM_WITH_SUFFIXES(amoxor, d, rl)
- DEF_ASM_WITH_SUFFIXES(amoxor, d, aqrl)
- DEF_ASM_WITH_SUFFIXES(amomax, w, aq)
- DEF_ASM_WITH_SUFFIXES(amomax, w, rl)
- DEF_ASM_WITH_SUFFIXES(amomax, w, aqrl)
- DEF_ASM_WITH_SUFFIXES(amomax, d, aq)
- DEF_ASM_WITH_SUFFIXES(amomax, d, rl)
- DEF_ASM_WITH_SUFFIXES(amomax, d, aqrl)
- DEF_ASM_WITH_SUFFIXES(amomaxu, w, aq)
- DEF_ASM_WITH_SUFFIXES(amomaxu, w, rl)
- DEF_ASM_WITH_SUFFIXES(amomaxu, w, aqrl)
- DEF_ASM_WITH_SUFFIXES(amomaxu, d, aq)
- DEF_ASM_WITH_SUFFIXES(amomaxu, d, rl)
- DEF_ASM_WITH_SUFFIXES(amomaxu, d, aqrl)
- DEF_ASM_WITH_SUFFIXES(amomin, w, aq)
- DEF_ASM_WITH_SUFFIXES(amomin, w, rl)
- DEF_ASM_WITH_SUFFIXES(amomin, w, aqrl)
- DEF_ASM_WITH_SUFFIXES(amomin, d, aq)
- DEF_ASM_WITH_SUFFIXES(amomin, d, rl)
- DEF_ASM_WITH_SUFFIXES(amomin, d, aqrl)
- DEF_ASM_WITH_SUFFIXES(amominu, w, aq)
- DEF_ASM_WITH_SUFFIXES(amominu, w, rl)
- DEF_ASM_WITH_SUFFIXES(amominu, w, aqrl)
- DEF_ASM_WITH_SUFFIXES(amominu, d, aq)
- DEF_ASM_WITH_SUFFIXES(amominu, d, rl)
- DEF_ASM_WITH_SUFFIXES(amominu, d, aqrl)
-
-
- /* rounding mode keywords (used as fcvt operand: fcvt.w.s rd, rs1, rtz) */
- DEF_ASM(rne)
- DEF_ASM(rtz)
- DEF_ASM(rdn)
- DEF_ASM(rup)
- DEF_ASM(rmm)
-
- /* `fence` arguments */
-/* NOTE: Order is important */
- DEF_ASM_FENCE(w)
- DEF_ASM_FENCE(r)
- DEF_ASM_FENCE(rw)
-
- DEF_ASM_FENCE(o)
- DEF_ASM_FENCE(ow)
- DEF_ASM_FENCE(or)
- DEF_ASM_FENCE(orw)
-
- DEF_ASM_FENCE(i)
- DEF_ASM_FENCE(iw)
- DEF_ASM_FENCE(ir)
- DEF_ASM_FENCE(irw)
-
- DEF_ASM_FENCE(io)
- DEF_ASM_FENCE(iow)
- DEF_ASM_FENCE(ior)
- DEF_ASM_FENCE(iorw)
-
-#undef DEF_ASM_FENCE
 #undef DEF_ASM_WITH_SUFFIX
-#undef DEF_ASM_WITH_SUFFIXES

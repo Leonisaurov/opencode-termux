@@ -90,6 +90,8 @@
     #define __NO_TLS 1
     #define __RUNETYPE_INTERNAL 1
 # if __SIZEOF_POINTER__ == 8
+    /* FIXME, __int128_t is used by setjump */
+    #define __int128_t struct { unsigned char _dummy[16] __attribute((aligned(16))); }
     #define __SIZEOF_SIZE_T__ 8
     #define __SIZEOF_PTRDIFF_T__ 8
 #else
@@ -122,17 +124,20 @@
     /* avoids usage of GCC/clang specific builtins in libc-headerfiles: */
     #define __FINITE_MATH_ONLY__ 1
     #define _FORTIFY_SOURCE 0
-    //#define __has_builtin(x) 0
-    #define _Float16 short unsigned int /* fake type just for size & alignment (macOS Sequoia) */
+    #define __has_builtin(x) 0
 
 #elif defined __ANDROID__
     #define  BIONIC_IOCTL_NO_SIGNEDNESS_OVERLOAD
+    #define  __PRETTY_FUNCTION__ __FUNCTION__
+    #define __has_builtin(x) 0
+    #define __has_feature(x) 0
+    #define _Nonnull
+    #define _Nullable
 
 #else
     /* Linux */
 
 #endif
-
     /* Some derived integer types needed to get stdint.h to compile correctly on some platforms */
 #ifndef __NetBSD__
     #define __UINTPTR_TYPE__ unsigned __PTRDIFF_TYPE__
@@ -146,17 +151,6 @@
     #define __REDIRECT_NTH(name, proto, alias) name proto __asm__ (#alias) __THROW
     #define __REDIRECT_NTHNL(name, proto, alias) name proto __asm__ (#alias) __THROWNL
 #endif
-
-    /* not implemented */
-    #define  __PRETTY_FUNCTION__ __FUNCTION__
-    #define __has_builtin(x) 0
-    #define __has_feature(x) 0
-    #define __has_attribute(x) 0
-    /* C23 Keywords */
-    #define _Nonnull
-    #define _Nullable
-    #define _Nullable_result
-    #define _Null_unspecified
 
     /* skip __builtin... with -E */
     #ifndef __TCC_PP__
@@ -179,17 +173,11 @@
 # endif
 #endif
 
-    /* GCC's __uint128_t appears in some Linux/OSX header files.
-       Just make it some type with same size and alignment. */
-    struct __uint128__ { char x[16]; } __attribute((__aligned__(16)));
-    #define __int128_t struct __uint128__
-    #define __uint128_t struct __uint128__
-
     /* __builtin_va_list */
 #if defined __x86_64__
 #if !defined _WIN32
     /* GCC compatible definition of va_list. */
-    /* This should be in sync with the declaration in our lib/va_list.c */
+    /* This should be in sync with the declaration in our lib/libtcc1.c */
     typedef struct {
         unsigned gp_offset, fp_offset;
         union {
@@ -222,9 +210,7 @@
                            &~3), *(type *)(ap - ((sizeof(type)+3)&~3)))
 
 #elif defined __aarch64__
-#if defined _WIN32
-    typedef char *__builtin_va_list;
-#elif defined __APPLE__
+#if defined __APPLE__
     typedef struct {
         void *__stack;
     } __builtin_va_list;
@@ -308,8 +294,11 @@
     __MAYBE_REDIR(void*, calloc, (__SIZE_TYPE__, __SIZE_TYPE__))
     __MAYBE_REDIR(void*, memalign, (__SIZE_TYPE__, __SIZE_TYPE__))
     __MAYBE_REDIR(void, free, (void*))
+#if defined __i386__ || defined __x86_64__
     __BOTH(void*, alloca, (__SIZE_TYPE__))
-    void *alloca(__SIZE_TYPE__);
+#else
+    __BUILTIN(void*, alloca, (__SIZE_TYPE__))
+#endif
     __BUILTIN(void, abort, (void))
     __BOUND(void, longjmp, ())
 #if !defined _WIN32

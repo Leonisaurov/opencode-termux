@@ -63,7 +63,12 @@ int main()
 #define OP1(func, v, e1, e2) atomic_##func(&c, v) == e1 && c == e2
 #define OP2(func, v, e1, e2) atomic_##func(&s, v) == e1 && s == e2
 #define OP4(func, v, e1, e2) atomic_##func(&i, v) == e1 && i == e2
+#if defined __x86_64__ || defined __aarch64__ || defined __riscv
 #define OP8(func, v, e1, e2) atomic_##func(&l, v) == e1 && l == e2
+#define HAS_64BITS
+#else
+#define OP8(func, v, e1, e2) 1
+#endif
 
 #define OP(func, v, e1, e2) printf ("%s: %s\n", #func,                        \
                                     OP1(func,v,e1,e2) && OP2(func,v,e1,e2) && \
@@ -75,12 +80,16 @@ int main()
     atomic_char c;
     atomic_short s;
     atomic_int i;
+#ifdef HAS_64BITS
     atomic_size_t l;
+#endif
 
     atomic_init(&c, 0);
     atomic_init(&s, 0);
     atomic_init(&i, 0);
+#ifdef HAS_64BITS
     atomic_init(&l, 0);
+#endif
 
     OP(fetch_add, 10, 0, 10);
     OP(fetch_sub, 5, 10, 5);
@@ -99,8 +108,13 @@ typedef __SIZE_TYPE__ size64_t;
     __atomic_##func(&s, v, __ATOMIC_SEQ_CST) == e1 && s == e2
 #define OP4(func, v, e1, e2)\
     __atomic_##func(&i, v, __ATOMIC_SEQ_CST) == e1 && i == e2
+#if defined __x86_64__ || defined __aarch64__ || defined __riscv
 #define OP8(func, v, e1, e2)\
     __atomic_##func(&l, v, __ATOMIC_SEQ_CST) == e1 && l == e2
+#define HAS_64BITS
+#else
+#define OP8(func, v, e1, e2) 1
+#endif
 
 #define OP(func, v, e1, e2) printf ("%s: %s\n", #func,                        \
                                     OP1(func,v,e1,e2) && OP2(func,v,e1,e2) && \
@@ -112,12 +126,16 @@ int main()
     signed char c;
     short s;
     int i;
+#ifdef HAS_64BITS
     size64_t l;
+#endif
 
     atomic_init(&c, 0);
     atomic_init(&s, 0);
     atomic_init(&i, 0);
+#ifdef HAS_64BITS
     atomic_init(&l, 0);
+#endif
 
     OP(fetch_add, 10, 0, 10);
     OP(fetch_sub, 5, 10, 5);
@@ -129,7 +147,9 @@ int main()
     atomic_init(&c, 0);
     atomic_init(&s, 0);
     atomic_init(&i, 0);
+#ifdef HAS_64BITS
     atomic_init(&l, 0);
+#endif
 
     OP(add_fetch, 10, 10, 10);
     OP(sub_fetch, 5, 5, 5);

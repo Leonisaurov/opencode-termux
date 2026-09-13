@@ -1,6 +1,6 @@
 #include <tcclib.h>
 
-int fib(int n)
+int fib(n)
 {
     if (n <= 2)
         return 1;
@@ -18,6 +18,6 @@ int main(int argc, char **argv)
     }
 
     n = atoi(argv[1]);
-    printf("fib(%d) = %d\n", n, fib(n));
+    printf("fib(%d) = %d\n", n, fib(n, 2));
     return 0;
 }

@@ -70,24 +70,17 @@
 
 #ifdef _WIN64
 #define __stdcall
-#if defined(__aarch64__)
-#define _M_ARM64 1
-#define _ARM64_ 1
-#else
 #define _AMD64_ 1
 #define __x86_64 1
 #define _M_X64 100 /* Visual Studio */
 #define _M_AMD64 100 /* Visual Studio */
-#endif
+#define USE_MINGW_SETJMP_TWO_ARGS
+#define mingw_getsp tinyc_getbp
 #else
 #define __stdcall __attribute__((__stdcall__))
 #define _X86_ 1
 #define _M_IX86 300 /* Visual Studio */
-#ifndef __MINGW_USE_VC2005_COMPAT /* time became 64, but not timeval.tv_sec */
-# ifndef _USE_32BIT_TIME_T
-#  define _USE_32BIT_TIME_T
-# endif
-#endif
+#define _USE_32BIT_TIME_T
 #endif
 
 /* in stddef.h */

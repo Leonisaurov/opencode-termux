@@ -379,7 +379,7 @@ The Bun team [closed Android support as "not planned"](https://github.com/oven-s
 | Android API level | 24 (Android 7.0+) | Minimum for 64-bit Termux |
 | Zig (for opentui) | 0.15.2 | Latest stable, Android target support |
 | OpenCode | 1.3.13 | Current release |
-| TinyCC | `b91835d8` (oven-sh/tinycc) | Matches Bun v1.2.13's expected TinyCC |
+| TinyCC | `29985a3b` (oven-sh/tinycc) | Matches Bun v1.2.13's expected TinyCC (two-argument `tcc_relocate`) |
 
 ---
 

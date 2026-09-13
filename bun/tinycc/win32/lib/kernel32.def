@@ -3,13 +3,10 @@ LIBRARY kernel32.dll
 EXPORTS
 AddAtomA
 AddAtomW
-AddVectoredContinueHandler
-AddVectoredExceptionHandler
 AllocConsole
 AllocLSCallback
 AllocSLCallback
 AreFileApisANSI
-AttachConsole
 BackupRead
 BackupSeek
 BackupWrite
