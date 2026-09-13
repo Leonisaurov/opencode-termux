@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working in this
 
 This is the maintained Android/Termux port workspace for OpenCode, Kilo, and Codex. It builds native `aarch64` artifacts rather than wrapping host installations. OpenCode and Kilo bundle the Android Bun runtime and ARM64 OpenTUI runtime; Codex produces its Android CLI, code-mode host, and sandbox helper.
 
-Read `AGENTS.md` before making changes. `WORKSPACE.md` is the quick navigation map. Work inside the product directory that owns a change and keep generated state under that product's `build/` and final artifacts under its `artifacts/`.
+Read `AGENTS.md` before making changes. `WORKSPACE.md` is the quick navigation map. Work inside the product directory that owns a change and keep generated state under that product's `build/` and final artifacts under its `artifacts/`. For reusable guidance on dependency-aware CI, incremental state, caches, artifacts, monitoring, and releases, see [`incremental-ci-builds`](~/.claude/skills/incremental-ci-builds/SKILL.md).
 
 ## Architecture
 
@@ -37,7 +37,7 @@ These values are deliberate port compatibility constraints:
 - WebKit/JSC: commit `017930ebf915121f8f593bef61cbbca82d78132d`
 - ICU: `75.1`
 - Zig: `0.15.2`
-- OpenCode: `1.3.13`
+- OpenCode: `1.18.30`
 
 Do not update or align these versions by inference. A version update requires coordinated verification of the source ports and explicit authorization.
 

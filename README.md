@@ -11,7 +11,7 @@ Kilo are standalone `aarch64` binaries with the Android Bun runtime and ARM64
 OpenTUI runtime incorporated into their bundle. Codex is distributed with its
 Android CLI, code-mode host, and sandbox helper.
 
-Bun `1.2.13`, OpenCode `1.3.13`, Android API 24, and the `aarch64` target are
+Bun `1.2.13`, OpenCode `1.18.30`, Android API 24, and the `aarch64` target are
 deliberately pinned for compatibility with the Android source ports.
 
 The build consumes the source trees declared in
@@ -378,7 +378,7 @@ The Bun team [closed Android support as "not planned"](https://github.com/oven-s
 | Android NDK | r28b (28.1.13356709) | Clang 19, stable |
 | Android API level | 24 (Android 7.0+) | Minimum for 64-bit Termux |
 | Zig (for opentui) | 0.15.2 | Latest stable, Android target support |
-| OpenCode | 1.3.13 | Current release |
+| OpenCode | 1.18.30 | Current release |
 | TinyCC | `29985a3b` (oven-sh/tinycc) | Matches Bun v1.2.13's expected TinyCC (two-argument `tcc_relocate`) |
 
 ---

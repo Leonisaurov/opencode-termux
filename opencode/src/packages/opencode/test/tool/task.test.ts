@@ -3,7 +3,7 @@ import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Database } from "@opencode-ai/core/database/database"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
-import { Deferred, Effect, Exit, Fiber, Layer } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import { Agent } from "../../src/agent/agent"
 import { BackgroundJob } from "@/background/job"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -96,19 +96,29 @@ const seed = Effect.fn("TaskToolTest.seed")(function* (title = "Pinned") {
   return { chat, assistant }
 })
 
-function stubOps(opts?: { onPrompt?: (input: SessionPrompt.PromptInput) => void; text?: string }): TaskPromptOps {
+function stubOps(opts?: {
+  onPrompt?: (input: SessionPrompt.PromptInput) => void
+  text?: string
+  error?: NonNullable<SessionV1.Assistant["error"]>
+  toolError?: string
+}): TaskPromptOps {
   return {
     cancel: () => Effect.void,
     resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
     prompt: (input) =>
       Effect.sync(() => {
         opts?.onPrompt?.(input)
-        return reply(input, opts?.text ?? "done")
+        return reply(input, opts?.text ?? "done", opts?.error, opts?.toolError)
       }),
   }
 }
 
-function reply(input: SessionPrompt.PromptInput, text: string): SessionV1.WithParts {
+function reply(
+  input: SessionPrompt.PromptInput,
+  text: string,
+  error?: NonNullable<SessionV1.Assistant["error"]>,
+  toolError?: string,
+): SessionV1.WithParts {
   const id = MessageID.ascending()
   return {
     info: {
@@ -125,6 +135,7 @@ function reply(input: SessionPrompt.PromptInput, text: string): SessionV1.WithPa
       providerID: input.model?.providerID ?? ref.providerID,
       time: { created: Date.now() },
       finish: "stop",
+      error,
     },
     parts: [
       {
@@ -134,65 +145,25 @@ function reply(input: SessionPrompt.PromptInput, text: string): SessionV1.WithPa
         type: "text",
         text,
       },
+      ...(toolError
+        ? [
+            {
+              id: PartID.ascending(),
+              messageID: id,
+              sessionID: input.sessionID,
+              type: "tool" as const,
+              tool: "read",
+              callID: "call-1",
+              state: {
+                status: "error" as const,
+                input: { filePath: "/external" },
+                error: toolError,
+                time: { start: Date.now(), end: Date.now() },
+              },
+            },
+          ]
+        : []),
     ],
-  }
-}
-
-/** Writes an assistant message plus a step-finish part with the given cost into a session. */
-function seedCost(input: { sessionID: SessionID; cost: number }): Effect.Effect<void> {
-  return Effect.gen(function* () {
-    const sessions = yield* Session.Service
-    const messageID = MessageID.ascending()
-    const assistant: SessionV1.Assistant = {
-      id: messageID,
-      role: "assistant",
-      parentID: MessageID.ascending(),
-      sessionID: input.sessionID,
-      mode: "build",
-      agent: "general",
-      cost: 0,
-      path: { cwd: "/tmp", root: "/tmp" },
-      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-      modelID: ref.modelID,
-      providerID: ref.providerID,
-      variant: "xhigh",
-      time: { created: Date.now() },
-    }
-    yield* sessions.updateMessage(assistant)
-    yield* sessions.updatePart({
-      id: PartID.ascending(),
-      messageID,
-      sessionID: input.sessionID,
-      type: "step-finish",
-      reason: "stop",
-      cost: input.cost,
-      tokens: { input: 100, output: 50, reasoning: 0, cache: { read: 0, write: 0 } },
-    })
-  })
-}
-
-/** TaskPromptOps whose prompt writes `cost` worth of usage to the child session before replying. */
-function costingOps(cost: number): TaskPromptOps {
-  return {
-    ...stubOps(),
-    prompt: (input) =>
-      Effect.gen(function* () {
-        yield* seedCost({ sessionID: input.sessionID, cost })
-        return reply(input, "done")
-      }),
-  }
-}
-
-function taskContext(sessionID: SessionID, messageID: MessageID, promptOps: TaskPromptOps) {
-  return {
-    sessionID,
-    messageID,
-    agent: "build",
-    abort: new AbortController().signal,
-    extra: { promptOps },
-    messages: [],
-    metadata: () => Effect.void,
-    ask: () => Effect.void,
   }
 }
 
@@ -310,6 +281,93 @@ describe("tool.task", () => {
       expect(result.output).toContain(`<task id="${child.id}" state="completed">`)
       expect(seen?.sessionID).toBe(child.id)
       expect(seen?.variant).toBe("xhigh")
+    }),
+  )
+
+  it.instance("execute surfaces child errors with a resumable task_id", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+
+      const exit = yield* def
+        .execute(
+          {
+            description: "inspect bug",
+            prompt: "look into the cache key path",
+            subagent_type: "general",
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: {
+              promptOps: stubOps({
+                text: "",
+                error: new SessionV1.APIError({ message: "Network connection lost", isRetryable: false }).toObject(),
+              }),
+            },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+        .pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isSuccess(exit)) throw new Error("expected task failure")
+      const child = (yield* sessions.children(chat.id))[0]
+      expect(child).toBeDefined()
+      const failure = Cause.squash(exit.cause)
+      expect(failure).toBeInstanceOf(Error)
+      if (!(failure instanceof Error)) throw new Error("expected Error defect")
+      expect(failure.message).toBe(`Subagent failed (task_id: ${child?.id}): Network connection lost`)
+    }),
+  )
+
+  it.instance("execute surfaces terminal child tool errors with a resumable task_id", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+
+      const exit = yield* def
+        .execute(
+          {
+            description: "inspect external directory",
+            prompt: "read the external directory",
+            subagent_type: "general",
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: {
+              promptOps: stubOps({
+                text: "I will inspect the directory.",
+                toolError: "The user rejected permission to use this specific tool call.",
+              }),
+            },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+        .pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isSuccess(exit)) throw new Error("expected task failure")
+      const child = (yield* sessions.children(chat.id))[0]
+      const failure = Cause.squash(exit.cause)
+      expect(failure).toBeInstanceOf(Error)
+      if (!(failure instanceof Error)) throw new Error("expected Error defect")
+      expect(failure.message).toBe(
+        `Subagent failed (task_id: ${child?.id}): The user rejected permission to use this specific tool call.`,
+      )
     }),
   )
 
@@ -1039,115 +1097,5 @@ describe("tool.task", () => {
       expect((yield* jobs.get(child.id))?.status).toBe("cancelled")
       expect((yield* jobs.get(grandchild.id))?.status).toBe("cancelled")
     }),
-  )
-
-  it.instance("propagates subagent cost to the parent and all ancestors on completion", () =>
-    Effect.gen(function* () {
-      const sessions = yield* Session.Service
-      const tool = yield* TaskTool
-      const def = yield* tool.init()
-      const { chat: root } = yield* seed()
-      const mid = yield* sessions.create({ parentID: root.id, title: "mid" })
-      const midAssistant = yield* sessions.updateMessage({
-        id: MessageID.ascending(),
-        role: "assistant",
-        parentID: MessageID.ascending(),
-        sessionID: mid.id,
-        agent: "build",
-        model: ref,
-        time: { created: Date.now() },
-      })
-
-      const result = yield* def.execute(
-        { description: "inspect bug", prompt: "look into the cache key path", subagent_type: "general" },
-        taskContext(mid.id, midAssistant.id, costingOps(1.25)),
-      )
-
-      const child = yield* sessions.get(result.metadata.sessionId)
-      expect(child.cost).toBe(1.25)
-      expect((yield* sessions.get(mid.id)).cost).toBe(1.25)
-      expect((yield* sessions.get(root.id)).cost).toBe(1.25)
-      expect(child.metadata?.["subagentCostPropagated"]).toBe(1.25)
-      expect((yield* sessions.get(mid.id)).metadata?.["subagentCostPropagated"]).toBe(1.25)
-      expect((yield* sessions.get(root.id)).metadata?.["subagentCostPropagated"]).toBe(1.25)
-    }),
-    { config: { subagent_depth: 2 } },
-  )
-
-  it.instance("resuming via task_id adds only the additional cost delta", () =>
-    Effect.gen(function* () {
-      const sessions = yield* Session.Service
-      const tool = yield* TaskTool
-      const def = yield* tool.init()
-      const { chat, assistant } = yield* seed()
-      const ctx = taskContext(chat.id, assistant.id, stubOps())
-
-      const first = yield* def.execute(
-        { description: "inspect bug", prompt: "look into the cache key path", subagent_type: "general" },
-        { ...ctx, extra: { promptOps: costingOps(1.0) } },
-      )
-      expect((yield* sessions.get(chat.id)).cost).toBe(1.0)
-      expect((yield* sessions.get(first.metadata.sessionId)).metadata?.["subagentCostPropagated"]).toBe(1.0)
-
-      const resumed = yield* def.execute(
-        {
-          description: "inspect bug",
-          prompt: "dig deeper",
-          subagent_type: "general",
-          task_id: first.metadata.sessionId,
-        },
-        { ...ctx, extra: { promptOps: costingOps(0.5) } },
-      )
-      expect(resumed.metadata.sessionId).toBe(first.metadata.sessionId)
-      expect((yield* sessions.get(chat.id)).cost).toBe(1.5)
-      expect((yield* sessions.get(first.metadata.sessionId)).metadata?.["subagentCostPropagated"]).toBe(1.5)
-    }),
-  )
-
-  it.instance("propagates through a chain of subagents without double counting", () =>
-    Effect.gen(function* () {
-      const sessions = yield* Session.Service
-      const tool = yield* TaskTool
-      const def = yield* tool.init()
-      const { chat: root, assistant: rootAssistant } = yield* seed()
-      const rootCtx = taskContext(root.id, rootAssistant.id, stubOps())
-
-      // A invokes B (no cost yet)
-      const b = yield* def.execute(
-        { description: "task b", prompt: "do work", subagent_type: "general" },
-        rootCtx,
-      )
-      // B invokes C; C spends 1.0 -> B and A each receive 1.0
-      const bAssistant = yield* sessions.updateMessage({
-        id: MessageID.ascending(),
-        role: "assistant",
-        parentID: MessageID.ascending(),
-        sessionID: b.metadata.sessionId,
-        agent: "build",
-        model: ref,
-        time: { created: Date.now() },
-      })
-      yield* def.execute(
-        { description: "task c", prompt: "do work", subagent_type: "general" },
-        taskContext(b.metadata.sessionId, bAssistant.id, costingOps(1.0)),
-      )
-      expect((yield* sessions.get(b.metadata.sessionId)).cost).toBe(1.0)
-      expect((yield* sessions.get(root.id)).cost).toBe(1.0)
-      expect((yield* sessions.get(b.metadata.sessionId)).metadata?.["subagentCostPropagated"]).toBe(1.0)
-      expect((yield* sessions.get(root.id)).metadata?.["subagentCostPropagated"]).toBe(1.0)
-
-      // B spends 2.0 of its own; total 3.0, of which 1.0 already reached A via C
-      yield* seedCost({ sessionID: b.metadata.sessionId, cost: 2.0 })
-      // A resumes B -> only B's own delta (2.0) reaches A, no double count of C
-      yield* def.execute(
-        { description: "resume b", prompt: "continue", subagent_type: "general", task_id: b.metadata.sessionId },
-        rootCtx,
-      )
-      expect((yield* sessions.get(b.metadata.sessionId)).cost).toBe(3.0)
-      expect((yield* sessions.get(root.id)).cost).toBe(3.0)
-      expect((yield* sessions.get(b.metadata.sessionId)).metadata?.["subagentCostPropagated"]).toBe(3.0)
-      expect((yield* sessions.get(root.id)).metadata?.["subagentCostPropagated"]).toBe(3.0)
-    }),
-    { config: { subagent_depth: 2 } },
   )
 })

@@ -1,6 +1,6 @@
 import { afterEach, expect } from "bun:test"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { Cause, Deferred, Effect, Exit, Fiber, Layer, Queue } from "effect"
+import { Cause, Effect, Exit, Fiber, Layer, Queue } from "effect"
 import { Question } from "../../src/question"
 import { InstanceRef } from "../../src/effect/instance-ref"
 import { InstanceStore } from "../../src/project/instance-store"
@@ -64,33 +64,6 @@ const waitForPending = Effect.fn("QuestionTest.waitForPending")(function* (count
     yield* Queue.take(asked).pipe(Effect.timeout("2 seconds"))
   }
 })
-
-type RejectedEvent = {
-  sessionID: SessionID
-  requestID: QuestionID
-}
-
-const captureRejectedEvent = (requestID: QuestionID) =>
-  Effect.gen(function* () {
-    const events = yield* EventV2Bridge.Service
-    const seen = yield* Deferred.make<RejectedEvent>()
-    const unsub = yield* events.listen((event) => {
-      if (event.type !== Question.Event.Rejected.type) return Effect.void
-      const data = event.data as RejectedEvent
-      if (data.requestID === requestID) Deferred.doneUnsafe(seen, Effect.succeed(data))
-      return Effect.void
-    })
-    yield* Effect.addFinalizer(() => unsub)
-    return seen
-  })
-
-const waitForRejectedEvent = (seen: Deferred.Deferred<RejectedEvent>) =>
-  Deferred.await(seen).pipe(
-    Effect.timeoutOrElse({
-      duration: "1 second",
-      orElse: () => Effect.fail(new Error("timed out waiting for question rejected event")),
-    }),
-  )
 
 it.instance(
   "ask - remains pending until answered",
@@ -482,68 +455,5 @@ lifecycle.live("pending question rejects on instance reload", () =>
     const exit = yield* Fiber.await(fiber)
     expect(Exit.isFailure(exit)).toBe(true)
     if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBeInstanceOf(Question.RejectedError)
-  }),
-)
-
-it.instance(
-  "ask - publishes rejected event when interrupted",
-  () =>
-    Effect.gen(function* () {
-      const fiber = yield* askEffect({
-        sessionID: SessionID.make("ses_interrupt"),
-        questions: [
-          {
-            question: "What would you like to do?",
-            header: "Action",
-            options: [
-              { label: "Option 1", description: "First option" },
-              { label: "Option 2", description: "Second option" },
-            ],
-          },
-        ],
-      }).pipe(Effect.forkScoped)
-
-      const pending = yield* waitForPending(1)
-      const seen = yield* captureRejectedEvent(pending[0].id)
-      yield* Fiber.interrupt(fiber)
-
-      expect(yield* waitForRejectedEvent(seen)).toEqual({
-        sessionID: SessionID.make("ses_interrupt"),
-        requestID: pending[0].id,
-      })
-      expect(yield* listEffect).toHaveLength(0)
-    }),
-  { git: true },
-)
-
-lifecycle.live("pending question publishes rejected event on instance dispose", () =>
-  Effect.gen(function* () {
-    const dir = yield* tmpdirScoped({ git: true })
-    const fiber = yield* askEffect({
-      sessionID: SessionID.make("ses_dispose"),
-      questions: [
-        {
-          question: "Dispose me?",
-          header: "Dispose",
-          options: [{ label: "Yes", description: "Yes" }],
-        },
-      ],
-    }).pipe(provideInstance(dir), Effect.forkScoped)
-
-    const pending = yield* waitForPending(1).pipe(provideInstance(dir))
-    const seen = yield* captureRejectedEvent(pending[0].id)
-    const ctx = yield* Effect.gen(function* () {
-      return yield* InstanceRef
-    }).pipe(provideInstance(dir))
-    if (!ctx) return yield* Effect.die(new Error("missing test instance"))
-    yield* InstanceStore.Service.use((store) => store.dispose(ctx))
-
-    const exit = yield* Fiber.await(fiber)
-    expect(Exit.isFailure(exit)).toBe(true)
-    if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBeInstanceOf(Question.RejectedError)
-    expect(yield* waitForRejectedEvent(seen)).toEqual({
-      sessionID: SessionID.make("ses_dispose"),
-      requestID: pending[0].id,
-    })
   }),
 )

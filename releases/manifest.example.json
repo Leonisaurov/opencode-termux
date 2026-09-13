@@ -19,8 +19,8 @@
       "size": 0, "archive": "tar.gz", "depends": [], "files": ["libopentui.so"]
     },
     "opencode": {
-      "version": "1.3.13", "tag": "opencode-v1.3.13-android",
-      "asset": "opencode-v1.3.13-android-aarch64.tar.gz",
+      "version": "1.18.30", "tag": "opencode-v1.18.30-android",
+      "asset": "opencode-v1.18.30-android-aarch64.tar.gz",
       "sha256": "<sha256 del artifact publicado>",
       "size": 0, "archive": "zip", "depends": ["bun", "opentui"], "files": ["opencode"]
     },

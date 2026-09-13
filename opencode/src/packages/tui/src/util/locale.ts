@@ -27,11 +27,6 @@ export function todayTimeOrDateTime(input: number): string {
   }
 }
 
-export function datetimeFull(input: number): string {
-  const date = new Date(input)
-  return `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}/${date.getFullYear()} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
-}
-
 export function number(num: number): string {
   if (num >= 1000000) {
     return (num / 1000000).toFixed(1) + "M"

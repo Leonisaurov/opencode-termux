@@ -65,14 +65,6 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const events = yield* EventV2Bridge.Service
-    const cleanup = Effect.fn("Question.cleanup")(function* (pending: State["pending"], item: PendingEntry) {
-      if (!pending.delete(item.info.id)) return // guard: evita reject duplicado
-      yield* events.publish(Event.Rejected, {
-        sessionID: item.info.sessionID,
-        requestID: item.info.id,
-      })
-      yield* Deferred.fail(item.deferred, new RejectedError())
-    })
     const state = yield* InstanceState.make<State>(
       Effect.fn("Question.state")(function* () {
         const state = {
@@ -82,8 +74,9 @@ const layer = Layer.effect(
         yield* Effect.addFinalizer(() =>
           Effect.gen(function* () {
             for (const item of state.pending.values()) {
-              yield* cleanup(state.pending, item)
+              yield* Deferred.fail(item.deferred, new RejectedError())
             }
+            state.pending.clear()
           }),
         )
 
@@ -107,11 +100,15 @@ const layer = Layer.effect(
         questions: input.questions,
         tool: input.tool,
       }
-      const item = { info, deferred }
-      pending.set(id, item)
+      pending.set(id, { info, deferred })
       yield* events.publish(Event.Asked, info)
 
-      return yield* Effect.ensuring(Deferred.await(deferred), cleanup(pending, item))
+      return yield* Effect.ensuring(
+        Deferred.await(deferred),
+        Effect.sync(() => {
+          pending.delete(id)
+        }),
+      )
     })
 
     const reply = Effect.fn("Question.reply")(function* (input: {

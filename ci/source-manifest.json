@@ -9,7 +9,7 @@
     "opencode": {
       "path": "opencode/src",
       "mode": "vendored",
-      "commit": "77f342a97d8c606caf101d4b4668bb175c9af5aa"
+      "commit": "3104c1428ec91f809e5ab86631300de41eb6952e"
     },
     "kilo": {
       "path": "kilo/src",

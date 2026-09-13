@@ -14,7 +14,7 @@ on:
       opencode_version:
         description: 'OpenCode version to build'
         required: false
-        default: '1.3.13'
+        default: '1.18.30'
   workflow_call:
     inputs:
       bun_version:
@@ -31,7 +31,7 @@ on:
         description: 'Versión de OpenCode'
         required: false
         type: string
-        default: '1.3.13'
+        default: '1.18.30'
       require_dependency_artifacts:
         description: 'Falla si faltan artifacts producidos por el DAG caller'
         required: false
@@ -50,7 +50,7 @@ env:
   BUN_VERSION: "${{ inputs.bun_version || '1.2.13' }}"
   HOST_BUN_VERSION: "1.3.2"
   OPENTUI_REF: "${{ inputs.opentui_ref || '658db4cbe0da0adfeb5edac0273ee68911b29c3e' }}"
-  OPENCODE_VERSION: "${{ inputs.opencode_version || '1.3.13' }}"
+  OPENCODE_VERSION: "${{ inputs.opencode_version || '1.18.30' }}"
   ANDROID_API: "24"
   ANDROID_NDK_VERSION: "28.1.13356709"
   ICU_VERSION: "75.1"

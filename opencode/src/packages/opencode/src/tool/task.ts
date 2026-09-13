@@ -10,7 +10,7 @@ import { Agent } from "../agent/agent"
 import { deriveSubagentSessionPermission } from "../agent/subagent-permissions"
 import type { SessionPrompt } from "../session/prompt"
 import { Config } from "@/config/config"
-import { Effect, Exit, Option, Schema, Scope } from "effect"
+import { Effect, Exit, Schema, Scope } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Database } from "@opencode-ai/core/database/database"
@@ -210,45 +210,24 @@ export const TaskTool = Tool.define(
           agent: next.name,
           parts,
         })
-        return result.parts.findLast((item) => item.type === "text")?.text ?? ""
-      })
-
-      // Propagates the child's cost to the invoking session and every ancestor up the
-      // parentID chain. Only the delta since the last propagation is added, tracked in
-      // each session's metadata under "subagentCostPropagated". Ancestors bump their
-      // own counter by the same delta so a later completion of the intermediate agent
-      // does not re-count this child's cost (chain A -> B -> C). The child keeps its
-      // own cost untouched; only its counter is set to its full cost.
-      const propagateCost = Effect.fn("TaskTool.propagateCost")(function* (childSessionID: SessionID) {
-        const child = yield* sessions.get(childSessionID).pipe(Effect.option)
-        if (Option.isNone(child)) return
-        const childCost = child.value.cost ?? 0
-        const childPropagated = Number(child.value.metadata?.["subagentCostPropagated"] ?? 0)
-        const delta = childCost - childPropagated
-        if (delta <= 0) return
-        // Race conocida y aceptada: la secuencia read->compute->write del delta no es
-        // atomica frente al clobber full-row del projector en Session.Updated (mismo
-        // riesgo pre-existente que applyUsage en projector.ts:90-110). Auto-corrige
-        // parcialmente con delta>0. Decision: no blindar con transaccion/mutex por ahora.
-        const visited = new Set<SessionID>()
-        let ancestor = yield* sessions.get(ctx.sessionID).pipe(Effect.option)
-        while (Option.isSome(ancestor)) {
-          // Guard against a corrupt parentID chain (cycle A->B->A or self-reference
-          // A->A): never process the same ancestor twice, or the loop never terminates.
-          if (visited.has(ancestor.value.id)) break
-          visited.add(ancestor.value.id)
-          yield* sessions.addPropagatedCost({ sessionID: ancestor.value.id, delta })
-          if (!ancestor.value.parentID) break
-          ancestor = yield* sessions.get(ancestor.value.parentID).pipe(Effect.option)
+        if (result.info.role === "assistant" && result.info.error) {
+          const message =
+            "message" in result.info.error.data && typeof result.info.error.data.message === "string"
+              ? result.info.error.data.message
+              : result.info.error.name
+          return yield* Effect.fail(new Error(`Subagent failed (task_id: ${nextSession.id}): ${message}`))
         }
-        yield* sessions.setPropagatedCost({ sessionID: childSessionID, cost: childCost })
+        const failed = result.parts.findLast((item) => item.type === "tool" && item.state.status === "error")
+        if (failed?.type === "tool" && failed.state.status === "error") {
+          return yield* Effect.fail(new Error(`Subagent failed (task_id: ${nextSession.id}): ${failed.state.error}`))
+        }
+        return result.parts.findLast((item) => item.type === "text")?.text ?? ""
       })
 
       const inject = Effect.fn("TaskTool.injectBackgroundResult")(function* (
         state: "completed" | "error",
         text: string,
       ) {
-        yield* propagateCost(nextSession.id)
         const currentParent = yield* sessions.get(ctx.sessionID)
         yield* ops
           .prompt({
@@ -357,15 +336,8 @@ export const TaskTool = Tool.define(
               background.waitForPromotion(nextSession.id),
             )
             if (result?.metadata?.background === true) return backgroundResult()
-            if (result?.status === "error") {
-              yield* propagateCost(nextSession.id)
-              return yield* Effect.fail(new Error(result.error ?? "Task failed"))
-            }
-            if (result?.status === "cancelled") {
-              yield* propagateCost(nextSession.id)
-              return yield* Effect.fail(new Error("Task cancelled"))
-            }
-            yield* propagateCost(nextSession.id)
+            if (result?.status === "error") return yield* Effect.fail(new Error(result.error ?? "Task failed"))
+            if (result?.status === "cancelled") return yield* Effect.fail(new Error("Task cancelled"))
             return {
               title: params.description,
               metadata,

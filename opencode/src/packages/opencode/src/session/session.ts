@@ -336,10 +336,8 @@ export function plan(input: { slug: string; time: { created: number } }, instanc
 }
 
 export const getUsage = (input: { model: Provider.Model; usage: Usage; metadata?: ProviderMetadata }) => {
-  const safe = (value: number) => {
-    if (!Number.isFinite(value)) return 0
-    return Math.max(0, value)
-  }
+  const finite = (value: number) => (Number.isFinite(value) ? value : 0)
+  const safe = (value: number) => Math.max(0, finite(value))
   const inputTokens = safe(input.usage.inputTokens ?? 0)
   const outputTokens = safe(input.usage.outputTokens ?? 0)
   const reasoningTokens = safe(input.usage.reasoningTokens ?? 0)
@@ -393,13 +391,13 @@ export const getUsage = (input: { model: Provider.Model; usage: Usage; metadata?
         ? new Decimal(totalNanoAiu).div(100_000_000_000).toNumber()
         : safe(
             new Decimal(0)
-              .add(new Decimal(tokens.input).mul(costInfo?.input ?? 0).div(1_000_000))
-              .add(new Decimal(tokens.output).mul(costInfo?.output ?? 0).div(1_000_000))
-              .add(new Decimal(tokens.cache.read).mul(costInfo?.cache?.read ?? 0).div(1_000_000))
-              .add(new Decimal(tokens.cache.write).mul(costInfo?.cache?.write ?? 0).div(1_000_000))
+              .add(new Decimal(tokens.input).mul(finite(costInfo?.input ?? 0)).div(1_000_000))
+              .add(new Decimal(tokens.output).mul(finite(costInfo?.output ?? 0)).div(1_000_000))
+              .add(new Decimal(tokens.cache.read).mul(finite(costInfo?.cache?.read ?? 0)).div(1_000_000))
+              .add(new Decimal(tokens.cache.write).mul(finite(costInfo?.cache?.write ?? 0)).div(1_000_000))
               // TODO: update models.dev to have better pricing model, for now:
               // charge reasoning tokens at the same rate as output tokens
-              .add(new Decimal(tokens.reasoning).mul(costInfo?.output ?? 0).div(1_000_000))
+              .add(new Decimal(tokens.reasoning).mul(finite(costInfo?.output ?? 0)).div(1_000_000))
               .toNumber(),
           ),
     tokens,
@@ -430,13 +428,6 @@ export interface Interface {
   readonly setTitle: (input: { sessionID: SessionID; title: string }) => Effect.Effect<void>
   readonly setArchived: (input: { sessionID: SessionID; time?: number }) => Effect.Effect<void>
   readonly setMetadata: (input: typeof SetMetadataInput.Type) => Effect.Effect<void>
-  /**
-   * Atomically adds a subagent cost delta to a session's cost and its propagated-cost
-   * counter (used for ancestor sessions during transitive cost propagation).
-   */
-  readonly addPropagatedCost: (input: { sessionID: SessionID; delta: number }) => Effect.Effect<void>
-  /** Sets how much of a session's cost has been propagated up to its ancestors (counter only, cost untouched). */
-  readonly setPropagatedCost: (input: { sessionID: SessionID; cost: number }) => Effect.Effect<void>
   readonly setAgentModel: (input: {
     sessionID: SessionID
     agent: string
@@ -550,52 +541,6 @@ const layer: Layer.Layer<
       const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, id)).get().pipe(Effect.orDie)
       if (!row) return yield* Effect.fail(new NotFoundError({ message: `Session not found: ${id}` }))
       return fromRow(row)
-    })
-
-    const addPropagatedCost = Effect.fn("Session.addPropagatedCost")(function* (input: {
-      sessionID: SessionID
-      delta: number
-    }) {
-      if (input.delta <= 0) return
-      // Single atomic statement: mirrors applyUsage (incremental cost) while bumping the
-      // propagated-cost counter in metadata, so cost and counter stay consistent within
-      // the single statement.
-      // Note (race aceptada): este statement es atomico, pero la secuencia completa del
-      // caller (propagateCost en tool/task.ts) es read->compute->write y NO es atomica
-      // frente al clobber full-row del projector en Session.Updated. Riesgo conocido y
-      // aceptado (mismo que applyUsage en projector.ts:90-110); auto-corrige con delta>0.
-      yield* db
-        .update(SessionTable)
-        .set({
-          cost: sql`${SessionTable.cost} + ${input.delta}`,
-          metadata: sql`json_set(
-            coalesce(${SessionTable.metadata}, '{}'),
-            '$.subagentCostPropagated',
-            coalesce(json_extract(coalesce(${SessionTable.metadata}, '{}'), '$.subagentCostPropagated'), 0) + ${input.delta}
-          )`,
-          time_updated: sql`${SessionTable.time_updated}`,
-        })
-        .where(eq(SessionTable.id, input.sessionID))
-        .run()
-        .pipe(Effect.orDie)
-    })
-
-    const setPropagatedCost = Effect.fn("Session.setPropagatedCost")(function* (input: {
-      sessionID: SessionID
-      cost: number
-    }) {
-      yield* db
-        .update(SessionTable)
-        .set({
-          metadata: sql`json_set(
-            coalesce(${SessionTable.metadata}, '{}'),
-            '$.subagentCostPropagated',
-            ${input.cost}
-          )`,
-        })
-        .where(eq(SessionTable.id, input.sessionID))
-        .run()
-        .pipe(Effect.orDie)
     })
 
     const list = Effect.fn("Session.list")(function* (input?: ListInput) {
@@ -747,23 +692,18 @@ const layer: Layer.Layer<
       const ctx = yield* InstanceState.context
       const original = yield* get(input.sessionID)
       const title = getForkedTitle(original.title)
-      // The forked session must not inherit the parent's `subagentCostPropagated`
-      // counter: it starts with cost=0, so inheriting counter>0 would make its own
-      // propagation a permanent no-op (delta = cost - propagated <= 0).
-      const forkedMetadata = structuredClone(original.metadata)
-      if (forkedMetadata) delete forkedMetadata["subagentCostPropagated"]
       const session = yield* createNext({
         directory: ctx.directory,
         path: sessionPath(ctx.worktree, ctx.directory),
         workspaceID: original.workspaceID,
         title,
-        metadata: forkedMetadata,
+        metadata: structuredClone(original.metadata),
       })
       const msgs = yield* messages({ sessionID: input.sessionID })
       const idMap = new Map<string, MessageID>()
+      const target = input.messageID ? msgs.findIndex((msg) => msg.info.id === input.messageID) : msgs.length
 
-      for (const msg of msgs) {
-        if (input.messageID && msg.info.id >= input.messageID) break
+      for (const msg of msgs.slice(0, target < 0 ? msgs.length : target)) {
         const newID = MessageID.ascending()
         idMap.set(msg.info.id, newID)
 
@@ -973,8 +913,6 @@ const layer: Layer.Layer<
       setTitle,
       setArchived,
       setMetadata,
-      addPropagatedCost,
-      setPropagatedCost,
       setAgentModel,
       setPermission,
       setRevert,

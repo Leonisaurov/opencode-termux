@@ -51,6 +51,12 @@ function search<T>(items: T[], target: string, key: (item: T) => string) {
   return { found: false, index: left }
 }
 
+function compareMessage(a: Message, b: Message) {
+  return a.time.created - b.time.created || a.id.localeCompare(b.id)
+}
+
+const messageKey = (message: Message) => message.time.created + message.id
+
 export const {
   context: SyncContext,
   use: useSync,
@@ -105,18 +111,6 @@ export const {
       }
       formatter: FormatterStatus[]
       vcs: VcsInfo | undefined
-      messageOlderCursor: {
-        [sessionID: string]: string | null
-      }
-      messageNewerCursor: {
-        [sessionID: string]: string | null
-      }
-      messageOlderLoading: {
-        [sessionID: string]: boolean
-      }
-      messageNewerLoading: {
-        [sessionID: string]: boolean
-      }
     }>({
       provider_next: {
         all: [],
@@ -147,10 +141,6 @@ export const {
       mcp_resource: {},
       formatter: [],
       vcs: undefined,
-      messageOlderCursor: {},
-      messageNewerCursor: {},
-      messageOlderLoading: {},
-      messageNewerLoading: {},
     })
 
     const event = useEvent()
@@ -329,76 +319,75 @@ export const {
         }
 
         case "message.updated": {
-          const sessionID = event.properties.info.sessionID
-          const messages = store.message[sessionID]
+          touchMessage(event.properties.info.sessionID, event.properties.info.id)
+          const messages = store.message[event.properties.info.sessionID]
           if (!messages) {
-            setStore("message", sessionID, [event.properties.info])
+            setStore("message", event.properties.info.sessionID, [event.properties.info])
             break
           }
-          const result = search(messages, event.properties.info.id, (m) => m.id)
+          const result = search(messages, messageKey(event.properties.info), messageKey)
           if (result.found) {
-            setStore("message", sessionID, result.index, reconcile(event.properties.info))
+            setStore("message", event.properties.info.sessionID, result.index, reconcile(event.properties.info))
             break
-          }
-          // If the bottom of the window has been evicted (messageNewerCursor
-          // is set), drop messages that arrive past our visible tail. They
-          // will be loaded on demand when the user scrolls back down.
-          if (store.messageNewerCursor[sessionID]) {
-            const last = messages[messages.length - 1]
-            if (last) {
-              const incoming = event.properties.info
-              const isPastTail =
-                incoming.time.created > last.time.created ||
-                (incoming.time.created === last.time.created && incoming.id > last.id)
-              if (isPastTail) break
-            }
           }
           setStore(
             "message",
-            sessionID,
+            event.properties.info.sessionID,
             produce((draft) => {
               draft.splice(result.index, 0, event.properties.info)
             }),
           )
+          const updated = store.message[event.properties.info.sessionID]
+          if (updated.length > 100) {
+            const oldest = updated[0]
+            batch(() => {
+              setStore(
+                "message",
+                event.properties.info.sessionID,
+                produce((draft) => {
+                  draft.shift()
+                }),
+              )
+              setStore(
+                "part",
+                produce((draft) => {
+                  delete draft[oldest.id]
+                }),
+              )
+            })
+          }
           break
         }
         case "message.removed": {
           touchMessage(event.properties.sessionID, event.properties.messageID)
           const messages = store.message[event.properties.sessionID]
-          const result = search(messages, event.properties.messageID, (m) => m.id)
-          if (result.found) {
+          const index = messages.findIndex((message) => message.id === event.properties.messageID)
+          if (index !== -1) {
             setStore(
               "message",
               event.properties.sessionID,
               produce((draft) => {
-                draft.splice(result.index, 1)
+                draft.splice(index, 1)
               }),
             )
           }
           break
         }
         case "message.part.updated": {
-          const sessionID = event.properties.part.sessionID
-          const messageID = event.properties.part.messageID
-          const parts = store.part[messageID]
-          // If the parent message isn't in our window AND the window's
-          // bottom has been evicted, drop the part - it would otherwise
-          // be orphaned in store.part with no message to attach to.
-          const messages = store.message[sessionID]
-          const inWindow = !messages || search(messages, messageID, (m) => m.id).found
+          touchPart(event.properties.part.sessionID, event.properties.part.id)
+          const parts = store.part[event.properties.part.messageID]
           if (!parts) {
-            if (!inWindow && store.messageNewerCursor[sessionID]) break
-            setStore("part", messageID, [event.properties.part])
+            setStore("part", event.properties.part.messageID, [event.properties.part])
             break
           }
-          const result = search(parts, event.properties.part.id, (p) => p.id)
+          const result = search(parts, event.properties.part.id, (part) => part.id)
           if (result.found) {
-            setStore("part", messageID, result.index, reconcile(event.properties.part))
+            setStore("part", event.properties.part.messageID, result.index, reconcile(event.properties.part))
             break
           }
           setStore(
             "part",
-            messageID,
+            event.properties.part.messageID,
             produce((draft) => {
               draft.splice(result.index, 0, event.properties.part)
             }),
@@ -409,7 +398,7 @@ export const {
         case "message.part.delta": {
           const parts = store.part[event.properties.messageID]
           if (!parts) break
-          const result = search(parts, event.properties.partID, (p) => p.id)
+          const result = search(parts, event.properties.partID, (part) => part.id)
           if (!result.found) break
           touchPart(event.properties.sessionID, event.properties.partID)
           setStore(
@@ -428,7 +417,7 @@ export const {
         case "message.part.removed": {
           touchPart(event.properties.sessionID, event.properties.partID)
           const parts = store.part[event.properties.messageID]
-          const result = search(parts, event.properties.partID, (p) => p.id)
+          const result = search(parts, event.properties.partID, (part) => part.id)
           if (result.found) {
             setStore(
               "part",
@@ -604,163 +593,77 @@ export const {
         },
         async sync(sessionID: string) {
           if (fullSyncedSessions.has(sessionID)) return
-          const hydration = { messages: new Set<string>(), parts: new Set<string>() }
-          hydratingSessions.set(sessionID, hydration)
-          try {
+          const syncing = syncingSessions.get(sessionID)
+          if (syncing) return syncing
+          const tracker = { messages: new Set<string>(), parts: new Set<string>() }
+          hydratingSessions.set(sessionID, tracker)
+          const task = (async () => {
             const [session, messages, todo, diff] = await Promise.all([
               sdk.client.session.get({ sessionID }, { throwOnError: true }),
-              sdk.client.session.messages({ sessionID, limit: INITIAL_PAGE_SIZE }),
+              sdk.client.session.messages({ sessionID, limit: 100 }),
               sdk.client.session.todo({ sessionID }),
               sdk.client.session.diff({ sessionID }),
             ])
-            const olderCursor = (messages.response?.headers.get("x-next-cursor") as string | null | undefined) ?? null
             setStore(
               produce((draft) => {
                 const match = search(draft.session, sessionID, (s) => s.id)
                 if (match.found) draft.session[match.index] = session.data!
                 if (!match.found) draft.session.splice(match.index, 0, session.data!)
                 draft.todo[sessionID] = todo.data ?? []
-                if (messages.data) {
-                  const existing = draft.message[sessionID] ?? []
-                  const infos: (typeof draft.message)[string] = []
-                  const hydratedIDs = new Set<string>()
-                  for (const message of messages.data) {
-                    hydratedIDs.add(message.info.id)
-                    const current = existing.find((item) => item.id === message.info.id)
-                    if (current) {
-                      infos.push(current)
-                      continue
+                const currentMessages = draft.message[sessionID] ?? []
+                const infos = (messages.data ?? []).flatMap((message) => {
+                  if (!tracker.messages.has(message.info.id)) return [message.info]
+                  const current = currentMessages.find((item) => item.id === message.info.id)
+                  return current ? [current] : []
+                })
+                infos.push(
+                  ...currentMessages.filter(
+                    (message) => tracker.messages.has(message.id) && !infos.some((item) => item.id === message.id),
+                  ),
+                )
+                infos.sort(compareMessage)
+                const removed = infos.slice(0, -100)
+                const visible = infos.slice(-100)
+                const visibleIDs = new Set(visible.map((message) => message.id))
+                for (const message of messages.data ?? []) {
+                  if (!visibleIDs.has(message.info.id)) {
+                    delete draft.part[message.info.id]
+                    continue
+                  }
+                  const currentParts = draft.part[message.info.id] ?? []
+                  const parts = message.parts.flatMap((part) => {
+                    const current = currentParts.find((item) => item.id === part.id)
+                    if (tracker.parts.has(part.id)) return current ? [current] : []
+                    if (
+                      current &&
+                      (part.type === "text" || part.type === "reasoning") &&
+                      (current.type === "text" || current.type === "reasoning") &&
+                      part.text.length === 0 &&
+                      current.text.length > 0
+                    ) {
+                      return [current]
                     }
-                    if (hydration.messages.has(message.info.id)) continue
-                    infos.push(message.info)
-                    draft.part[message.info.id] = message.parts
-                  }
-                  for (const message of existing) {
-                    if (hydratedIDs.has(message.id)) continue
-                    infos.push(message)
-                  }
-                  while (infos.length > INITIAL_PAGE_SIZE) {
-                    const evicted = infos.shift()
-                    if (evicted) delete draft.part[evicted.id]
-                  }
-                  draft.message[sessionID] = infos
-                  draft.messageOlderCursor[sessionID] = olderCursor
-                  draft.messageNewerCursor[sessionID] = null
+                    return [part]
+                  })
+                  parts.push(
+                    ...currentParts.filter(
+                      (part) => tracker.parts.has(part.id) && !parts.some((item) => item.id === part.id),
+                    ),
+                  )
+                  draft.part[message.info.id] = parts
                 }
+                for (const message of removed) delete draft.part[message.id]
+                draft.message[sessionID] = visible
                 draft.session_diff[sessionID] = diff.data ?? []
               }),
             )
-            if (!olderCursor) fullSyncedSessions.add(sessionID)
-          } finally {
+            fullSyncedSessions.add(sessionID)
+          })().finally(() => {
+            syncingSessions.delete(sessionID)
             hydratingSessions.delete(sessionID)
-          }
-        },
-        async loadOlderMessages(sessionID: string) {
-          const cursor = store.messageOlderCursor[sessionID]
-          if (!cursor || store.messageOlderLoading[sessionID]) return
-          setStore("messageOlderLoading", sessionID, true)
-          try {
-            const res = await sdk.client.session.messages({ sessionID, limit: PAGE_SIZE, before: cursor })
-            const nextCursor = (res.response?.headers.get("x-next-cursor") as string | null | undefined) ?? null
-            setStore(
-              produce((draft) => {
-                const existing = draft.message[sessionID] ?? []
-                const prepend: Message[] = []
-                for (const m of res.data ?? []) {
-                  draft.part[m.info.id] = m.parts
-                  prepend.push(m.info)
-                }
-                draft.message[sessionID] = [...prepend, ...existing]
-                draft.messageOlderCursor[sessionID] = nextCursor
-              }),
-            )
-            if (!nextCursor && !store.messageNewerCursor[sessionID]) fullSyncedSessions.add(sessionID)
-          } finally {
-            setStore("messageOlderLoading", sessionID, false)
-          }
-        },
-        async loadNewerMessages(sessionID: string) {
-          const cursor = store.messageNewerCursor[sessionID]
-          if (!cursor || store.messageNewerLoading[sessionID]) return
-          setStore("messageNewerLoading", sessionID, true)
-          try {
-            const res = await sdk.client.session.messages({ sessionID, limit: PAGE_SIZE, after: cursor })
-            const nextCursor = (res.response?.headers.get("x-next-cursor") as string | null | undefined) ?? null
-            setStore(
-              produce((draft) => {
-                const existing = draft.message[sessionID] ?? []
-                const append: Message[] = []
-                for (const m of res.data ?? []) {
-                  draft.part[m.info.id] = m.parts
-                  append.push(m.info)
-                }
-                draft.message[sessionID] = [...existing, ...append]
-                draft.messageNewerCursor[sessionID] = nextCursor
-              }),
-            )
-            if (!nextCursor && !store.messageOlderCursor[sessionID]) fullSyncedSessions.add(sessionID)
-          } finally {
-            setStore("messageNewerLoading", sessionID, false)
-          }
-        },
-        trimNewerMessages(sessionID: string, cap: number) {
-          const messages = store.message[sessionID]
-          if (!messages || messages.length <= cap) return
-          // Find the largest "safe" prefix length we can keep without
-          // discarding a message that's still in flight (assistants
-          // currently streaming) - those need to remain pinned so live
-          // events can update them.
-          let target = cap
-          while (target < messages.length) {
-            const tail = messages.slice(target)
-            const hasInflight = tail.some(
-              (m) => m.role === "assistant" && !m.time?.completed,
-            )
-            if (!hasInflight) break
-            target++
-          }
-          if (target >= messages.length) return
-          const evicted = messages.slice(target)
-          const newLast = messages[target - 1]
-          if (!newLast) return
-          const cursorVal = encodeMessageCursor({ id: newLast.id, time: newLast.time.created })
-          setStore(
-            produce((draft) => {
-              const arr = draft.message[sessionID]
-              for (const ev of evicted) delete draft.part[ev.id]
-              arr.length = target
-              draft.messageNewerCursor[sessionID] = cursorVal
-            }),
-          )
-          fullSyncedSessions.delete(sessionID)
-        },
-        trimOlderMessages(sessionID: string, cap: number) {
-          const messages = store.message[sessionID]
-          if (!messages || messages.length <= cap) return
-          const drop = messages.length - cap
-          const evicted = messages.slice(0, drop)
-          const newFirst = messages[drop]
-          if (!newFirst) return
-          const cursorVal = encodeMessageCursor({ id: newFirst.id, time: newFirst.time.created })
-          setStore(
-            produce((draft) => {
-              const arr = draft.message[sessionID]
-              for (const ev of evicted) delete draft.part[ev.id]
-              arr.splice(0, drop)
-              draft.messageOlderCursor[sessionID] = cursorVal
-            }),
-          )
-          fullSyncedSessions.delete(sessionID)
-        },
-        async loadAllMessages(sessionID: string) {
-          // Page through both directions until exhausted. Used by the
-          // Timeline dialog so it can render every prompt in the session.
-          while (store.messageOlderCursor[sessionID]) {
-            await result.session.loadOlderMessages(sessionID)
-          }
-          while (store.messageNewerCursor[sessionID]) {
-            await result.session.loadNewerMessages(sessionID)
-          }
+          })
+          syncingSessions.set(sessionID, task)
+          return task
         },
       },
       bootstrap,
@@ -768,10 +671,3 @@ export const {
     return result
   },
 })
-
-const INITIAL_PAGE_SIZE = 100
-const PAGE_SIZE = 50
-
-function encodeMessageCursor(input: { id: string; time: number }): string {
-  return Buffer.from(JSON.stringify(input)).toString("base64url")
-}

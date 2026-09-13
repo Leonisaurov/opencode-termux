@@ -31,7 +31,7 @@ on:
         default: '658db4cbe0da0adfeb5edac0273ee68911b29c3e'
       opencode_version:
         required: true
-        default: '1.3.13'
+        default: '1.18.30'
       kilo_version:
         required: true
         default: '7.4.20'
@@ -124,7 +124,7 @@ jobs:
     with:
       bun_version: ${{ inputs.bun_version || '1.2.13' }}
       opentui_ref: ${{ inputs.opentui_ref || '658db4cbe0da0adfeb5edac0273ee68911b29c3e' }}
-      opencode_version: ${{ inputs.opencode_version || '1.3.13' }}
+      opencode_version: ${{ inputs.opencode_version || '1.18.30' }}
       require_dependency_artifacts: true
     secrets: inherit
   kilo:
@@ -162,7 +162,7 @@ jobs:
           RELEASE: ${{ inputs.release || '1.18.11' }}
           BUN_VERSION: ${{ inputs.bun_version || '1.2.13' }}
           OPENTUI_REF: ${{ inputs.opentui_ref || '658db4cbe0da0adfeb5edac0273ee68911b29c3e' }}
-          OPENCODE_VERSION: ${{ inputs.opencode_version || '1.3.13' }}
+          OPENCODE_VERSION: ${{ inputs.opencode_version || '1.18.30' }}
           KILO_VERSION: ${{ inputs.kilo_version || '7.4.20' }}
           CODEX_VERSION: ${{ inputs.codex_ref || 'fee9a8d5f08291b72c580d15aa0b08c7c3ecb204' }}
         run: |
