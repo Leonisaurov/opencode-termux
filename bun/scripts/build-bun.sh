@@ -74,6 +74,18 @@ fi
 echo ">>> Configuring Bun..."
 cd "$BUN_BUILD"
 
+# Restored intermediates can carry object mtimes newer than the fresh checkout.
+# Ninja trusts mtimes, so a changed source (for example env_loader.zig or the
+# built-in JS modules) could be skipped and the previous binary relinked. Make
+# every source newer than any restored object so Ninja re-evaluates it; ccache
+# and the Zig cache still keep unchanged translation units cheap.
+echo ">>> Refreshing Bun source mtimes so Ninja recompiles changed units..."
+find "$BUN_SRC" -type f \
+    -not -path '*/.zig-cache/*' \
+    -not -path '*/node_modules/*' \
+    -not -path '*/target/*' \
+    -exec touch {} +
+
 cmake \
     -G Ninja \
     -DCMAKE_C_COMPILER_LAUNCHER=ccache \
