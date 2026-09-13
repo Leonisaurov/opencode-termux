@@ -93,7 +93,6 @@ jobs:
             --path bun/scripts/build-tinycc.sh --path ci/scripts/env.sh
             --path .github/workflows/build-core.yml
             --path ci/external-sources.lock
-            --path ci/source-manifest.json
             --path bun/webkit
             --path bun/tinycc
             --path bun/cmake/webkit-android-toolchain.cmake
@@ -104,7 +103,6 @@ jobs:
             --path bun/scripts/build-bun.sh
             --path ci/scripts/env.sh --path ci/scripts/test-android-heap-tagging.py
             --path .github/workflows/build-bun.yml
-            --path ci/source-manifest.json
             --value "BUN_VERSION=$BUN_VERSION"
             --value "ICU_VERSION=$ICU_VERSION"
             --value "BUN_SOURCE_COMMIT=$bun_source_commit"
@@ -114,7 +112,7 @@ jobs:
           opentui_args=(--root "$GITHUB_WORKSPACE" --product opentui
             --path opentui/scripts/build-opentui.sh --path ci/scripts/env.sh
             --path .github/workflows/build-opentui.yml
-            --path ci/source-manifest.json --value "OPENTUI_REF=$OPENTUI_REF"
+            --value "OPENTUI_REF=$OPENTUI_REF"
             --value "OPENTUI_TARGET=aarch64-linux-android.24"
             --value "OPENTUI_SOURCE_TREE=$opentui_source_tree")
           opentui_key="$(UPSTREAM_COMMIT="$OPENTUI_COMMIT" python3 ci/scripts/cache-contract.py key "${opentui_args[@]}")"
@@ -125,7 +123,6 @@ jobs:
             --path ci/scripts/patch-opentui-core-runtime.py
             --path opencode/scripts/make-packages.sh
             --path ci/scripts/env.sh --path .github/workflows/build-opencode.yml
-            --path ci/source-manifest.json
             --value "OPENCODE_VERSION=$OPENCODE_VERSION" --value "BUN_VERSION=$BUN_VERSION"
             --value "HOST_BUN_VERSION=$HOST_BUN_VERSION"
             --value "OPENTUI_REF=$OPENTUI_REF"

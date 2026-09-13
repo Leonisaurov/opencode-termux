@@ -84,7 +84,7 @@ jobs:
           args=(--root "$GITHUB_WORKSPACE" --product opentui
             --path opentui/scripts/build-opentui.sh --path ci/scripts/env.sh
             --path .github/workflows/build-opentui.yml
-            --path ci/source-manifest.json --value "OPENTUI_REF=$OPENTUI_REF"
+            --value "OPENTUI_REF=$OPENTUI_REF"
             --value "OPENTUI_TARGET=$OPENTUI_TARGET"
             --value "OPENTUI_SOURCE_TREE=$opentui_source_tree")
           cache_key="$(python3 ci/scripts/cache-contract.py key "${args[@]}")"

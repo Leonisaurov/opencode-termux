@@ -68,8 +68,13 @@ def main() -> None:
     opcode_paths, opcode_values = opencode["opencode"]
     assert "ci/scripts/patch-opentui-core-runtime.py" in opcode_paths
     assert "ci/scripts/module-graph-patch.ts" in opcode_paths
-    assert "ci/source-manifest.json" in opcode_paths
     assert "OPENCODE_SOURCE_COMMIT" in opcode_values
+    # ci/source-manifest.json aggregates every product commit. Including it in a
+    # per-product key makes an unrelated product change invalidate this cache,
+    # so keys must rely on the product's own source tree/commit instead.
+    for group in (core, bun, opentui, opencode, kilo):
+        for product, (paths, _values) in group.items():
+            assert "ci/source-manifest.json" not in paths, f"{product}: global manifest in cache key"
 
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ source "$SCRIPT_DIR/../../ci/scripts/env.sh"
 
 incremental_exec bun \
     --input "$SCRIPT_DIR/build-bun.sh" --input "$REPO_ROOT/ci/scripts/env.sh" \
-    --input "$REPO_ROOT/ci/source-manifest.json" --input "$BUN_SRC" \
+    --input "$BUN_SRC" \
     --value "BUN_VERSION=$BUN_VERSION" --value "ANDROID_API=$ANDROID_API" \
     --value "ANDROID_NDK_VERSION=$ANDROID_NDK_VERSION" \
     --dep "$BUN_STATE_DIR/nodes/webkit.json" \

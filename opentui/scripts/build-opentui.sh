@@ -36,7 +36,7 @@ mkdir -p "$ZIG_LOCAL_CACHE_DIR" "$ZIG_GLOBAL_CACHE_DIR"
 
 incremental_exec opentui \
     --input "$SCRIPT_DIR/build-opentui.sh" --input "$REPO_ROOT/ci/scripts/env.sh" \
-    --input "$REPO_ROOT/ci/source-manifest.json" --input "$OPENTUI_SRC" \
+    --input "$OPENTUI_SRC" \
     --value "ZIG_VERSION=$ZIG_VERSION" --value "ANDROID_API=$ANDROID_API" \
     --value "OPENTUI_TARGET=$OPENTUI_TARGET" --value "ANDROID_NDK_LIB_DIR=$ANDROID_NDK_LIB_DIR" \
     --value "ZIG_LIBC_FILE=$ZIG_LIBC_FILE" \
