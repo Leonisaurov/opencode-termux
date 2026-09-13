@@ -1,3 +1,9 @@
+# Backup of the full Android stack DAG before Rusty V8 and Codex were
+# temporarily removed from the default flow. Kept tracked so the two jobs
+# can be restored by copying their blocks back into
+# .github/workflows/build-android.yml. This file is not executed: GitHub
+# only reads .github/workflows/*.yml.
+
 name: Build and publish Android stack
 
 on:
@@ -55,6 +61,8 @@ jobs:
       bun: ${{ steps.changes.outputs.build_bun }}
       opencode: ${{ steps.changes.outputs.build_opencode }}
       kilo: ${{ steps.changes.outputs.build_kilo }}
+      rusty_v8: ${{ steps.changes.outputs.build_rusty_v8 }}
+      codex: ${{ steps.changes.outputs.build_codex }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -102,6 +110,13 @@ jobs:
     with:
       bun_version: ${{ inputs.bun_version || '1.2.13' }}
     secrets: inherit
+  rusty-v8:
+    needs: detect
+    if: needs.detect.outputs.rusty_v8 == 'true'
+    uses: ./.github/workflows/build-rusty-v8-android.yml
+    with:
+      v8_version: ${{ inputs.v8_version || '150.4.0' }}
+    secrets: inherit
   opencode:
     needs: [detect, bun, opentui]
     if: needs.detect.outputs.opencode == 'true'
@@ -121,8 +136,17 @@ jobs:
       bun_version: ${{ inputs.bun_version || '1.2.13' }}
       kilo_version: ${{ inputs.kilo_version || '7.4.20' }}
     secrets: inherit
+  codex:
+    needs: [detect, rusty-v8]
+    if: needs.detect.outputs.codex == 'true'
+    uses: ./.github/workflows/build-codex.yml
+    with:
+      use_existing_v8: true
+      codex_ref: ${{ inputs.codex_ref || 'fee9a8d5f08291b72c580d15aa0b08c7c3ecb204' }}
+      v8_version: ${{ inputs.v8_version || '150.4.0' }}
+    secrets: inherit
   publish:
-    needs: [detect, bun, opentui, opencode, kilo]
+    needs: [detect, bun, opentui, opencode, kilo, codex]
     if: ${{ github.event_name == 'workflow_dispatch' && always() && needs.detect.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped') }}
     permissions:
       contents: write

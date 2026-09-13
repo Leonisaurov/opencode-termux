@@ -32,6 +32,7 @@ def parse_args() -> argparse.Namespace:
     if a.release_opt is not None: a.release = a.release_opt
     a.release = release(a.release)
     a.components = list(COMPONENTS) if a.all or not a.just else list(dict.fromkeys(a.just))
+    a.strict = a.just is not None
     return a
 
 def preflight(args: argparse.Namespace) -> pathlib.Path:
@@ -108,13 +109,17 @@ def validate_manifest(path: pathlib.Path, requested: str, device_api: int | None
             fail(f"{name}: asset inválido")
     return data
 
-def selected(data: dict, names: list[str]) -> list[str]:
+def selected(data: dict, names: list[str], strict: bool = True) -> list[str]:
     comps = data["components"]
+    chosen = []
     for name in names:
-        if name not in comps: fail(f"componente ausente: {name}")
+        if name not in comps:
+            if strict: fail(f"componente ausente: {name}")
+            continue
         for dep in comps[name]["depends"]:
             if dep not in names: fail(f"{name} requiere el componente {dep}; selección incompatible")
-    return names
+        chosen.append(name)
+    return chosen
 
 def download(asset: str, origin: str, actual_release: str, base: pathlib.Path) -> pathlib.Path:
     parsed = urllib.parse.urlparse(asset)
@@ -184,7 +189,7 @@ def smoke(path: pathlib.Path, component: str) -> bool:
 def main() -> None:
     args = parse_args(); tmp = preflight(args); manifest, origin = source_manifest(args, tmp)
     try:
-        data = validate_manifest(manifest, args.release, args.device_api); names = selected(data, args.components)
+        data = validate_manifest(manifest, args.release, args.device_api); names = selected(data, args.components, args.strict)
         print("Componentes y versiones:", file=sys.stderr)
         for n in names: print(f"  {n} {data['components'][n]['version']}", file=sys.stderr)
         if not args.dry_run and not args.yes:

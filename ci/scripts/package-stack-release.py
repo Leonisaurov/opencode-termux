@@ -12,10 +12,15 @@ def verify(path: pathlib.Path, name: str) -> None:
         raise SystemExit(f"{name}: no es un ELF aarch64 ({info.strip()})")
 
 def main():
-    p=argparse.ArgumentParser(); p.add_argument("--root", type=pathlib.Path, required=True); p.add_argument("--out", type=pathlib.Path, required=True); p.add_argument("--release", required=True); p.add_argument("--stack-version", required=True); p.add_argument("--bun", required=True); p.add_argument("--opentui", required=True); p.add_argument("--opencode", required=True); p.add_argument("--kilo", required=True); p.add_argument("--codex", required=True); a=p.parse_args(); a.out.mkdir(parents=True, exist_ok=True)
+    p=argparse.ArgumentParser(); p.add_argument("--root", type=pathlib.Path, required=True); p.add_argument("--out", type=pathlib.Path, required=True); p.add_argument("--release", required=True); p.add_argument("--stack-version", required=True); p.add_argument("--bun", required=True); p.add_argument("--opentui", required=True); p.add_argument("--opencode", required=True); p.add_argument("--kilo", required=True); p.add_argument("--codex"); a=p.parse_args(); a.out.mkdir(parents=True, exist_ok=True)
     specs={"bun":(["bun"],"tar.gz",[]),"opentui":(["libopentui.so"],"tar.gz",[]),"opencode":(["opencode"],"tar.gz",[]),"kilo":(["kilo"],"tar.gz",[]),"codex":(["codex-android","codex-code-mode-host","codex-linux-sandbox"],"tar.gz",[])}
     versions={"bun":a.bun,"opentui":a.opentui,"opencode":a.opencode,"kilo":a.kilo,"codex":a.codex}; comps={}
     prefixes={"bun":"bun-android-aarch64-","opentui":"opentui-android-aarch64-","opencode":"opencode-android-aarch64-","kilo":"kilo-android-aarch64-","codex":"codex-android-aarch64-"}
+    # Codex is temporarily out of the default flow. Package it only when both
+    # its version and its artifact are present, so a stack without it still
+    # produces a valid manifest.
+    if a.codex is None or not any(p.is_dir() and p.name.startswith(prefixes["codex"]) for p in a.root.iterdir()):
+        for name in ("codex",): specs.pop(name); versions.pop(name); prefixes.pop(name)
     source_names={"kilo":"kilo-android"}
     for name,(files,kind,deps) in specs.items():
         artifact_dirs=[p for p in a.root.iterdir() if p.is_dir() and p.name.startswith(prefixes[name])]
