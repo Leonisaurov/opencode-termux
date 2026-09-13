@@ -499,6 +499,16 @@ pub const Loader = struct {
 
     pub fn loadProcess(this: *Loader) void {
         if (this.did_load_process) return;
+        this.did_load_process = true;
+
+        if (comptime Environment.isAndroid) {
+            // Bionic can leave both Zig's std.os.environ and the libc `environ`
+            // global empty or unreachable. Recover the initial process
+            // environment from procfs, which is always readable for the
+            // current process.
+            this.loadProcSelfEnviron();
+            if (this.map.map.count() > 0) return;
+        }
 
         if (std.os.environ.len > 0 or !Environment.isAndroid) {
             this.map.map.ensureTotalCapacity(std.os.environ.len) catch unreachable;
@@ -543,17 +553,26 @@ pub const Loader = struct {
                 this.loadProcSelfEnviron();
             }
         }
-        this.did_load_process = true;
     }
 
     fn loadProcSelfEnviron(this: *Loader) void {
         const file = std.fs.cwd().openFile("/proc/self/environ", .{}) catch return;
         defer file.close();
 
-        const contents = file.readToEndAlloc(this.allocator, 4 * 1024 * 1024) catch return;
-        defer this.allocator.free(contents);
+        // procfs reports st_size = 0, so size-based readers (such as
+        // readToEndAlloc) would return nothing. Read incrementally instead.
+        const max_bytes = 4 * 1024 * 1024;
+        const buffer = this.allocator.alloc(u8, max_bytes) catch return;
+        defer this.allocator.free(buffer);
 
-        var it = std.mem.splitScalar(u8, contents, 0);
+        var total: usize = 0;
+        while (total < buffer.len) {
+            const n = file.read(buffer[total..]) catch break;
+            if (n == 0) break;
+            total += n;
+        }
+
+        var it = std.mem.splitScalar(u8, buffer[0..total], 0);
         while (it.next()) |entry| {
             if (entry.len == 0) continue;
             if (strings.indexOfChar(entry, '=')) |i| {
