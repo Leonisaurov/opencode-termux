@@ -27,7 +27,7 @@ Opciones:
 | Opción | Descripción |
 | --- | --- |
 | `--size WxH` | Tamaño del panel (default `120x32`). |
-| `--wait S` | Segundos antes de capturar (default 8; OpenCode tarda ~15 s en pintar). |
+| `--wait S` | Segundos antes de capturar (default 8; OpenCode 1.18.x tarda ~30 s en pintar en un dispositivo lento). |
 | `--send STRING` | Envía teclas tras la espera (repetible), p. ej. para interactuar o salir. |
 | `--grep REGEX` | Falla si el panel **no** coincide. |
 | `--reject REGEX` | Falla si el panel coincide (útil para detectar errores). |
