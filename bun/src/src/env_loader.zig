@@ -519,24 +519,53 @@ pub const Loader = struct {
         } else {
             // Bionic exposes libc environ here even when Zig's std.os.environ is empty.
             const environ = std.mem.span(std.c.environ);
-            this.map.map.ensureTotalCapacity(environ.len) catch unreachable;
-            for (environ) |entry| {
-                const line = entry orelse continue;
-                var env = bun.span(line);
-                if (strings.indexOfChar(env, '=')) |i| {
-                    const key = env[0..i];
-                    const value = env[i + 1 ..];
-                    if (key.len > 0) {
-                        this.map.put(key, value) catch unreachable;
-                    }
-                } else {
-                    if (env.len > 0) {
-                        this.map.put(env, "") catch unreachable;
+            if (environ.len > 0) {
+                this.map.map.ensureTotalCapacity(environ.len) catch unreachable;
+                for (environ) |entry| {
+                    const line = entry orelse continue;
+                    var env = bun.span(line);
+                    if (strings.indexOfChar(env, '=')) |i| {
+                        const key = env[0..i];
+                        const value = env[i + 1 ..];
+                        if (key.len > 0) {
+                            this.map.put(key, value) catch unreachable;
+                        }
+                    } else {
+                        if (env.len > 0) {
+                            this.map.put(env, "") catch unreachable;
+                        }
                     }
                 }
+            } else {
+                // Last resort on Bionic: the libc `environ` global is not
+                // reachable from the runtime, so read the initial process
+                // environment from /proc/self/environ instead.
+                this.loadProcSelfEnviron();
             }
         }
         this.did_load_process = true;
+    }
+
+    fn loadProcSelfEnviron(this: *Loader) void {
+        const file = std.fs.cwd().openFile("/proc/self/environ", .{}) catch return;
+        defer file.close();
+
+        const contents = file.readToEndAlloc(this.allocator, 4 * 1024 * 1024) catch return;
+        defer this.allocator.free(contents);
+
+        var it = std.mem.splitScalar(u8, contents, 0);
+        while (it.next()) |entry| {
+            if (entry.len == 0) continue;
+            if (strings.indexOfChar(entry, '=')) |i| {
+                const key = entry[0..i];
+                const value = entry[i + 1 ..];
+                if (key.len > 0) {
+                    this.map.putAllocKeyAndValue(this.allocator, key, value) catch unreachable;
+                }
+            } else {
+                this.map.putAllocKeyAndValue(this.allocator, entry, "") catch unreachable;
+            }
+        }
     }
 
     // mostly for tests
