@@ -414,6 +414,15 @@ The Bun team [closed Android support as "not planned"](https://github.com/oven-s
 
 ---
 
+## Documentation
+
+- [`docs/PORTING-AND-CI.md`](docs/PORTING-AND-CI.md) -- how to run TUIs
+  headlessly with `ci/scripts/tui-smoke.sh`, where the historical patches lived,
+  how to pick the right dependency commit, and how the CI cache contracts and
+  mtime pitfalls work.
+
+---
+
 ## Credits
 
 - [OpenCode](https://github.com/anomalyco/opencode) by Anomaly

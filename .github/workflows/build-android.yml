@@ -83,6 +83,23 @@ jobs:
             --root "$GITHUB_WORKSPACE" --base "$base" --head HEAD \
             --format github --graph >> "$GITHUB_OUTPUT"
 
+      - name: Validate static CI contracts
+        run: |
+          set -euo pipefail
+          # Pure-static checks: cache-contract parity, vendored TinyCC ABI,
+          # OpenTUI runtime patch, module graph and change detection. They need
+          # no runner setup and guard every product before any expensive job.
+          for test in \
+            test-workflow-cache-contracts \
+            test-tinycc-sources \
+            test-patch-opentui-core-runtime \
+            test-downstream-bundle-contracts \
+            test-module-graph-patch \
+            test-changed-products; do
+            echo ">>> $test"
+            python3 "ci/scripts/$test.py"
+          done
+
   core:
     needs: detect
     if: needs.detect.outputs.core == 'true'

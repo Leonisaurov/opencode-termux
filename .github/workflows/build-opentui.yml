@@ -79,11 +79,14 @@ jobs:
         run: |
           set -euo pipefail
           export ANDROID_TRIPLE_API="aarch64-linux-android${ANDROID_API}"
+          opentui_source_tree="$(git ls-tree HEAD opentui/src/opencode | awk '{print $3}')"
+          test -n "$opentui_source_tree"
           args=(--root "$GITHUB_WORKSPACE" --product opentui
             --path opentui/scripts/build-opentui.sh --path ci/scripts/env.sh
             --path .github/workflows/build-opentui.yml
             --path ci/source-manifest.json --value "OPENTUI_REF=$OPENTUI_REF"
-            --value "OPENTUI_TARGET=$OPENTUI_TARGET")
+            --value "OPENTUI_TARGET=$OPENTUI_TARGET"
+            --value "OPENTUI_SOURCE_TREE=$opentui_source_tree")
           cache_key="$(python3 ci/scripts/cache-contract.py key "${args[@]}")"
           echo "key=$cache_key" >> "$GITHUB_OUTPUT"
 

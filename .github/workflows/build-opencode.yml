@@ -85,13 +85,15 @@ jobs:
           set -euo pipefail
           bun_source_commit="$(git ls-tree HEAD bun/src | awk '{print $3}')"
           opencode_source_commit="$(git ls-tree HEAD opencode/src | awk '{print $3}')"
-          test -n "$bun_source_commit" && test -n "$opencode_source_commit"
+          opentui_source_tree="$(git ls-tree HEAD opentui/src/opencode | awk '{print $3}')"
+          test -n "$bun_source_commit" && test -n "$opencode_source_commit" && test -n "$opentui_source_tree"
           export ANDROID_TRIPLE_API="aarch64-linux-android${ANDROID_API}"
           core_args=(--root "$GITHUB_WORKSPACE" --product bun-core
             --path bun/scripts/build-icu.sh --path bun/scripts/build-webkit.sh
             --path bun/scripts/build-tinycc.sh --path ci/scripts/env.sh
             --path .github/workflows/build-core.yml
             --path ci/external-sources.lock
+            --path ci/source-manifest.json
             --path bun/webkit
             --path bun/tinycc
             --path bun/cmake/webkit-android-toolchain.cmake
@@ -113,12 +115,14 @@ jobs:
             --path opentui/scripts/build-opentui.sh --path ci/scripts/env.sh
             --path .github/workflows/build-opentui.yml
             --path ci/source-manifest.json --value "OPENTUI_REF=$OPENTUI_REF"
-            --value "OPENTUI_TARGET=aarch64-linux-android.24")
+            --value "OPENTUI_TARGET=aarch64-linux-android.24"
+            --value "OPENTUI_SOURCE_TREE=$opentui_source_tree")
           opentui_key="$(UPSTREAM_COMMIT="$OPENTUI_COMMIT" python3 ci/scripts/cache-contract.py key "${opentui_args[@]}")"
           echo "opentui=$opentui_key" >> "$GITHUB_OUTPUT"
           args=(--root "$GITHUB_WORKSPACE" --product opencode
             --path opencode/scripts/build-opencode.sh --path opencode/scripts/build-opencode-android.ts
             --path ci/scripts/module-graph-patch.ts --path ci/scripts/validate-android-bundle.py
+            --path ci/scripts/patch-opentui-core-runtime.py
             --path opencode/scripts/make-packages.sh
             --path ci/scripts/env.sh --path .github/workflows/build-opencode.yml
             --path ci/source-manifest.json

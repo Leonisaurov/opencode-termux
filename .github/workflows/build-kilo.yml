@@ -117,6 +117,9 @@ jobs:
           ANDROID_TRIPLE_API: aarch64-linux-android24
         run: |
           set -euo pipefail
+          kilo_source_tree="$(git ls-tree HEAD kilo/src | awk '{print $3}')"
+          kilo_opentui_source_tree="$(git ls-tree HEAD opentui/src/kilo | awk '{print $3}')"
+          test -n "$kilo_source_tree" && test -n "$kilo_opentui_source_tree"
           args=(--root "$GITHUB_WORKSPACE" --product kilo
             --path kilo/scripts/build.sh --path kilo/scripts/build-kilo-android.ts
             --path ci/scripts/module-graph-patch.ts --path ci/scripts/validate-android-bundle.py
@@ -127,6 +130,8 @@ jobs:
             --path bun/artifacts/bun-android
             --path kilo/src/bun.lock --path kilo/src/package.json
             --path kilo/src/packages/opencode/package.json
+            --value "KILO_SOURCE_TREE=$kilo_source_tree"
+            --value "KILO_OPENTUI_SOURCE_TREE=$kilo_opentui_source_tree"
             --value "KILO_VERSION=${{ inputs.kilo_version || '7.4.20' }}"
             --value "KILO_OPENTUI_REF=5b3d520550e118fd436f682bd67242b95a05318b"
             --value "BUN_VERSION=$BUN_VERSION" --value "HOST_BUN_VERSION=$HOST_BUN_VERSION")

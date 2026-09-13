@@ -64,6 +64,12 @@ SOURCES=(
 
 cd "$TINYCC_SRC"
 
+# Restored objects can carry mtimes newer than the vendored checkout, which
+# makes the `make -q` dependency check below skip a changed translation unit.
+# Refresh source mtimes so every changed unit is rebuilt; the compile signature
+# and depfiles still keep unchanged units reusable.
+find "$TINYCC_SRC" -type f \( -name '*.c' -o -name '*.h' -o -name '*.S' \) -exec touch {} +
+
 CC=("$ANDROID_CC")
 if command -v ccache >/dev/null 2>&1; then
     CC=(ccache "$ANDROID_CC")
