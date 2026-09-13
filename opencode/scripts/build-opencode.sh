@@ -19,6 +19,7 @@ source "$SCRIPT_DIR/../../ci/scripts/env.sh"
 incremental_exec opencode \
     --input "$SCRIPT_DIR/build-opencode.sh" --input "$SCRIPT_DIR/build-opencode-android.ts" \
     --input "$REPO_ROOT/ci/scripts/module-graph-patch.ts" \
+    --input "$REPO_ROOT/ci/scripts/patch-opentui-core-runtime.py" \
     --input "$REPO_ROOT/ci/scripts/env.sh" --input "$OPENCODE_SRC" \
     --input "$BUN_BUILD/bun" \
     --input "$OPENTUI_SRC/packages/core/src/lib/aarch64-linux-android.24/libopentui.so" \
@@ -38,6 +39,12 @@ OPENCODE_PKG="$OPENCODE_SRC/packages/opencode"
 echo ">>> Installing OpenCode dependencies..."
 cd "$OPENCODE_SRC"
 "$HOST_BUN" install
+
+# The published @opentui/core chunk predates the vendored source guard for
+# non-string bundled-file defaults, which crashes the Android TUI. Bring it in
+# line with the pinned OpenTUI source before bundling.
+echo ">>> Patching @opentui/core runtime for Android..."
+python3 "$REPO_ROOT/ci/scripts/patch-opentui-core-runtime.py" --root "$OPENCODE_SRC"
 
 # Find the Android bun binary
 ANDROID_BUN="$BUN_BUILD/bun"
