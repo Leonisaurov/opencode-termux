@@ -12,7 +12,13 @@ const data = path.join(xdgData!, app)
 const cache = path.join(xdgCache!, app)
 const config = path.join(xdgConfig!, app)
 const state = path.join(xdgState!, app)
-const tmp = path.join(os.tmpdir(), app)
+// Android/Termux does not always export TMPDIR into the app process. Fall
+// back to the Termux prefix instead of the unwritable /tmp so every temp path
+// (log, repos, sockets) stays inside the app sandbox.
+const tmp = path.join(
+  process.env.TMPDIR ?? (process.env.PREFIX ? path.join(process.env.PREFIX, "tmp") : os.tmpdir()),
+  app,
+)
 
 const paths = {
   get home() {
