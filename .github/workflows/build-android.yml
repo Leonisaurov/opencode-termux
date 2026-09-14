@@ -154,6 +154,8 @@ jobs:
   codex:
     needs: [detect, rusty-v8]
     if: needs.detect.outputs.codex == 'true'
+    permissions:
+      contents: write
     uses: ./.github/workflows/build-codex.yml
     with:
       use_existing_v8: true

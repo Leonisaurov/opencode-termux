@@ -42,6 +42,8 @@ env:
 jobs:
   rusty-v8:
     if: ${{ !inputs.use_existing_v8 }}
+    permissions:
+      contents: write
     uses: ./.github/workflows/build-rusty-v8-android.yml
     with:
       v8_version: ${{ inputs.v8_version || '150.4.0' }}
