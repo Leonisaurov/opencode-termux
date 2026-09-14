@@ -95,6 +95,7 @@ jobs:
           # in the jobs that install it.
           for test in \
             test-workflow-cache-contracts \
+            test-cache-report \
             test-tinycc-sources \
             test-patch-opentui-core-runtime \
             test-downstream-bundle-contracts \

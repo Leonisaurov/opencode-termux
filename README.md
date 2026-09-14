@@ -420,6 +420,9 @@ The Bun team [closed Android support as "not planned"](https://github.com/oven-s
   headlessly with `ci/scripts/tui-smoke.sh`, where the historical patches lived,
   how to pick the right dependency commit, and how the CI cache contracts and
   mtime pitfalls work.
+- [`docs/CACHE-VERIFICATION.md`](docs/CACHE-VERIFICATION.md) -- cache budget,
+  duplicate detection (`ci/scripts/cache-report.py`), and the verification
+  matrix for cold/warm/invalidation scenarios.
 
 ---
 

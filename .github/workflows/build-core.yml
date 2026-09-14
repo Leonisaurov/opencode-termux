@@ -20,8 +20,8 @@ env:
   TINYCC_SOURCE: "current"
   ZIG_VERSION: "0.15.2"
   WORK_DIR: "${{ github.workspace }}/bun/build"
-  ANDROID_NDK_HOME: "${{ github.workspace }}/bun/build/android-ndk"
-  ANDROID_NDK_ROOT: "${{ github.workspace }}/bun/build/android-ndk"
+  ANDROID_NDK_HOME: "${{ github.workspace }}/.ci/android-ndk"
+  ANDROID_NDK_ROOT: "${{ github.workspace }}/.ci/android-ndk"
 
 jobs:
   build-core:

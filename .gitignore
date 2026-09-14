@@ -5,6 +5,8 @@
 */deps-android/
 */zig-*/
 */android-ndk-*/
+# Shared, ignored CI tool state (e.g. the single Android NDK cache path).
+.ci/
 # Historical names must not reappear at the repository root.
 bun-src/
 webkit-src/

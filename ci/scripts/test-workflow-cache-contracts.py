@@ -46,6 +46,8 @@ def main() -> None:
     opencode = blocks(WORKFLOWS / "build-opencode.yml")
     opentui = blocks(WORKFLOWS / "build-opentui.yml")
     kilo = blocks(WORKFLOWS / "build-kilo.yml")
+    codex = blocks(WORKFLOWS / "build-codex.yml")
+    rusty = blocks(WORKFLOWS / "build-rusty-v8-android.yml")
 
     # Every producer of a product must use the same path and value sets as the
     # consumer, otherwise the recomputed restore key diverges.
@@ -75,6 +77,32 @@ def main() -> None:
     for group in (core, bun, opentui, opencode, kilo):
         for product, (paths, _values) in group.items():
             assert "ci/source-manifest.json" not in paths, f"{product}: global manifest in cache key"
+
+    # Rusty V8 and Codex are contract-driven producers too.
+    assert "rusty-v8" in rusty, "rusty-v8 cache contract missing"
+    assert "codex" in codex, "codex cache contract missing"
+    assert "V8_VERSION" in rusty["rusty-v8"][1]
+    assert "CODEX_REF" in codex["codex"][1]
+    assert "V8_VERSION" in codex["codex"][1]
+
+    # The NDK must use one shared absolute path so actions/cache (which versions
+    # by path string) stores a single entry instead of one per product workspace.
+    # It lives under the gitignored `.ci/` so clean-tree checks stay intact.
+    shared = "${{ github.workspace }}/.ci/android-ndk"
+    for workflow in sorted(WORKFLOWS.glob("*.yml")):
+        text = workflow.read_text(encoding="utf-8")
+        for value in re.findall(r"ANDROID_NDK_HOME:\s*['\"]?(.+?)['\"]?\s*$", text, re.MULTILINE):
+            assert value == shared, f"{workflow.name}: NDK path is not shared: {value}"
+    assert "path: ${{ env.ANDROID_NDK_HOME }}" in (WORKFLOWS / "build-core.yml").read_text()
+
+    # The orchestrator must wire both producers and include Codex in publish.
+    android = (WORKFLOWS / "build-android.yml").read_text(encoding="utf-8")
+    assert "rusty_v8: ${{ steps.changes.outputs.build_rusty_v8 }}" in android
+    assert "codex: ${{ steps.changes.outputs.build_codex }}" in android
+    assert "for product in core opentui bun opencode kilo rusty_v8 codex; do" in android
+    assert "uses: ./.github/workflows/build-rusty-v8-android.yml" in android
+    assert "uses: ./.github/workflows/build-codex.yml" in android
+    assert "needs: [detect, bun, opentui, opencode, kilo, codex]" in android
 
 
 if __name__ == "__main__":

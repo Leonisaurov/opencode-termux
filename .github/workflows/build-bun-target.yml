@@ -25,7 +25,7 @@ env:
   TINYCC_SOURCE: "current"
   PRODUCT: bun
   WORK_DIR: "${{ github.workspace }}/bun/build"
-  ANDROID_NDK_HOME: "${{ github.workspace }}/bun/build/android-ndk"
+  ANDROID_NDK_HOME: "${{ github.workspace }}/.ci/android-ndk"
 
 jobs:
   build-bun-target:
