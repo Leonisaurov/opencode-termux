@@ -1059,7 +1059,7 @@ pub const CliRenderer = struct {
     ) void {
         var currentFg: ?RGBA = null;
         var currentBg: ?RGBA = null;
-        var currentAttributes: i32 = -1;
+        var currentAttributes: ?u32 = null;
         var currentLinkId: u32 = 0;
         var utf8Buf: [4]u8 = undefined;
 
@@ -1076,7 +1076,7 @@ pub const CliRenderer = struct {
 
                 const fgMatch = currentFg != null and buf.rgbaEqual(currentFg.?, cell.fg);
                 const bgMatch = currentBg != null and buf.rgbaEqual(currentBg.?, cell.bg);
-                const sameAttributes = fgMatch and bgMatch and @as(i32, @intCast(cell.attributes)) == currentAttributes;
+                const sameAttributes = fgMatch and bgMatch and currentAttributes != null and cell.attributes == currentAttributes.?;
 
                 const linkId = if (hyperlinksEnabled) ansi.TextAttributes.getLinkId(cell.attributes) else 0;
                 if (hyperlinksEnabled and linkId != currentLinkId) {
@@ -1110,7 +1110,7 @@ pub const CliRenderer = struct {
 
                     currentFg = cell.fg;
                     currentBg = cell.bg;
-                    currentAttributes = @as(i32, @intCast(cell.attributes));
+                    currentAttributes = cell.attributes;
 
                     self.emitColor(writer, cell.fg, false);
                     self.emitColor(writer, cell.bg, true);
@@ -1192,7 +1192,7 @@ pub const CliRenderer = struct {
             writer.writeAll(ansi.ANSI.eraseToEndOfLine) catch {};
             currentFg = null;
             currentBg = null;
-            currentAttributes = -1;
+            currentAttributes = null;
 
             const is_last_row = @as(u32, @intCast(uy + 1)) >= snapshot.height;
             if (!is_last_row or trailing_newline) {
@@ -1380,7 +1380,7 @@ pub const CliRenderer = struct {
 
         var currentFg: ?RGBA = null;
         var currentBg: ?RGBA = null;
-        var currentAttributes: i32 = -1;
+        var currentAttributes: ?u32 = null;
         var currentLinkId: u32 = 0;
         var utf8Buf: [4]u8 = undefined;
 
@@ -1425,7 +1425,7 @@ pub const CliRenderer = struct {
 
                 const fgMatch = currentFg != null and buf.rgbaEqual(currentFg.?, cell.fg);
                 const bgMatch = currentBg != null and buf.rgbaEqual(currentBg.?, cell.bg);
-                const sameAttributes = fgMatch and bgMatch and @as(i32, @intCast(cell.attributes)) == currentAttributes;
+                const sameAttributes = fgMatch and bgMatch and currentAttributes != null and cell.attributes == currentAttributes.?;
 
                 const linkId = if (hyperlinksEnabled) ansi.TextAttributes.getLinkId(cell.attributes) else 0;
 
@@ -1471,7 +1471,7 @@ pub const CliRenderer = struct {
 
                     currentFg = cell.fg;
                     currentBg = cell.bg;
-                    currentAttributes = @as(i32, @intCast(cell.attributes));
+                    currentAttributes = cell.attributes;
 
                     ansi.ANSI.moveToOutput(writer, x + 1, y + 1 + self.renderOffset) catch {};
 

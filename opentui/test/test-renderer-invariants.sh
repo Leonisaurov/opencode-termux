@@ -20,6 +20,10 @@ check_source() {
     rg -q 'OTUI Android fix' "$source/packages/core/src/zig/renderer.zig"
     rg -q 'RETIRED_GENERATION|retired_slot_count' "$source/packages/core/src/zig/grapheme.zig"
     rg -q 'RETIRED_GENERATION|retired_slot_count' "$source/packages/core/src/zig/link.zig"
+    if rg -q '@intCast\(cell\.attributes\)' "$source/packages/core/src/zig/renderer.zig"; then
+        echo "ERROR: renderer narrows cell.attributes (u32) to i32; the link id lives in bits 8-31, so bit 31 panics with 'integer does not fit in destination type'" >&2
+        return 1
+    fi
     echo "$label: versioned renderer invariants OK"
 }
 
