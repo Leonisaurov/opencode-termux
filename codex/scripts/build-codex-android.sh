@@ -74,6 +74,7 @@ fi
 # it to every target link through the linker wrapper.
 ANDROID_LIBC_SHIMS_C="$CODEX_TARGET_DIR/android-libc-shims.c"
 ANDROID_LIBC_SHIMS_O="$CODEX_TARGET_DIR/android-libc-shims.o"
+mkdir -p "$CODEX_TARGET_DIR"
 cat > "$ANDROID_LIBC_SHIMS_C" <<'CEOF'
 #include <stddef.h>
 
@@ -108,7 +109,6 @@ CEOF
 "$ANDROID_CC" -c -O2 -fPIC -o "$ANDROID_LIBC_SHIMS_O" "$ANDROID_LIBC_SHIMS_C"
 
 LINKER_WRAPPER="$CODEX_TARGET_DIR/android-linker"
-mkdir -p "$CODEX_TARGET_DIR"
 cat > "$LINKER_WRAPPER" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
