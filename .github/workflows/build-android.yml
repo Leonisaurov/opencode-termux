@@ -126,6 +126,8 @@ jobs:
   rusty-v8:
     needs: detect
     if: needs.detect.outputs.rusty_v8 == 'true'
+    permissions:
+      contents: write
     uses: ./.github/workflows/build-rusty-v8-android.yml
     with:
       v8_version: ${{ inputs.v8_version || '150.4.0' }}

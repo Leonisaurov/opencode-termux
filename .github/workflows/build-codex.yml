@@ -137,28 +137,6 @@ jobs:
       # Stable intermediate caches are restored only for a missing final
       # product and before the per-attempt checkpoint. The checkpoint is
       # restored last, so it always wins with the most recent partial state.
-      - name: Restore Codex Cargo dependencies
-        if: steps.validate-codex.outputs.ready != 'true'
-        id: cache-codex-dependencies
-        uses: ./ci/actions/incremental-cache
-        with:
-          mode: restore-intermediate
-          key: ci-cache-v2-codex-cargo-dependencies-${{ runner.os }}-${{ runner.arch }}-v8-${{ inputs.v8_version || '150.4.0' }}-rust-${{ steps.contract.outputs.rust }}-${{ steps.contract.outputs.key }}
-          restore-prefix: ci-cache-v2-codex-cargo-dependencies-${{ runner.os }}-${{ runner.arch }}-v8-${{ inputs.v8_version || '150.4.0' }}-rust-${{ steps.contract.outputs.rust }}-
-          path: |
-            ${{ env.WORK_DIR }}/cache/cargo/registry
-            ${{ env.WORK_DIR }}/cache/cargo/git
-
-      - name: Restore Codex Cargo intermediates
-        if: steps.validate-codex.outputs.ready != 'true'
-        id: cache-codex-intermediates
-        uses: ./ci/actions/incremental-cache
-        with:
-          mode: restore-intermediate
-          key: ci-cache-v2-codex-cargo-target-${{ runner.os }}-${{ runner.arch }}-v8-${{ inputs.v8_version || '150.4.0' }}-rust-${{ steps.contract.outputs.rust }}-api-${{ env.ANDROID_API }}-${{ steps.contract.outputs.key }}
-          restore-prefix: ci-cache-v2-codex-cargo-target-${{ runner.os }}-${{ runner.arch }}-v8-${{ inputs.v8_version || '150.4.0' }}-rust-${{ steps.contract.outputs.rust }}-api-${{ env.ANDROID_API }}-
-          path: ${{ env.WORK_DIR }}/codex-target
-
       - name: Restore Codex compiler objects
         if: steps.validate-codex.outputs.ready != 'true'
         id: cache-codex-compiler
@@ -247,26 +225,6 @@ jobs:
         run: source ci/scripts/env.sh && ./codex/scripts/build-codex-android.sh
 
       # Preserve useful Cargo/sccache work when the final linker fails.
-      - name: Save Codex Cargo dependencies (best effort)
-        if: success() && steps.validate-codex.outputs.ready != 'true' && steps.cache-codex-dependencies.outputs.cache-hit != 'true'
-        continue-on-error: true
-        uses: ./ci/actions/incremental-cache
-        with:
-          mode: save-intermediate
-          path: |
-            ${{ env.WORK_DIR }}/cache/cargo/registry
-            ${{ env.WORK_DIR }}/cache/cargo/git
-          key: ci-cache-v2-codex-cargo-dependencies-${{ runner.os }}-${{ runner.arch }}-v8-${{ inputs.v8_version || '150.4.0' }}-rust-${{ steps.contract.outputs.rust }}-${{ steps.contract.outputs.key }}
-
-      - name: Save Codex Cargo intermediates (best effort)
-        if: success() && steps.validate-codex.outputs.ready != 'true' && steps.cache-codex-intermediates.outputs.cache-hit != 'true'
-        continue-on-error: true
-        uses: ./ci/actions/incremental-cache
-        with:
-          mode: save-intermediate
-          path: ${{ env.WORK_DIR }}/codex-target
-          key: ci-cache-v2-codex-cargo-target-${{ runner.os }}-${{ runner.arch }}-v8-${{ inputs.v8_version || '150.4.0' }}-rust-${{ steps.contract.outputs.rust }}-api-${{ env.ANDROID_API }}-${{ steps.contract.outputs.key }}
-
       - name: Save Codex compiler objects (best effort)
         if: success() && steps.validate-codex.outputs.ready != 'true' && steps.cache-codex-compiler.outputs.cache-hit != 'true'
         continue-on-error: true
@@ -350,6 +308,6 @@ jobs:
       - name: Write CI summary
         if: always()
         env:
-          CACHE_DEPENDENCIES: ${{ steps.cache-codex-dependencies.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
-          CACHE_INTERMEDIATES: ${{ steps.cache-codex-intermediates.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
+          CACHE_DEPENDENCIES: miss
+          CACHE_INTERMEDIATES: ${{ steps.cache-codex-compiler.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
         run: source ci/scripts/ci-summary.sh && ci_summary

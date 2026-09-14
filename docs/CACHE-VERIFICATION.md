@@ -20,10 +20,33 @@ skill `github-actions-cache`.
   un NDK por producto) dejan una copia grande por path.
 
 - Regla aplicada: el NDK usa **un único path absoluto compartido**
-  (`${{ github.workspace }}/android-ndk`) en core, bun, opentui, kilo, codex y
-  opencode, de modo que produce **una** entrada. `test-workflow-cache-contracts.py`
-  lo verifica. El cache de Zig aún se guarda por producto (~150 MiB en total);
-  es pequeño y queda documentado.
+  (`${{ github.workspace }}/.ci/android-ndk`) y el toolchain de Zig otro
+  (`${{ github.workspace }}/.ci/zig-<version>`), en core, bun, opentui, kilo,
+  codex y opencode. `actions/cache` versiona por la cadena de `path`, así que
+  paths distintos guardaban una copia por producto; ahora es una sola entrada.
+  `test-workflow-cache-contracts.py` lo verifica.
+
+- Se conservan los **intermedios de objetos compilados** (WebKit `webkit-build`,
+  Bun `bun-build`, Codex `sccache`), que son lo que evita las recompilaciones
+  largas. Solo se descartan capas **redundantes o re-descargables**:
+  `codex-cargo-target` (redundante con `sccache`), `codex-cargo-dependencies` y
+  `kilo-dependencies` (registries re-descargables) y el host Bun `~/.bun`
+  (re-instalable). Los checkpoints de fallo conservan el árbol completo.
+
+## Fallback durable de Rusty V8
+
+Rusty V8 es el caso más caro: una compilación en frío tarda ~110 min y su
+artifact es pequeño (~36 MB). La cuota de cache (10 GiB) puede desalojarlo, así
+que su par staged (`.a.gz` + `src_binding.rs` + `.sha256`) también se publica en
+la Release **`rusty-v8-v<version>`**, que **no** está sujeta a la cuota.
+
+- `build-rusty-v8-android.yml` intenta primero la cache exacta; si falta,
+  **descarga la Release y valida `sha256sum`** antes de compilar desde fuente.
+  Un fallback válido evita por completo el rebuild de V8.
+- Tras un build desde fuente correcto, publica/actualiza la Release
+  (best-effort) para mantenerla fresca.
+- El job `rusty-v8` del orquestador tiene `contents: write` para poder publicar.
+
 
 ## Matriz de verificación
 
@@ -82,6 +105,8 @@ Ninja/make no recompilen un fuente cambiado. Mitigaciones aplicadas:
 - Run completa del stack (Rusty V8 + Codex + `publish`) en success.
 - Cache hits observados: `core/opentui/bun/opencode/kilo` terminan en minutos
   cuando no cambiaron; solo se reconstruye el producto afectado.
-- Incidente real: se desalojaron las caches de Rusty V8 y hubo un rebuild en
-  frío de ~110 min. La cuota llegó a 10.52 GiB con NDK duplicado ×5 y caches de
-  Codex; tras deduplicar el NDK y podar finals inalcanzables quedó en ~5.5 GiB.
+- Incidente: al terminar esa run la cuota subió a 13.61 GiB (intermedios de
+  WebKit/Bun/Codex + finals) y el LRU **desalojó Rusty V8**, cuyo rebuild en
+  frío tarda ~110 min. Se añadió el fallback durable en Release y se podaron
+  capas redundantes/re-descargables; quedó en **9.68 GiB** (bajo las 10 GiB) con
+  los objetos compilados intactos.

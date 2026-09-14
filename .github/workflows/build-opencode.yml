@@ -219,13 +219,6 @@ jobs:
           path: ${{ github.workspace }}/.ci/zig-${{ env.ZIG_VERSION }}
           key: ci-cache-v2-toolchain-${{ runner.os }}-${{ runner.arch }}-zig-${{ env.ZIG_VERSION }}-api-${{ env.ANDROID_API }}
 
-      - name: Cache Bun host
-        id: cache-bun-host
-        uses: actions/cache/restore@v4
-        with:
-          path: ~/.bun
-          key: ${{ steps.contract.outputs.key }}-bun-host
-
       - name: Ensure host Bun is available
         id: host-bun
         run: |
@@ -389,15 +382,6 @@ jobs:
             exit 1
           fi
 
-      - name: Save OpenCode host cache
-        if: always() && steps.host-bun.outputs.ready == 'true' && steps.cache-bun-host.outputs.cache-hit != 'true'
-        continue-on-error: true
-        uses: ./ci/actions/incremental-cache
-        with:
-          mode: save-final
-          path: ~/.bun
-          key: ${{ steps.contract.outputs.key }}-bun-host
-
       - name: Save OpenTUI fallback cache
         if: always() && !inputs.require_dependency_artifacts && steps.validate-opentui.outputs.cache_ready == 'true' && steps.cache-opentui.outputs.cache-hit != 'true'
         continue-on-error: true
@@ -501,7 +485,7 @@ jobs:
       - name: Write CI summary
         if: always()
         env:
-          CACHE_DEPENDENCIES: ${{ steps.cache-bun-host.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
+          CACHE_DEPENDENCIES: miss
           CACHE_INTERMEDIATES: ${{ steps.cache-opentui-zig.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
         run: source ci/scripts/ci-summary.sh && ci_summary
 

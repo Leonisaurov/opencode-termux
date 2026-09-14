@@ -161,16 +161,6 @@ jobs:
             echo ready=false >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Restore Kilo Bun dependencies
-        if: steps.validate-kilo.outputs.ready != 'true'
-        id: cache-kilo-dependencies
-        uses: ./ci/actions/incremental-cache
-        with:
-          mode: restore-intermediate
-          key: ci-cache-v2-kilo-dependencies-${{ runner.os }}-${{ runner.arch }}-kilo-${{ env.KILO_VERSION }}-bun-${{ env.BUN_VERSION }}-${{ steps.kilo-contract.outputs.key }}
-          restore-prefix: ci-cache-v2-kilo-dependencies-${{ runner.os }}-${{ runner.arch }}-kilo-${{ env.KILO_VERSION }}-bun-${{ env.BUN_VERSION }}-
-          path: ~/.bun/install/cache
-
       - name: Restore Kilo Zig intermediates
         if: steps.validate-kilo.outputs.ready != 'true'
         id: cache-kilo-zig
@@ -223,15 +213,6 @@ jobs:
             echo "ERROR: Kilo output or state manifest is not valid." >&2
             exit 1
           fi
-
-      - name: Save Kilo dependency cache
-        if: success() && steps.validate-kilo.outputs.ready != 'true' && steps.cache-kilo-dependencies.outputs.cache-hit != 'true'
-        continue-on-error: true
-        uses: ./ci/actions/incremental-cache
-        with:
-          mode: save-intermediate
-          path: ~/.bun/install/cache
-          key: ci-cache-v2-kilo-dependencies-${{ runner.os }}-${{ runner.arch }}-kilo-${{ env.KILO_VERSION }}-bun-${{ env.BUN_VERSION }}-${{ steps.kilo-contract.outputs.key }}
 
       - name: Save Kilo Zig intermediates
         if: success() && steps.validate-kilo.outputs.ready != 'true' && steps.cache-kilo-zig.outputs.cache-hit != 'true'
@@ -288,6 +269,6 @@ jobs:
       - name: Write CI summary
         if: always()
         env:
-          CACHE_DEPENDENCIES: ${{ steps.cache-kilo-dependencies.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
+          CACHE_DEPENDENCIES: miss
           CACHE_INTERMEDIATES: ${{ steps.cache-kilo-zig.outputs.cache-hit == 'true' && 'hit' || 'miss' }}
         run: source ci/scripts/ci-summary.sh && ci_summary

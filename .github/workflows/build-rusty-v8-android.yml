@@ -60,6 +60,8 @@ jobs:
   build-android:
     runs-on: ubuntu-24.04
     timeout-minutes: 150
+    permissions:
+      contents: write
     steps:
       # This reusable workflow also runs helpers owned by the port repository.
       - name: Check out port repository
@@ -223,11 +225,40 @@ jobs:
             echo "ready=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # Durable fallback: the cache quota (10 GiB) can evict this artifact, and
+      # a cold V8 source build costs ~110 minutes. The staged pair is also
+      # published to the `rusty-v8-v<version>` release, which is not subject to
+      # the cache quota. Prefer it over rebuilding.
+      - name: Restore Rusty V8 from release fallback
+        if: steps.validate-v8.outputs.ready != 'true'
+        id: restore-v8-release
+        env:
+          TAG: rusty-v8-v${{ inputs.v8_version || '150.4.0' }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          base="https://github.com/${{ github.repository }}/releases/download/${TAG}"
+          ok=true
+          for name in \
+            librusty_v8_ptrcomp_sandbox_release_aarch64-linux-android.a.gz \
+            src_binding_ptrcomp_sandbox_release_aarch64-linux-android.rs \
+            rusty_v8_ptrcomp_sandbox_release_aarch64-linux-android.sha256; do
+            curl -fsSL "${base}/${name}" -o "dist/${name}" || ok=false
+          done
+          if [ "$ok" = true ] && (cd dist && sha256sum -c ./*.sha256 >/dev/null 2>&1); then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "Restored Rusty V8 from release ${TAG}"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            rm -f dist/librusty_v8_*.a.gz dist/src_binding_*.rs dist/rusty_v8_*.sha256
+            echo "Release fallback unavailable; building from source"
+          fi
+
       # Reuse Cargo/V8 state from a compatible version, then overlay the
       # newest per-attempt checkpoint. Cargo, GN and Ninja retain their own
       # fingerprints, so a small source change rebuilds only affected units.
       - name: Restore Rusty V8 Cargo dependencies
-        if: steps.validate-v8.outputs.ready != 'true'
+        if: steps.validate-v8.outputs.ready != 'true' && steps.restore-v8-release.outputs.ready != 'true'
         id: cache-v8-dependencies
         uses: ./ci/actions/incremental-cache
         with:
@@ -242,7 +273,7 @@ jobs:
       # current checkout's patched third_party tree authoritative; only reuse
       # generated Cargo/GN output and compiler objects here.
       - name: Restore Rusty V8 build intermediates
-        if: steps.validate-v8.outputs.ready != 'true'
+        if: steps.validate-v8.outputs.ready != 'true' && steps.restore-v8-release.outputs.ready != 'true'
         id: cache-v8
         uses: ./ci/actions/incremental-cache
         with:
@@ -255,7 +286,7 @@ jobs:
             upstream-rusty-v8/target/sccache
 
       - name: Restore Rusty V8 resumable checkpoint
-        if: steps.validate-v8.outputs.ready != 'true'
+        if: steps.validate-v8.outputs.ready != 'true' && steps.restore-v8-release.outputs.ready != 'true'
         uses: ./ci/actions/incremental-cache
         with:
           mode: restore-checkpoint
@@ -270,19 +301,19 @@ jobs:
 
       # These packages/toolchains are needed only on a cold or invalid V8 cache.
       - name: Install build dependencies
-        if: steps.validate-v8.outputs.ready != 'true'
+        if: steps.validate-v8.outputs.ready != 'true' && steps.restore-v8-release.outputs.ready != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y python3 curl git unzip util-linux kmod gpg zstd libglib2.0-dev libclang-19-dev
           echo "LIBCLANG_PATH=/usr/lib/llvm-19/lib" >> "$GITHUB_ENV"
 
       - name: Enable zram swap
-        if: steps.validate-v8.outputs.ready != 'true'
+        if: steps.validate-v8.outputs.ready != 'true' && steps.restore-v8-release.outputs.ready != 'true'
         uses: ./ci/actions/zram
 
       # ── Toolchain Rust del crate v8 150.4.0 (rustup channel del repo) ──
       - name: Install Rust 1.91.0 + android target
-        if: steps.validate-v8.outputs.ready != 'true'
+        if: steps.validate-v8.outputs.ready != 'true' && steps.restore-v8-release.outputs.ready != 'true'
         run: |
           rustup toolchain install 1.91.0 --profile minimal
           rustup target add --toolchain 1.91.0 aarch64-linux-android
@@ -290,7 +321,7 @@ jobs:
       # ── sccache (release binario de mozilla, más rápido que cargo install) ──
       # SCCACHE_DIR va DENTRO del checkout para incluirlo en el cache key.
       - name: Install sccache
-        if: steps.validate-v8.outputs.ready != 'true'
+        if: steps.validate-v8.outputs.ready != 'true' && steps.restore-v8-release.outputs.ready != 'true'
         run: |
           set -euo pipefail
           SCCACHE_VERSION="v0.8.2"
@@ -304,7 +335,7 @@ jobs:
 
       # ── Build desde fuente (30-90 min en frío) ──
       - name: Build rusty_v8 sandbox from source
-        if: steps.validate-v8.outputs.ready != 'true'
+        if: steps.validate-v8.outputs.ready != 'true' && steps.restore-v8-release.outputs.ready != 'true'
         env:
           V8_FROM_SOURCE: "1"
           SCCACHE_IDLE_TIMEOUT: "0"
@@ -330,7 +361,7 @@ jobs:
       # target/<TARGET>/release/gn_out/obj/. Se busca con find en ambos árboles
       # (fallback al primer candidato bajo release) con fail-fast informativo.
       - name: Stage sandbox release pair
-        if: steps.validate-v8.outputs.ready != 'true'
+        if: steps.validate-v8.outputs.ready != 'true' && steps.restore-v8-release.outputs.ready != 'true'
         run: |
           set -euo pipefail
           TARGET="aarch64-linux-android"
@@ -459,6 +490,17 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             dist
+
+      # Keep the durable fallback fresh whenever a source build succeeds.
+      - name: Publish Rusty V8 release (best effort)
+        if: success() && steps.validate-v8.outputs.ready != 'true' && steps.restore-v8-release.outputs.ready != 'true'
+        continue-on-error: true
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: rusty-v8-v${{ inputs.v8_version || '150.4.0' }}
+          name: rusty-v8 v${{ inputs.v8_version || '150.4.0' }} (Android aarch64, ptrcomp_sandbox)
+          files: dist/*
+          fail_on_unmatched_files: true
 
       - name: Write CI summary
         if: always()
