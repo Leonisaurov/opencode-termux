@@ -95,6 +95,16 @@ def main() -> None:
             assert value == shared, f"{workflow.name}: NDK path is not shared: {value}"
     assert "path: ${{ env.ANDROID_NDK_HOME }}" in (WORKFLOWS / "build-core.yml").read_text()
 
+    # The Zig toolchain must also use one shared path; only the prefix-restored
+    # intermediate Zig compiler caches stay per product.
+    for workflow in sorted(WORKFLOWS.glob("*.yml")):
+        text = workflow.read_text(encoding="utf-8")
+        assert "${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}" not in text, (
+            f"{workflow.name}: per-product Zig toolchain path"
+        )
+    setup = (ROOT / "ci/scripts/setup-runner.sh").read_text(encoding="utf-8")
+    assert "${GITHUB_WORKSPACE}/.ci/zig-${ZIG_VERSION}" in setup
+
     # The orchestrator must wire both producers and include Codex in publish.
     android = (WORKFLOWS / "build-android.yml").read_text(encoding="utf-8")
     assert "rusty_v8: ${{ steps.changes.outputs.build_rusty_v8 }}" in android

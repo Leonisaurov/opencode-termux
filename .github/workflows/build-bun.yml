@@ -68,7 +68,7 @@ jobs:
         id: cache-zig
         uses: actions/cache/restore@v4
         with:
-          path: ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+          path: ${{ github.workspace }}/.ci/zig-${{ env.ZIG_VERSION }}
           key: ci-cache-v2-toolchain-${{ runner.os }}-${{ runner.arch }}-zig-${{ env.ZIG_VERSION }}-api-${{ env.ANDROID_API }}
 
       - name: Compute cache contract keys
@@ -229,7 +229,7 @@ jobs:
           checkpoint-prefix: ci-cache-v2-recovery-core-icu-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-icu-${{ env.ICU_VERSION }}-
           checkpoint-path: |
             ${{ env.ANDROID_NDK_HOME }}
-            ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+            ${{ github.workspace }}/.ci/zig-${{ env.ZIG_VERSION }}
             ${{ env.WORK_DIR }}/icu-src
             ${{ env.WORK_DIR }}/icu-host-build
             ${{ env.WORK_DIR }}/icu-android-build
@@ -245,7 +245,7 @@ jobs:
           checkpoint-prefix: ci-cache-v2-recovery-core-webkit-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-
           checkpoint-path: |
             ${{ env.ANDROID_NDK_HOME }}
-            ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+            ${{ github.workspace }}/.ci/zig-${{ env.ZIG_VERSION }}
             ${{ env.WORK_DIR }}/webkit-src
             ${{ env.WORK_DIR }}/webkit-build
             ${{ env.WORK_DIR }}/webkit-android
@@ -260,7 +260,7 @@ jobs:
           checkpoint-prefix: ci-cache-v2-recovery-core-tinycc-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-tinycc-current-
           checkpoint-path: |
             ${{ env.ANDROID_NDK_HOME }}
-            ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+            ${{ github.workspace }}/.ci/zig-${{ env.ZIG_VERSION }}
             ${{ env.WORK_DIR }}/tinycc-build-android
             ${{ env.WORK_DIR }}/webkit-android/lib/libtcc.a
             ${{ env.WORK_DIR }}/state/nodes/tinycc.json
@@ -338,7 +338,7 @@ jobs:
             ${{ env.WORK_DIR }}/cache
             ${{ env.WORK_DIR }}/state/nodes/bun.json
             ${{ env.ANDROID_NDK_HOME }}
-            ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+            ${{ github.workspace }}/.ci/zig-${{ env.ZIG_VERSION }}
             ~/.bun/install/cache
 
       - name: Install build dependencies
@@ -408,7 +408,7 @@ jobs:
              && test "$(readelf -h "${WORK_DIR}/bun-build/bun" | sed -n 's/^ *Class: *//p')" = ELF64 \
              && test "$(readelf -h "${WORK_DIR}/bun-build/bun" | sed -n 's/^ *Machine: *//p')" = AArch64; then bun=true; fi
           if test -x "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${ANDROID_API}-clang"; then ndk=true; fi
-          if test -x "${WORK_DIR}/zig-${ZIG_VERSION}/zig"; then zig=true; fi
+          if test -x "${GITHUB_WORKSPACE}/.ci/zig-${ZIG_VERSION}/zig"; then zig=true; fi
           echo "icu_ready=$icu" >> "$GITHUB_OUTPUT"
           echo "webkit_ready=$webkit" >> "$GITHUB_OUTPUT"
           echo "tinycc_ready=$tinycc" >> "$GITHUB_OUTPUT"
@@ -448,7 +448,7 @@ jobs:
         with:
           mode: save-final
           key: ci-cache-v2-toolchain-${{ runner.os }}-${{ runner.arch }}-zig-${{ env.ZIG_VERSION }}-api-${{ env.ANDROID_API }}
-          path: ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+          path: ${{ github.workspace }}/.ci/zig-${{ env.ZIG_VERSION }}
 
       - name: Save Bun durable cache
         if: always() && steps.cache-bun.outputs.cache-hit != 'true' && steps.final-state.outputs.bun_ready == 'true'
@@ -559,7 +559,7 @@ jobs:
           checkpoint-prefix: ci-cache-v2-recovery-core-icu-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-icu-${{ env.ICU_VERSION }}-
           checkpoint-path: |
             ${{ env.ANDROID_NDK_HOME }}
-            ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+            ${{ github.workspace }}/.ci/zig-${{ env.ZIG_VERSION }}
             ${{ env.WORK_DIR }}/icu-src
             ${{ env.WORK_DIR }}/icu-host-build
             ${{ env.WORK_DIR }}/icu-android-build
@@ -576,7 +576,7 @@ jobs:
           checkpoint-prefix: ci-cache-v2-recovery-core-webkit-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-
           checkpoint-path: |
             ${{ env.ANDROID_NDK_HOME }}
-            ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+            ${{ github.workspace }}/.ci/zig-${{ env.ZIG_VERSION }}
             ${{ env.WORK_DIR }}/webkit-src
             ${{ env.WORK_DIR }}/webkit-build
             ${{ env.WORK_DIR }}/webkit-android
@@ -592,7 +592,7 @@ jobs:
           checkpoint-prefix: ci-cache-v2-recovery-core-tinycc-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-tinycc-current-
           checkpoint-path: |
             ${{ env.ANDROID_NDK_HOME }}
-            ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+            ${{ github.workspace }}/.ci/zig-${{ env.ZIG_VERSION }}
             ${{ env.WORK_DIR }}/tinycc-build-android
             ${{ env.WORK_DIR }}/webkit-android/lib/libtcc.a
             ${{ env.WORK_DIR }}/state/nodes/tinycc.json
@@ -611,7 +611,7 @@ jobs:
             ${{ env.WORK_DIR }}/cache
             ${{ env.WORK_DIR }}/state/nodes/bun.json
             ${{ env.ANDROID_NDK_HOME }}
-            ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+            ${{ github.workspace }}/.ci/zig-${{ env.ZIG_VERSION }}
             ~/.bun/install/cache
 
       - name: Write CI summary

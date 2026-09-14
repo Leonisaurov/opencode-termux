@@ -216,7 +216,7 @@ jobs:
         id: cache-zig
         uses: actions/cache/restore@v4
         with:
-          path: ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+          path: ${{ github.workspace }}/.ci/zig-${{ env.ZIG_VERSION }}
           key: ci-cache-v2-toolchain-${{ runner.os }}-${{ runner.arch }}-zig-${{ env.ZIG_VERSION }}-api-${{ env.ANDROID_API }}
 
       - name: Cache Bun host
@@ -456,7 +456,7 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: save-final
-          path: ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+          path: ${{ github.workspace }}/.ci/zig-${{ env.ZIG_VERSION }}
           key: ci-cache-v2-toolchain-${{ runner.os }}-${{ runner.arch }}-zig-${{ env.ZIG_VERSION }}-api-${{ env.ANDROID_API }}
 
       - name: Create distribution packages

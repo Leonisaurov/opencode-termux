@@ -113,18 +113,18 @@ rustup target add aarch64-linux-android
 echo "Rust: $(rustc --version)"
 
 # ── Zig ─────────────────────────────────────────────────────────
-if [ ! -f "${WORK_DIR}/zig-${ZIG_VERSION}/zig" ]; then
+if [ ! -f "${GITHUB_WORKSPACE}/.ci/zig-${ZIG_VERSION}/zig" ]; then
   echo "=== Installing Zig ${ZIG_VERSION} ==="
-  mkdir -p "${WORK_DIR}"
+  mkdir -p "${GITHUB_WORKSPACE}/.ci"
   cd "$RUNNER_TMP_ROOT"
   wget -q "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" -O zig.tar.xz
-  mkdir -p "${WORK_DIR}/zig-${ZIG_VERSION}"
-  tar xf zig.tar.xz -C "${WORK_DIR}/zig-${ZIG_VERSION}" --strip-components=1
+  mkdir -p "${GITHUB_WORKSPACE}/.ci/zig-${ZIG_VERSION}"
+  tar xf zig.tar.xz -C "${GITHUB_WORKSPACE}/.ci/zig-${ZIG_VERSION}" --strip-components=1
   rm zig.tar.xz
 fi
-echo "ZIG_BIN=${WORK_DIR}/zig-${ZIG_VERSION}/zig" >> "$GITHUB_ENV"
-echo "${WORK_DIR}/zig-${ZIG_VERSION}" >> "$GITHUB_PATH"
-echo "Zig: $(${WORK_DIR}/zig-${ZIG_VERSION}/zig version 2>/dev/null)"
+echo "ZIG_BIN=${GITHUB_WORKSPACE}/.ci/zig-${ZIG_VERSION}/zig" >> "$GITHUB_ENV"
+echo "${GITHUB_WORKSPACE}/.ci/zig-${ZIG_VERSION}" >> "$GITHUB_PATH"
+echo "Zig: $(${GITHUB_WORKSPACE}/.ci/zig-${ZIG_VERSION}/zig version 2>/dev/null)"
 
 # ── Bun host ────────────────────────────────────────────────────
 if [ ! -x "$HOME/.bun/bin/bun" ] || [ "$("$HOME/.bun/bin/bun" --version 2>/dev/null || true)" != "$HOST_BUN_VERSION" ]; then

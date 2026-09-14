@@ -45,7 +45,7 @@ jobs:
         id: cache-zig
         uses: actions/cache/restore@v4
         with:
-          path: ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+          path: ${{ github.workspace }}/.ci/zig-${{ env.ZIG_VERSION }}
           key: ci-cache-v2-toolchain-${{ runner.os }}-${{ runner.arch }}-zig-${{ env.ZIG_VERSION }}-api-${{ env.ANDROID_API }}
 
       # ── Versioned source contract ─────────────────────────────
@@ -184,7 +184,7 @@ jobs:
           checkpoint-prefix: ci-cache-v2-recovery-core-icu-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-icu-${{ env.ICU_VERSION }}-
           checkpoint-path: |
             ${{ env.ANDROID_NDK_HOME }}
-            ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+            ${{ github.workspace }}/.ci/zig-${{ env.ZIG_VERSION }}
             ${{ env.WORK_DIR }}/icu-src
             ${{ env.WORK_DIR }}/icu-host-build
             ${{ env.WORK_DIR }}/icu-android-build
@@ -200,7 +200,7 @@ jobs:
           checkpoint-prefix: ci-cache-v2-recovery-core-webkit-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-
           checkpoint-path: |
             ${{ env.ANDROID_NDK_HOME }}
-            ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+            ${{ github.workspace }}/.ci/zig-${{ env.ZIG_VERSION }}
             ${{ env.WORK_DIR }}/webkit-src
             ${{ env.WORK_DIR }}/webkit-build
             ${{ env.WORK_DIR }}/webkit-android
@@ -215,7 +215,7 @@ jobs:
           checkpoint-prefix: ci-cache-v2-recovery-core-tinycc-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-tinycc-current-
           checkpoint-path: |
             ${{ env.ANDROID_NDK_HOME }}
-            ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+            ${{ github.workspace }}/.ci/zig-${{ env.ZIG_VERSION }}
             ${{ env.WORK_DIR }}/tinycc-build-android
             ${{ env.WORK_DIR }}/webkit-android/lib/libtcc.a
             ${{ env.WORK_DIR }}/state/nodes/tinycc.json
@@ -297,7 +297,7 @@ jobs:
           ndk=false
           zig=false
           if test -x "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${ANDROID_API}-clang"; then ndk=true; fi
-          if test -x "${WORK_DIR}/zig-${ZIG_VERSION}/zig"; then zig=true; fi
+          if test -x "${GITHUB_WORKSPACE}/.ci/zig-${ZIG_VERSION}/zig"; then zig=true; fi
           echo "ndk_ready=$ndk" >> "$GITHUB_OUTPUT"
           echo "zig_ready=$zig" >> "$GITHUB_OUTPUT"
           # A complete exact core cache is publishable without the toolchains:
@@ -329,7 +329,7 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: save-final
-          path: ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+          path: ${{ github.workspace }}/.ci/zig-${{ env.ZIG_VERSION }}
           key: ci-cache-v2-toolchain-${{ runner.os }}-${{ runner.arch }}-zig-${{ env.ZIG_VERSION }}-api-${{ env.ANDROID_API }}
 
       - name: Save ICU durable cache
@@ -410,7 +410,7 @@ jobs:
           checkpoint-prefix: ci-cache-v2-recovery-core-icu-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-icu-${{ env.ICU_VERSION }}-
           checkpoint-path: |
             ${{ env.ANDROID_NDK_HOME }}
-            ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+            ${{ github.workspace }}/.ci/zig-${{ env.ZIG_VERSION }}
             ${{ env.WORK_DIR }}/icu-src
             ${{ env.WORK_DIR }}/icu-host-build
             ${{ env.WORK_DIR }}/icu-android-build
@@ -427,7 +427,7 @@ jobs:
           checkpoint-prefix: ci-cache-v2-recovery-core-webkit-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-webkit-${{ env.WEBKIT_COMMIT }}-
           checkpoint-path: |
             ${{ env.ANDROID_NDK_HOME }}
-            ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+            ${{ github.workspace }}/.ci/zig-${{ env.ZIG_VERSION }}
             ${{ env.WORK_DIR }}/webkit-src
             ${{ env.WORK_DIR }}/webkit-build
             ${{ env.WORK_DIR }}/webkit-android
@@ -443,7 +443,7 @@ jobs:
           checkpoint-prefix: ci-cache-v2-recovery-core-tinycc-${{ runner.os }}-${{ runner.arch }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-tinycc-current-
           checkpoint-path: |
             ${{ env.ANDROID_NDK_HOME }}
-            ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+            ${{ github.workspace }}/.ci/zig-${{ env.ZIG_VERSION }}
             ${{ env.WORK_DIR }}/tinycc-build-android
             ${{ env.WORK_DIR }}/webkit-android/lib/libtcc.a
             ${{ env.WORK_DIR }}/state/nodes/tinycc.json

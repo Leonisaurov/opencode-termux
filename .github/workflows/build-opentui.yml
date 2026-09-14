@@ -98,7 +98,7 @@ jobs:
         id: cache-zig
         uses: actions/cache/restore@v4
         with:
-          path: ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+          path: ${{ github.workspace }}/.ci/zig-${{ env.ZIG_VERSION }}
           key: ci-cache-v2-toolchain-${{ runner.os }}-${{ runner.arch }}-zig-${{ env.ZIG_VERSION }}-api-${{ env.ANDROID_API }}
 
       - name: Restore OpenTUI output cache
@@ -160,7 +160,7 @@ jobs:
             ${{ env.WORK_DIR }}/cache
             ${{ env.WORK_DIR }}/state/nodes
             ${{ env.ANDROID_NDK_HOME }}
-            ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+            ${{ github.workspace }}/.ci/zig-${{ env.ZIG_VERSION }}
 
       # ── Toolchain ─────────────────────────────────────────────
       - name: Cache Android NDK
@@ -184,17 +184,17 @@ jobs:
       - name: Install Zig ${{ env.ZIG_VERSION }} (ziglang.org)
         if: steps.validate-opentui.outputs.ready != 'true'
         run: |
-          if [ ! -x "$WORK_DIR/zig-$ZIG_VERSION/zig" ]; then
+          if [ ! -x "$GITHUB_WORKSPACE/.ci/zig-$ZIG_VERSION/zig" ]; then
             mkdir -p "$WORK_DIR"
             cd "$RUNNER_TEMP"
             wget -q "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" -O zig.tar.xz
-            mkdir -p "$WORK_DIR/zig-$ZIG_VERSION"
-            tar xf zig.tar.xz -C "$WORK_DIR/zig-$ZIG_VERSION" --strip-components=1
+            mkdir -p "$GITHUB_WORKSPACE/.ci/zig-$ZIG_VERSION"
+            tar xf zig.tar.xz -C "$GITHUB_WORKSPACE/.ci/zig-$ZIG_VERSION" --strip-components=1
             rm zig.tar.xz
           fi
-          echo "ZIG_BIN=$WORK_DIR/zig-$ZIG_VERSION/zig" >> "$GITHUB_ENV"
-          echo "$WORK_DIR/zig-$ZIG_VERSION" >> "$GITHUB_PATH"
-          "$WORK_DIR/zig-$ZIG_VERSION/zig" version
+          echo "ZIG_BIN=$GITHUB_WORKSPACE/.ci/zig-$ZIG_VERSION/zig" >> "$GITHUB_ENV"
+          echo "$GITHUB_WORKSPACE/.ci/zig-$ZIG_VERSION" >> "$GITHUB_PATH"
+          "$GITHUB_WORKSPACE/.ci/zig-$ZIG_VERSION/zig" version
 
       - name: Write Android libc configuration for Zig
         if: steps.validate-opentui.outputs.ready != 'true'
@@ -345,7 +345,7 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: save-final
-          path: ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+          path: ${{ github.workspace }}/.ci/zig-${{ env.ZIG_VERSION }}
           key: ci-cache-v2-toolchain-${{ runner.os }}-${{ runner.arch }}-zig-${{ env.ZIG_VERSION }}-api-${{ env.ANDROID_API }}
 
       - name: Save OpenTUI Android NDK cache
@@ -376,7 +376,7 @@ jobs:
             ${{ env.WORK_DIR }}/cache
             ${{ env.WORK_DIR }}/state/nodes
             ${{ env.ANDROID_NDK_HOME }}
-            ${{ env.WORK_DIR }}/zig-${{ env.ZIG_VERSION }}
+            ${{ github.workspace }}/.ci/zig-${{ env.ZIG_VERSION }}
 
       - name: Write CI summary
         if: always()
