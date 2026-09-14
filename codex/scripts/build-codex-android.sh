@@ -65,16 +65,59 @@ if [ -z "$CLANG_RT_BUILTINS" ] || [ ! -s "$CLANG_RT_BUILTINS" ]; then
     echo "ERROR: Android compiler runtime not found under ${ANDROID_NDK_HOME}" >&2
     exit 1
 fi
+
+# Bionic API 24 lacks three libc entry points that the libc++/libc++abi bundled
+# inside the pinned Rusty V8 static archive references unconditionally:
+# aligned_alloc (Bionic API 28+) and strtof_l/strtod_l (Bionic API 26+). Because
+# V8 is consumed as a prebuilt archive, the final link must supply ABI-compatible
+# definitions. Compile a small shim with the Android target compiler and append
+# it to every target link through the linker wrapper.
+ANDROID_LIBC_SHIMS_C="$CODEX_TARGET_DIR/android-libc-shims.c"
+ANDROID_LIBC_SHIMS_O="$CODEX_TARGET_DIR/android-libc-shims.o"
+cat > "$ANDROID_LIBC_SHIMS_C" <<'CEOF'
+#include <stddef.h>
+
+/* Declare only what the shims need so the NDK headers cannot clash with these
+   definitions regardless of their availability guards. */
+extern int posix_memalign(void **memptr, size_t alignment, size_t size);
+extern float strtof(const char *nptr, char **endptr);
+extern double strtod(const char *nptr, char **endptr);
+
+/* Bionic exports posix_memalign from API 16 but C11 aligned_alloc only from API 28. */
+void *aligned_alloc(size_t alignment, size_t size) {
+    void *ptr = NULL;
+    if (posix_memalign(&ptr, alignment, size) != 0) {
+        return NULL;
+    }
+    return ptr;
+}
+
+/* Bionic exports strtof_l/strtod_l only from API 26. The terminal runs in the C
+   locale, so delegating to the non-_l variants preserves behaviour; the locale
+   pointer is forwarded as an opaque ABI-compatible argument. */
+float strtof_l(const char *nptr, char **endptr, void *locale) {
+    (void)locale;
+    return strtof(nptr, endptr);
+}
+
+double strtod_l(const char *nptr, char **endptr, void *locale) {
+    (void)locale;
+    return strtod(nptr, endptr);
+}
+CEOF
+"$ANDROID_CC" -c -O2 -fPIC -o "$ANDROID_LIBC_SHIMS_O" "$ANDROID_LIBC_SHIMS_C"
+
 LINKER_WRAPPER="$CODEX_TARGET_DIR/android-linker"
 mkdir -p "$CODEX_TARGET_DIR"
 cat > "$LINKER_WRAPPER" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-exec "$ANDROID_CC" "\$@" "$CLANG_RT_BUILTINS"
+exec "$ANDROID_CC" "\$@" "$ANDROID_LIBC_SHIMS_O" "$CLANG_RT_BUILTINS"
 EOF
 chmod 0755 "$LINKER_WRAPPER"
 export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$LINKER_WRAPPER"
 echo "Android compiler runtime: $CLANG_RT_BUILTINS"
+echo "Android libc shims: $ANDROID_LIBC_SHIMS_O"
 
 cd "$CODEX_SRC/codex-rs"
 CORE_MANIFEST="$CODEX_SRC/codex-rs/core/Cargo.toml"
