@@ -33,6 +33,30 @@ convenience boundary only: it does not provide network namespaces or strong
 anti-exfiltration guarantees. The native `codex-rs/linux-sandbox` executable
 must not be described as a working Android sandbox.
 
+## File locks
+
+Rust's `std::fs::File::lock`, `try_lock`, `lock_shared` and `try_lock_shared`
+return `ErrorKind::Unsupported` ("lock() not supported") on
+`aarch64-linux-android`: std only implements flock for a target list that does
+not include Android (checked against 1.95 through 1.98). Any unpatched call site
+fails at runtime, which previously broke startup (curated plugins sync,
+app-server control socket), the network-proxy CA cache, history paging, and the
+`rules/default.rules` write behind "don't ask again".
+
+Every such site carries a `CODEX-TERMUX-ANDROID-PATCH` marker and skips the
+advisory flock under `#[cfg(target_os = "android")]`, because the Termux runtime
+is single-user. A new upstream lock site will regress silently, so validate a
+built binary with:
+
+```sh
+bash codex/test/lock-regression/run.sh /path/to/codex-android
+```
+
+The harness boots the real app-server against a scripted Responses API stand-in,
+answers a command approval with an execpolicy amendment, and fails if the
+binary reports `lock() not supported`, if no `allow` rule lands in
+`<CODEX_HOME>/rules/default.rules`, or if the approved command does not run.
+
 ## Termux rules
 
 Use `TMPDIR` for temporary files and validate it before builds. In Termux the

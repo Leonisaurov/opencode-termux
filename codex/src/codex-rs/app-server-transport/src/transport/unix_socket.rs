@@ -148,6 +148,10 @@ pub async fn acquire_app_server_startup_lock(
             .read(true)
             .write(true)
             .open(startup_lock_path.as_path())?;
+        // CODEX-TERMUX-ANDROID-PATCH: std::fs::File::lock is unsupported on
+        // Android/bionic (ErrorKind::Unsupported), which failed the app-server
+        // control-socket startup. Single-user environment: skip the flock.
+        #[cfg(not(target_os = "android"))]
         file.lock()?;
         Ok(AppServerStartupLock { _file: file })
     })

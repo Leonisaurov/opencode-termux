@@ -198,6 +198,11 @@ fn lock_curated_plugins_startup_sync(codex_home: &Path) -> Result<File, String> 
         .truncate(false)
         .open(&lock_path)
         .map_err(|err| format!("failed to open curated plugins sync lock: {err}"))?;
+    // CODEX-TERMUX-ANDROID-PATCH: std::fs::File::lock is unsupported on
+    // Android/bionic (ErrorKind::Unsupported), which failed every curated
+    // plugins sync at startup. The Termux port is a single-user environment,
+    // so skip the advisory flock while preserving it elsewhere.
+    #[cfg(not(target_os = "android"))]
     lock_file
         .lock()
         .map_err(|err| format!("failed to lock curated plugins sync: {err}"))?;

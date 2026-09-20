@@ -529,6 +529,10 @@ fn lock_managed_ca_certificate(certificate_path: &Path) -> Result<File> {
     let lock_path = managed_ca_certificate_lock_path(certificate_path)
         .ok_or_else(|| anyhow!("managed MITM CA certificate path is missing a file name"))?;
     let file = open_managed_ca_lock(&lock_path)?;
+    // CODEX-TERMUX-ANDROID-PATCH: std::fs::File::lock_shared is unsupported on
+    // Android/bionic (ErrorKind::Unsupported); single-user env → skip the
+    // advisory flock while preserving it elsewhere.
+    #[cfg(not(target_os = "android"))]
     file.lock_shared()
         .with_context(|| format!("failed to lock {}", lock_path.display()))?;
     Ok(file)
@@ -537,6 +541,10 @@ fn lock_managed_ca_certificate(certificate_path: &Path) -> Result<File> {
 fn lock_managed_ca_artifacts(proxy_dir: &Path) -> Result<File> {
     let lock_path = proxy_dir.join(MANAGED_MITM_CA_ARTIFACT_LOCK);
     let file = open_managed_ca_lock(&lock_path)?;
+    // CODEX-TERMUX-ANDROID-PATCH: std::fs::File::lock is unsupported on
+    // Android/bionic (ErrorKind::Unsupported); single-user env → skip the
+    // advisory flock while preserving it elsewhere.
+    #[cfg(not(target_os = "android"))]
     file.lock()
         .with_context(|| format!("failed to lock {}", lock_path.display()))?;
     Ok(file)
@@ -630,7 +638,14 @@ fn remove_inactive_managed_ca_certificate(certificate_path: &Path) {
     let Ok(lock_file) = open_managed_ca_lock(&lock_path) else {
         return;
     };
-    match lock_file.try_lock() {
+    // CODEX-TERMUX-ANDROID-PATCH: std::fs::File::try_lock is unsupported on
+    // Android/bionic (ErrorKind::Unsupported) → treat the lease as acquired so
+    // stale artifacts are still pruned instead of warning forever.
+    #[cfg(not(target_os = "android"))]
+    let lock_result = lock_file.try_lock();
+    #[cfg(target_os = "android")]
+    let lock_result = Ok(());
+    match lock_result {
         Ok(()) => {}
         Err(std::fs::TryLockError::WouldBlock) => return,
         Err(err) => {

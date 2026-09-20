@@ -121,7 +121,14 @@ pub fn lookup_batch(
     }
 
     for _ in 0..MAX_RETRIES {
-        match file.try_lock_shared() {
+        // CODEX-TERMUX-ANDROID-PATCH: std::fs::File::try_lock_shared is unsupported
+        // on Android/bionic (ErrorKind::Unsupported); single-user env → shared lock
+        // is always granted instead of failing the lookup.
+        #[cfg(not(target_os = "android"))]
+        let lock_result = file.try_lock_shared();
+        #[cfg(target_os = "android")]
+        let lock_result = Ok(());
+        match lock_result {
             Ok(()) => return scan_batch(&mut file, cursor, config),
             Err(std::fs::TryLockError::WouldBlock) => std::thread::sleep(RETRY_SLEEP),
             Err(error) => return Err(error.into()),
