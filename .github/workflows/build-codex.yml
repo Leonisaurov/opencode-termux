@@ -93,6 +93,12 @@ jobs:
           RUST_TOOLCHAIN="$(sed -n 's/^channel = "\([^"]*\)"/\1/p' "$CODEX_SRC/codex-rs/rust-toolchain.toml" | head -1)"
           test -n "$RUST_TOOLCHAIN"
           echo "RUST_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
+          # The vendored tree carries the Android port patches (lock shims, Bionic
+          # API 24 workarounds), so its git tree hash must be part of the contract:
+          # hashing only Cargo.lock/build.rs would restore a stale codex-android
+          # artifact whenever a patch lands inside codex/src.
+          codex_source_tree="$(git ls-tree HEAD codex/src | awk '{print $3}')"
+          test -n "$codex_source_tree"
           export UPSTREAM_COMMIT="$CODEX_RESOLVED_COMMIT" RUST_TOOLCHAIN
           export ANDROID_TRIPLE_API="aarch64-linux-android${ANDROID_API}"
           args=(--root "$GITHUB_WORKSPACE" --product codex
@@ -101,6 +107,7 @@ jobs:
             --path .github/workflows/build-rusty-v8-android.yml
             --path codex/src/codex-rs/Cargo.lock
             --path codex/src/codex-rs/code-mode-host/build.rs
+            --value "CODEX_SOURCE_TREE=$codex_source_tree"
             --value "CODEX_REF=$CODEX_RESOLVED_COMMIT" --value "V8_VERSION=${{ inputs.v8_version || '150.4.0' }}")
           cache_key="$(python3 ci/scripts/cache-contract.py key "${args[@]}")"
           echo "key=$cache_key" >> "$GITHUB_OUTPUT"
