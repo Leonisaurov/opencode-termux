@@ -16,12 +16,23 @@ permite:
 - denegar y enviar un motivo mediante `turn/steer`;
 - enviar un mensaje adicional al turno activo mediante el campo de motivo;
 - permitir la sesión completa;
-- guardar un prefijo exacto del comando para autoaceptarlo durante esta sesión.
+- guardar un prefijo exacto del comando para autoaceptarlo durante esta sesión;
+- **permitir siempre**: manda la enmienda propuesta por el app-server
+  (`acceptWithExecpolicyAmendment`), que Codex escribe como regla `allow` en
+  `<CODEX_HOME>/rules/default.rules`.
 
-El prefijo se conserva únicamente en memoria del relay. No intenta escribir
-`~/.codex/rules/default.rules`, porque ese flujo falla en Android con
-`lock() not supported`. Por eso “Siempre” significa sesión del relay, no una
-regla persistente global.
+El prefijo de sesión se conserva únicamente en memoria del relay. La acción
+"Permitir siempre (regla)" sí persiste, y solo está disponible cuando el
+app-server propone una enmienda (en la TUI equivale a "Yes, and don't ask again
+for commands that start with …"). La enmienda se reenvía tal cual la propuso el
+app-server: acortarla permitiría comandos que el usuario nunca aprobó.
+
+Esa escritura necesita un binario con el parche Android de `codex-execpolicy`
+(el port lo trae desde el vendoring; `File::lock` devuelve
+`ErrorKind::Unsupported` en `aarch64-linux-android` con el toolchain fijado). Con
+un binario sin el parche el app-server responde con un warning y la aprobación
+se aplica solo a esa ejecución. Para volver al comportamiento estrictamente en
+memoria, define `CODEX_NTFY_PERSIST_RULES=0`.
 
 ## Ejecución
 
@@ -52,6 +63,8 @@ Variables opcionales:
 - `CODEX_NTFY_CODEX_BIN` (por defecto `codex-android`)
 - `CODEX_NTFY_CODEX_ARGS` (por defecto `app-server --stdio`)
 - `CODEX_NTFY_HOOK_PORT` (por defecto `10009`)
+- `CODEX_NTFY_PERSIST_RULES` (por defecto `1`; `0` deshabilita “Permitir siempre
+  (regla)” y deja el relay estrictamente en memoria)
 - `CODEX_NTFY_APPROVAL_TTL_MS` (por defecto `0`, sin expiración corta; el cierre
   del proceso siempre invalida las solicitudes)
 

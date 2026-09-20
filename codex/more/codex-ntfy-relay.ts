@@ -1,11 +1,14 @@
 #!/usr/bin/env bun
 /** Authenticated ntfy approval relay and live control panel for Codex app-server. */
 
+import { approvalResponse, proposedAmendment } from "./codex-ntfy-decisions";
+
 type Json = Record<string, unknown>;
 type Pending = {
   id: string; rpcId: unknown; kind: "command" | "file"; nonce: string;
   threadId: string; turnId: string; command: string; cwd: string;
   reason: string; createdAt: number; expiresAt: number | null; resolved: boolean;
+  proposedAmendment: string[] | null;
 };
 type History = { id: string; kind: string; command: string; status: string; at: number; detail?: string };
 
@@ -18,6 +21,10 @@ const NTFY_TOKEN = env("CODEX_NTFY_PUBLISH_TOKEN", env("NTFY_OPENCODE_TOKEN", en
 const HOOK_TOKEN = env("CODEX_NTFY_HOOK_TOKEN");
 const HOOK_PORT = Number(env("CODEX_NTFY_HOOK_PORT", "10009"));
 const TTL_MS = Number(env("CODEX_NTFY_APPROVAL_TTL_MS", "0"));
+// Persisting a rule writes <CODEX_HOME>/rules/default.rules, which requires a
+// Codex build carrying the Android execpolicy patch. Set to 0 to keep the relay
+// strictly in-memory (the pre-patch behaviour).
+const PERSIST_RULES = env("CODEX_NTFY_PERSIST_RULES", "1") !== "0";
 function detectLanHost(): string {
   const explicit = env("CODEX_NTFY_CALLBACK_HOST");
   if (explicit) return explicit;
@@ -96,8 +103,7 @@ function sendChildRequest(method: string, params: Json): number {
   return id;
 }
 function responseFor(p: Pending, actionName: string): Json {
-  const decision = actionName === "allow" ? "accept" : actionName === "session" ? "acceptForSession" : actionName === "deny" ? "decline" : "cancel";
-  return { jsonrpc: "2.0", id: p.rpcId, result: { decision } };
+  return approvalResponse(p.rpcId, actionName, p.proposedAmendment);
 }
 function matchingRule(command: string) { return sessionRules.find(rule => command.startsWith(rule.prefix)); }
 function steer(p: Pending, message: string) {
@@ -135,7 +141,7 @@ async function handleApproval(message: Json): Promise<boolean> {
     return true;
   }
   const nonce = `${Date.now().toString(36)}-${++nextAction}-${crypto.randomUUID()}`;
-  const p: Pending = { id, rpcId, kind: isCommand ? "command" : "file", nonce, threadId, turnId, command, cwd, reason, createdAt: Date.now(), expiresAt: TTL_MS > 0 ? Date.now() + TTL_MS : null, resolved: false };
+  const p: Pending = { id, rpcId, kind: isCommand ? "command" : "file", nonce, threadId, turnId, command, cwd, reason, createdAt: Date.now(), expiresAt: TTL_MS > 0 ? Date.now() + TTL_MS : null, resolved: false, proposedAmendment: isCommand ? proposedAmendment(params) : null };
   pending.set(id, p); addHistory({ id, kind: p.kind, command, status: "pending", at: p.createdAt, detail: reason });
   const messageText = `${reason ? `${reason}\n` : ""}${cwd ? `cwd: ${cwd}\n` : ""}${command}`;
   const buttons = [ntfyAction("Aceptar", rpcId, "allow", nonce), ntfyAction("Denegar", rpcId, "deny", nonce), { action: "view", label: "⋯", url: PANEL_URL, clear: false }];
@@ -156,7 +162,9 @@ async function approve(request: Request): Promise<Response> {
 async function panelAction(request: Request, p: Pending): Promise<Response> {
   let body: Json; try { body = await request.json() as Json; } catch { return Response.json({ ok: false, reason: "invalid_json" }, { status: 400 }); }
   const actionName = text(body.action);
-  if (!["allow", "deny", "session", "pattern", "deny-and-steer"].includes(actionName)) return Response.json({ ok: false, reason: "invalid_action" }, { status: 400 });
+  if (!["allow", "deny", "session", "pattern", "persist", "deny-and-steer"].includes(actionName)) return Response.json({ ok: false, reason: "invalid_action" }, { status: 400 });
+  if (actionName === "persist" && !PERSIST_RULES) return Response.json({ ok: false, reason: "persist_disabled" }, { status: 403 });
+  if (actionName === "persist" && !p.proposedAmendment) return Response.json({ ok: false, reason: "no_proposed_amendment" }, { status: 400 });
   try {
     if (actionName === "pattern") {
       const prefix = text(body.prefix).trim();
@@ -164,7 +172,9 @@ async function panelAction(request: Request, p: Pending): Promise<Response> {
       if (!sessionRules.some(rule => rule.prefix === prefix)) sessionRules.push({ prefix, createdAt: Date.now() });
       resolve(p, "session", `prefijo: ${prefix}`);
     } else {
-      const resolved = resolve(p, actionName === "session" ? "session" : actionName === "allow" ? "allow" : "deny", text(body.reason));
+      const decision = actionName === "persist" ? "persist" : actionName === "session" ? "session" : actionName === "allow" ? "allow" : "deny";
+      const detail = actionName === "persist" ? `regla: ${JSON.stringify(p.proposedAmendment)}` : text(body.reason);
+      const resolved = resolve(p, decision, detail);
       if (actionName === "deny-and-steer" && resolved) setTimeout(() => steer(resolved, text(body.reason)), 100);
       else if (actionName === "deny" && text(body.reason)) setTimeout(() => steer(p, `El usuario denegó la acción. Motivo: ${text(body.reason)}`), 100);
     }
@@ -175,12 +185,12 @@ async function panelAction(request: Request, p: Pending): Promise<Response> {
 function panelHtml() {
   return `<!doctype html><meta name="viewport" content="width=device-width"><title>Codex ntfy</title>
 <style>body{font:16px system-ui;max-width:900px;margin:2em auto;padding:0 1em;background:#111;color:#eee}article{border:1px solid #555;border-radius:8px;padding:1em;margin:1em 0}button,input,textarea{font:inherit;padding:.55em;margin:.2em;background:#222;color:#eee;border:1px solid #777;border-radius:5px}button{cursor:pointer}pre{white-space:pre-wrap;word-break:break-word}.muted{color:#aaa}</style>
-<h1>Codex · aprobaciones</h1><p class="muted">Panel vivo. “Siempre” guarda prefijos solo en esta sesión del relay; nunca modifica default.rules.</p><main id="app">Cargando…</main>
+<h1>Codex · aprobaciones</h1><p class="muted">Panel vivo. “Permitir siempre (regla)” manda la enmienda propuesta al app-server, que la escribe en <code>~/.codex/rules/default.rules</code>; el resto de opciones solo afectan a esta sesión del relay.</p><main id="app">Cargando…</main>
 <script>
 const base=location.pathname, esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function post(path,data){let r=await fetch(base+'/'+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});return r.json()}
 async function act(id,action){let reason=document.querySelector('#reason-'+CSS.escape(id))?.value||'';let prefix=document.querySelector('#prefix-'+CSS.escape(id))?.value||'';let r=await post('action',{id,action,reason,prefix});if(!r.ok)alert(r.reason);render()}
-function card(p){return '<article><b>'+esc(p.kind)+' · '+esc(p.id)+'</b><pre>'+esc(p.command)+'</pre><span class="muted">'+esc(p.cwd||'')+'</span><br><textarea id="reason-'+esc(p.id)+'" rows="2" cols="50" placeholder="Motivo o mensaje para steer"></textarea><br><button onclick="act(\''+esc(p.id)+'\',\'allow\')">Aceptar</button><button onclick="act(\''+esc(p.id)+'\',\'deny\')">Denegar</button><button onclick="act(\''+esc(p.id)+'\',\'deny-and-steer\')">Denegar + enviar motivo</button><br><input id="prefix-'+esc(p.id)+'" placeholder="Prefijo exacto del comando"><button onclick="act(\''+esc(p.id)+'\',\'pattern\')">Permitir este prefijo</button><button onclick="act(\''+esc(p.id)+'\',\'session\')">Permitir sesión</button></article>'}
+function card(p){return '<article><b>'+esc(p.kind)+' · '+esc(p.id)+'</b><pre>'+esc(p.command)+'</pre><span class="muted">'+esc(p.cwd||'')+'</span><br><textarea id="reason-'+esc(p.id)+'" rows="2" cols="50" placeholder="Motivo o mensaje para steer"></textarea><br><button onclick="act(\''+esc(p.id)+'\',\'allow\')">Aceptar</button><button onclick="act(\''+esc(p.id)+'\',\'deny\')">Denegar</button><button onclick="act(\''+esc(p.id)+'\',\'deny-and-steer\')">Denegar + enviar motivo</button><br><input id="prefix-'+esc(p.id)+'" placeholder="Prefijo exacto del comando"><button onclick="act(\''+esc(p.id)+'\',\'pattern\')">Permitir este prefijo</button><button onclick="act(\''+esc(p.id)+'\',\'session\')">Permitir sesión</button>'+(p.proposedAmendment?'<br><span class="muted">regla propuesta: '+esc(JSON.stringify(p.proposedAmendment))+'</span><button onclick="act(\''+esc(p.id)+'\',\'persist\')">Permitir siempre (regla)</button>':'')+'</article>'}
 async function render(){let s=await (await fetch(base+'/state')).json();document.querySelector('#app').innerHTML=(s.pending.length?s.pending.map(card).join(''):'<p>No hay solicitudes pendientes.</p>')+'<h2>Historial</h2>'+s.history.map(x=>'<article><b>'+esc(x.status)+'</b> · '+esc(x.kind)+'<pre>'+esc(x.command)+'</pre></article>').join('');}
 render();setInterval(render,2000);
 </script>`;
@@ -192,7 +202,7 @@ const server = Bun.serve({ hostname: "0.0.0.0", port: HOOK_PORT, async fetch(req
   if (url.pathname === "/approve" && request.method === "POST") return approve(request);
   if (!panelOk(url.pathname)) return Response.json({ ok: false, reason: "not_found" }, { status: 404 });
   if (url.pathname === `/panel/${PANEL_TOKEN}` && request.method === "GET") return new Response(panelHtml(), { headers: { "content-type": "text/html; charset=utf-8" } });
-  if (url.pathname === `/panel/${PANEL_TOKEN}/state` && request.method === "GET") return Response.json({ pending: [...pending.values()].map(p => ({ id: p.id, kind: p.kind, command: p.command, cwd: p.cwd, reason: p.reason, createdAt: p.createdAt })), history, rules: sessionRules });
+  if (url.pathname === `/panel/${PANEL_TOKEN}/state` && request.method === "GET") return Response.json({ pending: [...pending.values()].map(p => ({ id: p.id, kind: p.kind, command: p.command, cwd: p.cwd, reason: p.reason, createdAt: p.createdAt, proposedAmendment: p.proposedAmendment })), history, rules: sessionRules, persistRules: PERSIST_RULES });
   if (url.pathname === `/panel/${PANEL_TOKEN}/action` && request.method === "POST") {
     let body: Json; try { body = await request.clone().json() as Json; } catch { return Response.json({ ok: false, reason: "invalid_json" }, { status: 400 }); }
     const p = pending.get(keyOf(body.id)); if (!p) return Response.json({ ok: false, reason: "unknown_or_resolved" });
@@ -202,7 +212,7 @@ const server = Bun.serve({ hostname: "0.0.0.0", port: HOOK_PORT, async fetch(req
 }});
 
 console.error(`codex-ntfy-relay: panel vivo ${PANEL_URL}`);
-console.error("codex-ntfy-relay: siempre = regla de prefijo en memoria; no modifica default.rules");
+console.error(`codex-ntfy-relay: "permitir siempre (regla)" persiste en default.rules; prefijos de sesión solo en memoria (persistRules=${PERSIST_RULES})`);
 child = Bun.spawn([CODEX_BIN, ...CODEX_ARGS], { stdin: "pipe", stdout: "pipe", stderr: "inherit" });
 
 async function readLines(stream: ReadableStream<Uint8Array>, onLine: (line: string) => Promise<void>) {
