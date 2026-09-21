@@ -13,6 +13,8 @@ pub use tool_name::DEFAULT_FUNCTION_NAMESPACE;
 pub use tool_name::ToolName;
 pub mod approvals;
 pub mod capabilities;
+// CODEX-TERMUX-ANDROID-PATCH: version reported to the backend (see module docs).
+pub mod client_version;
 mod compacted_item;
 pub mod config_types;
 pub mod dynamic_tools;

@@ -57,6 +57,25 @@ answers a command approval with an execpolicy amendment, and fails if the
 binary reports `lock() not supported`, if no `allow` rule lands in
 `<CODEX_HOME>/rules/default.rules`, or if the approved command does not run.
 
+## Reported client version
+
+The backend gates models by their `minimal_client_version`: `gpt-5.6-sol`,
+`gpt-5.6-terra` and `gpt-5.6-luna` need 0.144.0, `gpt-6-astra` needs 0.153.0, so
+a build pinned to an older upstream release only receives the models its version
+satisfies and every newer model fails with "requires a newer version of Codex".
+
+`codex-protocol`'s `client_version` module lets a build report another version
+through `CODEX_REPORTED_CLIENT_VERSION`, which feeds both the HTTP User-Agent and
+the models endpoint's `client_version` parameter:
+
+```sh
+CODEX_REPORTED_CLIENT_VERSION=0.155.1 codex
+```
+
+The override is unset by default. It only changes what the build claims to be, so
+use it to test newer models before re-vendoring upstream, and keep it out of the
+pinned defaults.
+
 ## Termux rules
 
 Use `TMPDIR` for temporary files and validate it before builds. In Termux the

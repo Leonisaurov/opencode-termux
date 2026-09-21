@@ -16,11 +16,9 @@ pub fn bundled_models_response()
 }
 
 /// Convert the client version string to a whole version string (e.g. "1.2.3-alpha.4" -> "1.2.3").
+///
+/// CODEX-TERMUX-ANDROID-PATCH: the models endpoint receives this value, so it
+/// follows the same `CODEX_REPORTED_CLIENT_VERSION` override as the User-Agent.
 pub fn client_version_to_whole() -> String {
-    format!(
-        "{}.{}.{}",
-        env!("CARGO_PKG_VERSION_MAJOR"),
-        env!("CARGO_PKG_VERSION_MINOR"),
-        env!("CARGO_PKG_VERSION_PATCH")
-    )
+    codex_protocol::client_version::reported_whole_client_version()
 }

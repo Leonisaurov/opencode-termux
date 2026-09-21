@@ -157,7 +157,9 @@ pub fn is_first_party_chat_originator(originator_value: &str) -> bool {
 }
 
 pub fn get_codex_user_agent() -> String {
-    let build_version = env!("CARGO_PKG_VERSION");
+    // CODEX-TERMUX-ANDROID-PATCH: honour CODEX_REPORTED_CLIENT_VERSION so a port
+    // pinned to an older release can exercise newer backend models.
+    let build_version = codex_protocol::client_version::reported_client_version();
     let os_info = os_info::get();
     let originator = originator();
     let prefix = format!(
