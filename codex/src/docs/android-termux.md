@@ -59,22 +59,29 @@ binary reports `lock() not supported`, if no `allow` rule lands in
 
 ## Reported client version
 
-The backend gates models by their `minimal_client_version`: `gpt-5.6-sol`,
-`gpt-5.6-terra` and `gpt-5.6-luna` need 0.144.0, `gpt-6-astra` needs 0.153.0, so
+The backend gates models by their `minimal_client_version` (`gpt-5.6-sol`,
+`gpt-5.6-terra` and `gpt-5.6-luna` need 0.144.0, `gpt-6-astra` needs 0.153.0), so
 a build pinned to an older upstream release only receives the models its version
 satisfies and every newer model fails with "requires a newer version of Codex".
 
 `codex-protocol`'s `client_version` module lets a build report another version
-through `CODEX_REPORTED_CLIENT_VERSION`, which feeds both the HTTP User-Agent and
-the models endpoint's `client_version` parameter:
+through `CODEX_REPORTED_CLIENT_VERSION`, which feeds the HTTP User-Agent (both
+the prefix and the app-server identity suffix) and the models endpoint's
+`client_version` parameter. It is unset by default.
 
-```sh
-CODEX_REPORTED_CLIENT_VERSION=0.155.1 codex
-```
+Measured on 2026-09-21 with a 0.134.0-alpha.3 build:
 
-The override is unset by default. It only changes what the build claims to be, so
-use it to test newer models before re-vendoring upstream, and keep it out of the
-pinned defaults.
+- the models endpoint honours the override: with `0.155.1` the account catalog
+  returns `gpt-reserve`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`;
+- a turn for `gpt-5.6-luna` still fails with
+  `400 ... requires a newer version of Codex`, also with `9.9.9`, with the
+  first-party originators `codex_cli_rs` / `codex-tui`, and with a fresh
+  `installation_id`.
+
+The inference gate is therefore evaluated server-side against the authenticated
+account/session, not against anything the client sends, so raising the reported
+version cannot unlock newer models. Re-vendoring upstream is the only supported
+path; keep the override for catalog/diagnostic work only.
 
 ## Termux rules
 
