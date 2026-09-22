@@ -31,7 +31,7 @@ on:
         default: '7.4.20'
       codex_ref:
         required: true
-        default: 'fee9a8d5f08291b72c580d15aa0b08c7c3ecb204'
+        default: 'be2951ea34f0d295ed0becf97079f92fa5f6950e'
       v8_version:
         required: true
         default: '150.4.0'
@@ -159,7 +159,7 @@ jobs:
     uses: ./.github/workflows/build-codex.yml
     with:
       use_existing_v8: true
-      codex_ref: ${{ inputs.codex_ref || 'fee9a8d5f08291b72c580d15aa0b08c7c3ecb204' }}
+      codex_ref: ${{ inputs.codex_ref || 'be2951ea34f0d295ed0becf97079f92fa5f6950e' }}
       v8_version: ${{ inputs.v8_version || '150.4.0' }}
     secrets: inherit
   publish:
@@ -181,7 +181,7 @@ jobs:
           OPENTUI_REF: ${{ inputs.opentui_ref || '658db4cbe0da0adfeb5edac0273ee68911b29c3e' }}
           OPENCODE_VERSION: ${{ inputs.opencode_version || '1.18.30' }}
           KILO_VERSION: ${{ inputs.kilo_version || '7.4.20' }}
-          CODEX_VERSION: ${{ inputs.codex_ref || 'fee9a8d5f08291b72c580d15aa0b08c7c3ecb204' }}
+          CODEX_VERSION: ${{ inputs.codex_ref || 'be2951ea34f0d295ed0becf97079f92fa5f6950e' }}
         run: |
           set -euo pipefail
           test -d release-input

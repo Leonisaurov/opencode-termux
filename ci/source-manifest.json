@@ -19,7 +19,7 @@
     "codex": {
       "path": "codex/src",
       "mode": "vendored",
-      "commit": "fee9a8d5f08291b72c580d15aa0b08c7c3ecb204"
+      "commit": "be2951ea34f0d295ed0becf97079f92fa5f6950e"
     },
     "opentui-opencode": {
       "path": "opentui/src/opencode",

@@ -92,11 +92,19 @@ pub async fn run_command_under_seatbelt(
     anyhow::bail!("Seatbelt sandbox is only available on macOS");
 }
 
+// CODEX-TERMUX-ANDROID-PATCH: el sandbox landlock no aplica en Android.
+#[cfg(any(target_os = "linux", target_os = "android"))]
 pub async fn run_command_under_landlock(
     command: LandlockCommand,
     codex_linux_sandbox_exe: Option<PathBuf>,
     loader_overrides: LoaderOverrides,
 ) -> anyhow::Result<()> {
+    #[cfg(target_os = "android")]
+    anyhow::bail!(
+        "`codex sandbox` no es compatible con Android/Termux; ejecuta comandos directamente sin sandbox"
+    );
+    #[cfg(target_os = "linux")]
+    {
     let LandlockCommand {
         sandbox_state,
         permissions_profile,
@@ -126,6 +134,7 @@ pub async fn run_command_under_landlock(
         &[],
     )
     .await
+    }
 }
 
 pub async fn run_command_under_windows_sandbox(

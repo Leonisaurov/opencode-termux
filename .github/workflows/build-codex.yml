@@ -6,7 +6,7 @@ on:
       codex_ref:
         description: 'Commit o tag de openai/codex'
         required: false
-        default: 'fee9a8d5f08291b72c580d15aa0b08c7c3ecb204'
+        default: 'be2951ea34f0d295ed0becf97079f92fa5f6950e'
       v8_version:
         description: 'Versión de rusty_v8 compatible con codex-code-mode-host'
         required: false
@@ -16,7 +16,7 @@ on:
       codex_ref:
         type: string
         required: false
-        default: 'fee9a8d5f08291b72c580d15aa0b08c7c3ecb204'
+        default: 'be2951ea34f0d295ed0becf97079f92fa5f6950e'
       v8_version:
         type: string
         required: false
@@ -78,7 +78,7 @@ jobs:
           print(source['commit'])
           PY
           )"
-          test "$CODEX_RESOLVED_COMMIT" = "${{ inputs.codex_ref || 'fee9a8d5f08291b72c580d15aa0b08c7c3ecb204' }}"
+          test "$CODEX_RESOLVED_COMMIT" = "${{ inputs.codex_ref || 'be2951ea34f0d295ed0becf97079f92fa5f6950e' }}"
           test -z "$(find codex/src -name .git -print -quit)"
           test -z "$(git status --porcelain --untracked-files=all)"
           echo "CODEX_SRC=$GITHUB_WORKSPACE/codex/src" >> "$GITHUB_ENV"
@@ -292,7 +292,7 @@ jobs:
       - name: Upload Codex binaries
         uses: actions/upload-artifact@v4
         with:
-          name: codex-android-aarch64-${{ inputs.codex_ref || 'fee9a8d5f08291b72c580d15aa0b08c7c3ecb204' }}
+          name: codex-android-aarch64-${{ inputs.codex_ref || 'be2951ea34f0d295ed0becf97079f92fa5f6950e' }}
           path: |
             codex/artifacts/codex-android
             codex/artifacts/codex-code-mode-host
