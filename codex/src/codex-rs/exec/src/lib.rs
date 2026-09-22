@@ -543,7 +543,9 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         session_source: SessionSource::Exec,
         enable_codex_api_key_env: true,
         client_name: "codex_exec".to_string(),
-        client_version: env!("CARGO_PKG_VERSION").to_string(),
+        // CODEX-TERMUX-ANDROID-PATCH: this version is echoed into the HTTP
+        // User-Agent suffix that the backend gates models by.
+        client_version: codex_protocol::client_version::reported_client_version(),
         experimental_api: true,
         mcp_server_openai_form_elicitation: false,
         opt_out_notification_methods: Vec::new(),

@@ -415,7 +415,9 @@ async fn connect_remote_app_server(
     let app_server = RemoteAppServerClient::connect(RemoteAppServerConnectArgs {
         endpoint,
         client_name: "codex-tui".to_string(),
-        client_version: env!("CARGO_PKG_VERSION").to_string(),
+        // CODEX-TERMUX-ANDROID-PATCH: this version is echoed into the HTTP
+        // User-Agent suffix that the backend gates models by.
+        client_version: codex_protocol::client_version::reported_client_version(),
         experimental_api: true,
         mcp_server_openai_form_elicitation: false,
         opt_out_notification_methods: Vec::new(),
@@ -575,7 +577,9 @@ where
             .unwrap_or_else(|err| panic!("cli session source should deserialize: {err}")),
         enable_codex_api_key_env: false,
         client_name: "codex-tui".to_string(),
-        client_version: env!("CARGO_PKG_VERSION").to_string(),
+        // CODEX-TERMUX-ANDROID-PATCH: this version is echoed into the HTTP
+        // User-Agent suffix that the backend gates models by.
+        client_version: codex_protocol::client_version::reported_client_version(),
         experimental_api: true,
         mcp_server_openai_form_elicitation: false,
         opt_out_notification_methods: Vec::new(),
