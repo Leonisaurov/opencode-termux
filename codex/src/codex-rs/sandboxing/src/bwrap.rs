@@ -40,8 +40,9 @@ const SYSTEM_BWRAP_PROBE_STDERR_LIMIT_BYTES: u64 = 64 * 1024;
 pub fn system_bwrap_warning(permission_profile: &PermissionProfile) -> Option<String> {
     #[cfg(target_os = "android")]
     {
-        // Termux uses the port's codex-linux-sandbox/proot wrapper. The
-        // desktop bubblewrap prerequisite is not applicable here.
+        // CODEX-TERMUX-ANDROID-PATCH: Termux uses the port's
+        // codex-linux-sandbox/proot wrapper. The desktop bubblewrap
+        // prerequisite is not applicable here.
         let _ = permission_profile;
         return None;
     }

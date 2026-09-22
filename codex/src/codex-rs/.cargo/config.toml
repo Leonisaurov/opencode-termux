@@ -10,6 +10,8 @@ rustflags = ["-C", "link-arg=/STACK:8388608", "-C", "link-arg=/arm64hazardfree"]
 [target.'cfg(all(windows, target_env = "gnu"))']
 rustflags = ["-C", "link-arg=-Wl,--stack,8388608"]
 
+# CODEX-TERMUX-ANDROID-PATCH: the Android port builds with the NDK toolchain
+# exposed on PATH by the CI workflow instead of a Rust-bundled linker.
 [target.aarch64-linux-android]
 linker = "aarch64-linux-android-clang"
 ar = "llvm-ar"

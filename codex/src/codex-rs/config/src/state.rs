@@ -41,6 +41,8 @@ impl From<LoaderOverrides> for ConfigLoadOptions {
 /// LoaderOverrides overrides managed configuration inputs (primarily for tests).
 #[derive(Debug, Default, Clone)]
 pub struct LoaderOverrides {
+    /// Optional configuration file supplied with the installed Codex package.
+    pub packaged_defaults_path: Option<AbsolutePathBuf>,
     pub user_config_path: Option<AbsolutePathBuf>,
     pub user_config_profile: Option<ProfileV2Name>,
     pub managed_config_path: Option<PathBuf>,
@@ -50,6 +52,8 @@ pub struct LoaderOverrides {
     /// Remote app servers own their authentication policy independently.
     pub ignore_login_requirements: bool,
     pub ignore_user_config: bool,
+    /// Skip project-root discovery and all project configuration layers.
+    pub ignore_project_config: bool,
     pub ignore_user_and_project_exec_policy_rules: bool,
     //TODO(gt): Add a macos_ prefix to this field and remove the target_os check.
     #[cfg(target_os = "macos")]
@@ -64,6 +68,7 @@ impl LoaderOverrides {
     pub fn without_managed_config_for_tests() -> Self {
         let base = std::env::temp_dir().join("codex-config-tests");
         Self {
+            packaged_defaults_path: None,
             user_config_path: None,
             user_config_profile: None,
             managed_config_path: Some(base.join("managed_config.toml")),
@@ -72,6 +77,7 @@ impl LoaderOverrides {
             ignore_managed_requirements: false,
             ignore_login_requirements: false,
             ignore_user_config: false,
+            ignore_project_config: false,
             ignore_user_and_project_exec_policy_rules: false,
             #[cfg(target_os = "macos")]
             managed_preferences_base64: Some(String::new()),
@@ -212,6 +218,7 @@ impl ConfigLayerEntry {
     // Get the `.codex/` folder associated with this config layer, if any.
     pub fn config_folder(&self) -> Option<AbsolutePathBuf> {
         match &self.name {
+            ConfigLayerSource::PackagedDefaults { .. } => None,
             ConfigLayerSource::Mdm { .. } => None,
             ConfigLayerSource::System { file } => file.parent(),
             ConfigLayerSource::EnterpriseManaged { .. } => None,
@@ -459,10 +466,33 @@ impl ConfigLayerStack {
     pub fn origins(&self) -> HashMap<String, ConfigLayerMetadata> {
         let mut origins = HashMap::new();
         let mut path = Vec::new();
+        let mut provider_paths = vec!["features.network_proxy.credentials.".to_string()];
 
         for layer in self.layers_low_to_high() {
             let config = normalized_with_key_aliases(&layer.config, &[]);
+            if let Some(profiles) = config.get("profiles").and_then(TomlValue::as_table) {
+                provider_paths.extend(
+                    profiles
+                        .keys()
+                        .map(|name| format!("profiles.{name}.features.network_proxy.credentials.")),
+                );
+            }
             record_origins(&config, &layer.metadata(), &mut path, &mut origins);
+        }
+
+        if let Some(layer) = self.layers_low_to_high().next_back() {
+            let effective = self.effective_config();
+            let mut effective_origins = HashMap::new();
+            record_origins(
+                &effective,
+                &layer.metadata(),
+                &mut path,
+                &mut effective_origins,
+            );
+            origins.retain(|path, _| {
+                !provider_paths.iter().any(|prefix| path.starts_with(prefix))
+                    || effective_origins.contains_key(path)
+            });
         }
 
         origins

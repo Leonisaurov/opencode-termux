@@ -5,6 +5,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use codex_apply_patch::CODEX_CORE_APPLY_PATCH_ARG1;
+use codex_async_utils::THREAD_STACK_SIZE_BYTES;
 #[cfg(unix)]
 use codex_exec_server::CODEX_ARG0_EXEC_HELPER_ARG1;
 use codex_exec_server::CODEX_FS_HELPER_ARG1;
@@ -22,7 +23,6 @@ const MISSPELLED_APPLY_PATCH_ARG0: &str = "applypatch";
 #[cfg(unix)]
 const EXECVE_WRAPPER_ARG0: &str = "codex-execve-wrapper";
 const LOCK_FILENAME: &str = ".lock";
-const TOKIO_WORKER_STACK_SIZE_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Arg0DispatchPaths {
@@ -129,8 +129,13 @@ pub fn arg0_dispatch() -> Option<Arg0PathEntryGuard> {
                     Err(_) => std::process::exit(1),
                 };
                 let cwd = cwd.into();
-                match runtime.block_on(codex_apply_patch::apply_patch(
+                let update_file_mode = codex_apply_patch::apply_patch_file_update_mode_from_env();
+                match runtime.block_on(codex_apply_patch::apply_patch_with_options(
                     &patch_arg,
+                    codex_apply_patch::ApplyPatchOptions {
+                        update_file_mode,
+                        ..Default::default()
+                    },
                     &cwd,
                     &mut stdout,
                     &mut stderr,
@@ -227,7 +232,7 @@ where
     // top-level future on the caller's OS stack.
     let handle = std::thread::Builder::new()
         .name("codex-main".to_string())
-        .stack_size(TOKIO_WORKER_STACK_SIZE_BYTES)
+        .stack_size(THREAD_STACK_SIZE_BYTES)
         .spawn(move || {
             let runtime = build_runtime()?;
             runtime.block_on(run_main_with_arg0_guard(
@@ -255,8 +260,6 @@ where
         codex_self_exe: current_exe.clone(),
         codex_linux_sandbox_exe: if cfg!(target_os = "linux") {
             linux_sandbox_exe_path(path_entry_guard.as_ref(), current_exe)
-        } else if cfg!(target_os = "android") {
-            android_linux_sandbox_exe_path()
         } else {
             None
         },
@@ -284,60 +287,10 @@ fn linux_sandbox_exe_path(
         .or(current_exe)
 }
 
-/// Android/Termux port: there is no bubblewrap and no arg0 alias on Android.
-/// The sandbox is a shell wrapper (`codex-linux-sandbox`, a proot-based script
-/// installed by the port). Resolve it from `CODEX_LINUX_SANDBOX_EXE` first, then
-/// look for `codex-linux-sandbox` in `PATH`; fall back to `None` when absent.
-fn android_linux_sandbox_exe_path() -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os("CODEX_LINUX_SANDBOX_EXE") {
-        let path = PathBuf::from(path);
-        // Override explícito: se confía sin exigir shebang (puede apuntar a un
-        // wrapper que no es un script), solo se exige ejecutable.
-        if is_sandbox_wrapper_script(&path, /*require_shebang=*/ false) {
-            return Some(path);
-        }
-    }
-    for dir in std::env::split_paths(&std::env::var_os("PATH")?) {
-        let candidate = dir.join("codex-linux-sandbox");
-        if is_sandbox_wrapper_script(&candidate, /*require_shebang=*/ true) {
-            return Some(candidate);
-        }
-    }
-    None
-}
-
-/// True si `path` es un candidato válido para el wrapper del sandbox: archivo
-/// existente, EJECUTABLE (bit x del modo) y — cuando `require_shebang` — un
-/// script con shebang (primer byte `#`). El check de shebang descarta el stub
-/// ELF del port (`codex-linux-sandbox` compilado, que también puede aparecer en
-/// `$PREFIX/bin` y que simplemente imprime un error y sale): elegirlo haría
-/// fallar las tools cerrado. Lectura de solo 2 bytes: heurística barata.
-fn is_sandbox_wrapper_script(path: &Path, require_shebang: bool) -> bool {
-    use std::io::Read;
-    use std::os::unix::fs::PermissionsExt;
-
-    let md = match std::fs::metadata(path) {
-        Ok(md) => md,
-        Err(_) => return false,
-    };
-    if !md.is_file() || md.permissions().mode() & 0o111 == 0 {
-        return false;
-    }
-    if !require_shebang {
-        return true;
-    }
-    let mut f = match File::open(path) {
-        Ok(f) => f,
-        Err(_) => return false,
-    };
-    let mut buf = [0u8; 2];
-    f.read_exact(&mut buf).is_ok() && buf[0] == b'#'
-}
-
 fn build_runtime() -> anyhow::Result<tokio::runtime::Runtime> {
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     builder.enable_all();
-    builder.thread_stack_size(TOKIO_WORKER_STACK_SIZE_BYTES);
+    builder.thread_stack_size(THREAD_STACK_SIZE_BYTES);
     Ok(builder.build()?)
 }
 
@@ -429,10 +382,10 @@ fn prepare_path_entry_for_codex_aliases(
         .create(true)
         .truncate(false)
         .open(&lock_path)?;
+    // CODEX-TERMUX-ANDROID-PATCH: std::fs::File::try_lock is unsupported on
+    // Android/bionic (ErrorKind::Unsupported); single-user env → always acquired.
     #[cfg(not(target_os = "android"))]
     lock_file.try_lock()?;
-    // Android/bionic does not implement advisory file locks. Keeping the
-    // descriptor open still keeps the temporary directory guard alive.
 
     for filename in &[
         APPLY_PATCH_ARG0,
@@ -453,7 +406,7 @@ fn prepare_path_entry_for_codex_aliases(
         #[cfg(windows)]
         {
             let batch_script = path.join(format!("{filename}.bat"));
-            let exe = exe.display();
+            let exe = windows_batch_executable_path(&exe, path);
             std::fs::write(
                 &batch_script,
                 format!(
@@ -495,6 +448,14 @@ fn prepare_path_entry_for_codex_aliases(
         Arg0PathEntryGuard::new(temp_dir, lock_file, paths),
         updated_path_env_var,
     ))
+}
+
+#[cfg(windows)]
+fn windows_batch_executable_path(executable: &Path, alias_directory: &Path) -> String {
+    pathdiff::diff_paths(executable, alias_directory)
+        .filter(|relative_path| relative_path.is_relative())
+        .map(|relative_path| format!("%~dp0{}", relative_path.display()))
+        .unwrap_or_else(|| executable.display().to_string())
 }
 
 fn path_env_with_package_path_dir(
@@ -565,10 +526,6 @@ fn try_lock_dir(dir: &Path) -> std::io::Result<Option<File>> {
         Err(err) => return Err(err),
     };
 
-    #[cfg(target_os = "android")]
-    return Ok(Some(lock_file));
-
-    #[cfg(not(target_os = "android"))]
     match lock_file.try_lock() {
         Ok(()) => Ok(Some(lock_file)),
         Err(std::fs::TryLockError::WouldBlock) => Ok(None),
@@ -594,6 +551,8 @@ mod tests {
     use pretty_assertions::assert_eq;
     use std::fs;
     use std::fs::File;
+    #[cfg(windows)]
+    use std::os::windows::process::CommandExt;
     use std::path::Path;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -645,6 +604,50 @@ mod tests {
             install_context,
             path_dir,
         })
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_batch_alias_preserves_unicode_executable_paths() -> anyhow::Result<()> {
+        let root = TempDir::new()?;
+        let profile = root.path().join("用户");
+        let alias_directory = profile.join(".codex").join("tmp").join("arg0");
+        let executable_directory = profile.join("bin");
+        fs::create_dir_all(&alias_directory)?;
+        fs::create_dir_all(&executable_directory)?;
+
+        let system_root = std::env::var_os("SystemRoot")
+            .ok_or_else(|| anyhow::anyhow!("missing Windows system root"))?;
+        let command_shell = PathBuf::from(system_root).join("System32").join("cmd.exe");
+        let executable = executable_directory.join("cmd.exe");
+        fs::copy(&command_shell, &executable)?;
+
+        let batch_path = alias_directory.join("apply_patch.bat");
+        let executable_path = super::windows_batch_executable_path(&executable, &alias_directory);
+        fs::write(
+            &batch_path,
+            format!("@echo off\r\n\"{executable_path}\" /d /c exit 37\r\n"),
+        )?;
+
+        let output = std::process::Command::new(command_shell)
+            .args(["/d", "/c"])
+            .raw_arg(format!("chcp 437>nul & call \"{}\"", batch_path.display()))
+            .output()?;
+
+        assert_eq!(output.status.code(), Some(37));
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_batch_alias_preserves_cross_volume_executable_paths() {
+        assert_eq!(
+            super::windows_batch_executable_path(
+                Path::new(r"D:\Tools\codex.exe"),
+                Path::new(r"C:\Users\person\.codex\tmp\arg0"),
+            ),
+            r"D:\Tools\codex.exe",
+        );
     }
 
     #[test]

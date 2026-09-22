@@ -92,48 +92,40 @@ pub async fn run_command_under_seatbelt(
     anyhow::bail!("Seatbelt sandbox is only available on macOS");
 }
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
 pub async fn run_command_under_landlock(
     command: LandlockCommand,
     codex_linux_sandbox_exe: Option<PathBuf>,
     loader_overrides: LoaderOverrides,
 ) -> anyhow::Result<()> {
-    #[cfg(target_os = "android")]
-    anyhow::bail!(
-        "`codex sandbox` no es compatible con Android/Termux; ejecuta comandos directamente sin sandbox"
+    let LandlockCommand {
+        sandbox_state,
+        permissions_profile,
+        config_profile: _,
+        cwd,
+        include_managed_config,
+        config_overrides,
+        command,
+    } = command;
+    let managed_requirements_mode = ManagedRequirementsMode::for_profile_invocation(
+        &permissions_profile,
+        include_managed_config,
     );
-    #[cfg(target_os = "linux")]
-    {
-        let LandlockCommand {
+    run_command_under_sandbox(
+        DebugSandboxConfigOptions {
             sandbox_state,
             permissions_profile,
-            config_profile: _,
             cwd,
-            include_managed_config,
-            config_overrides,
-            command,
-        } = command;
-        let managed_requirements_mode = ManagedRequirementsMode::for_profile_invocation(
-            &permissions_profile,
-            include_managed_config,
-        );
-        run_command_under_sandbox(
-            DebugSandboxConfigOptions {
-                sandbox_state,
-                permissions_profile,
-                cwd,
-                managed_requirements_mode,
-                loader_overrides,
-            },
-            command,
-            config_overrides,
-            codex_linux_sandbox_exe,
-            SandboxType::Landlock,
-            /*log_denials*/ false,
-            &[],
-        )
-        .await
-    }
+            managed_requirements_mode,
+            loader_overrides,
+        },
+        command,
+        config_overrides,
+        codex_linux_sandbox_exe,
+        SandboxType::Landlock,
+        /*log_denials*/ false,
+        &[],
+    )
+    .await
 }
 
 pub async fn run_command_under_windows_sandbox(
@@ -388,7 +380,7 @@ async fn run_command_under_sandbox(
         SandboxType::Seatbelt => {
             let (file_system_sandbox_policy, network_sandbox_policy) =
                 runtime_permission_profile.to_runtime_permissions();
-            let args = create_seatbelt_command_args(CreateSeatbeltCommandArgsParams {
+            let mut args = create_seatbelt_command_args(CreateSeatbeltCommandArgsParams {
                 command,
                 file_system_sandbox_policy: &file_system_sandbox_policy,
                 network_sandbox_policy,
@@ -400,6 +392,15 @@ async fn run_command_under_sandbox(
                 extra_allow_unix_sockets: allow_unix_sockets,
             })
             .map_err(|err| anyhow::anyhow!(err))?;
+            // This CLI inherits the user's controlling terminal. Keep this deny
+            // after every shared policy allowance so the child cannot queue input
+            // for the unsandboxed shell that resumes when Codex exits.
+            match args.as_mut_slice() {
+                [flag, policy, ..] if flag.as_str() == "-p" => {
+                    policy.push_str("\n(deny file-ioctl (ioctl-command TIOCSTI))");
+                }
+                _ => anyhow::bail!("Seatbelt command is missing its generated policy"),
+            }
             spawn_debug_sandbox_child(
                 PathBuf::from("/usr/bin/sandbox-exec"),
                 args,
@@ -486,7 +487,21 @@ async fn run_command_under_windows_session(
     use codex_protocol::config_types::WindowsSandboxLevel;
     use codex_windows_sandbox::WindowsSandboxProxySettingsMode;
     use codex_windows_sandbox::WindowsSandboxSessionRequest;
+    use codex_windows_sandbox::resolve_windows_deny_read_paths;
     use codex_windows_sandbox::spawn_windows_sandbox_session_for_level;
+
+    // Setup reconciles persistent deny ACLs against this list. An empty list
+    // would discard the profile's denies, including on subsequent launches.
+    let (mut file_system, _) = permission_profile.to_runtime_permissions();
+    file_system.remove_skip_missing_path_entries();
+    let file_system = file_system.materialize_project_roots_with_workspace_roots(&workspace_roots);
+    let deny_read_paths = match resolve_windows_deny_read_paths(&file_system, &cwd) {
+        Ok(paths) => paths,
+        Err(err) => {
+            eprintln!("windows sandbox failed: {err}");
+            std::process::exit(1);
+        }
+    };
 
     let empty_paths: &[AbsolutePathBuf] = &[];
     let spawned = spawn_windows_sandbox_session_for_level(WindowsSandboxSessionRequest {
@@ -497,14 +512,14 @@ async fn run_command_under_windows_session(
         cwd: cwd.as_path(),
         env_map: env,
         windows_sandbox_level: WindowsSandboxLevel::from_config(config),
-        proxy_settings_mode: WindowsSandboxProxySettingsMode::Reconcile,
+        proxy_settings_mode: WindowsSandboxProxySettingsMode::Preserve,
         proxy_enforced: false,
         network_proxy_restricting_sid: None,
         timeout_ms: None,
         read_roots_override: None,
         read_roots_include_platform_defaults: false,
         write_roots_override: None,
-        deny_read_paths_override: empty_paths,
+        deny_read_paths_override: &deny_read_paths,
         deny_write_paths_override: empty_paths,
         tty: false,
         stdin_open: true,
