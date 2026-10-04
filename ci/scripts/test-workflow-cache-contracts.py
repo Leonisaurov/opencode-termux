@@ -46,8 +46,6 @@ def main() -> None:
     opencode = blocks(WORKFLOWS / "build-opencode.yml")
     opentui = blocks(WORKFLOWS / "build-opentui.yml")
     kilo = blocks(WORKFLOWS / "build-kilo.yml")
-    codex = blocks(WORKFLOWS / "build-codex.yml")
-    rusty = blocks(WORKFLOWS / "build-rusty-v8-android.yml")
 
     # Every producer of a product must use the same path and value sets as the
     # consumer, otherwise the recomputed restore key diverges.
@@ -78,12 +76,11 @@ def main() -> None:
         for product, (paths, _values) in group.items():
             assert "ci/source-manifest.json" not in paths, f"{product}: global manifest in cache key"
 
-    # Rusty V8 and Codex are contract-driven producers too.
-    assert "rusty-v8" in rusty, "rusty-v8 cache contract missing"
-    assert "codex" in codex, "codex cache contract missing"
-    assert "V8_VERSION" in rusty["rusty-v8"][1]
-    assert "CODEX_REF" in codex["codex"][1]
-    assert "V8_VERSION" in codex["codex"][1]
+    # Codex and its Rusty V8 dependency are not products of this repository:
+    # they build in Leonisaurov/codex-termux. Keeping them out here is an
+    # invariant, so re-adding either producer must fail this check.
+    for retired in ("build-codex.yml", "build-rusty-v8-android.yml"):
+        assert not (WORKFLOWS / retired).exists(), f"{retired}: Codex producer in this repository"
 
     # The NDK must use one shared absolute path so actions/cache (which versions
     # by path string) stores a single entry instead of one per product workspace.
@@ -105,14 +102,12 @@ def main() -> None:
     setup = (ROOT / "ci/scripts/setup-runner.sh").read_text(encoding="utf-8")
     assert "${GITHUB_WORKSPACE}/.ci/zig-${ZIG_VERSION}" in setup
 
-    # The orchestrator must wire both producers and include Codex in publish.
+    # The orchestrator wires the four stack products and nothing else.
     android = (WORKFLOWS / "build-android.yml").read_text(encoding="utf-8")
-    assert "rusty_v8: ${{ steps.changes.outputs.build_rusty_v8 }}" in android
-    assert "codex: ${{ steps.changes.outputs.build_codex }}" in android
-    assert "for product in core opentui bun opencode kilo rusty_v8 codex; do" in android
-    assert "uses: ./.github/workflows/build-rusty-v8-android.yml" in android
-    assert "uses: ./.github/workflows/build-codex.yml" in android
-    assert "needs: [detect, bun, opentui, opencode, kilo, codex]" in android
+    assert "rusty_v8" not in android, "build-android.yml: Rusty V8 re-wired into the stack"
+    assert "codex" not in android, "build-android.yml: Codex re-wired into the stack"
+    assert "for product in core opentui bun opencode kilo; do" in android
+    assert "needs: [detect, bun, opentui, opencode, kilo]" in android
 
 
 if __name__ == "__main__":

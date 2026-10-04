@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working in this
 
 ## Repository purpose
 
-This is the maintained Android/Termux port workspace for OpenCode, Kilo, and Codex. It builds native `aarch64` artifacts rather than wrapping host installations. OpenCode and Kilo bundle the Android Bun runtime and ARM64 OpenTUI runtime; Codex produces its Android CLI, code-mode host, and sandbox helper.
+This is the maintained Android/Termux port workspace for OpenCode and Kilo. It builds native `aarch64` artifacts rather than wrapping host installations. OpenCode and Kilo bundle the Android Bun runtime and ARM64 OpenTUI runtime. The Android Codex port lives in the separate `Leonisaurov/codex-termux` repository.
 
 Read `AGENTS.md` before making changes. `WORKSPACE.md` is the quick navigation map. Work inside the product directory that owns a change and keep generated state under that product's `build/` and final artifacts under its `artifacts/`. For reusable guidance on dependency-aware CI, incremental state, caches, artifacts, monitoring, and releases, see [`incremental-ci-builds`](~/.claude/skills/incremental-ci-builds/SKILL.md).
 
@@ -14,13 +14,11 @@ The producer graph is:
 
 ```text
 ICU -> WebKit/JSC -> TinyCC -> Bun -> OpenTUI -> OpenCode -> packages
-Rusty V8 -> Codex
 ```
 
 - `bun/` contains the vendored Bun source, Android build scripts, WebKit/JSC overlay, TinyCC source, and Android CMake files.
 - `opentui/` contains the versioned OpenTUI source trees for OpenCode and Kilo and the Android renderer build.
 - `opencode/` and `kilo/` contain their source checkouts, build scripts, tests, dependencies, and artifacts.
-- `codex/` contains the Codex checkout and Android build integration. For Codex-specific work, enter `codex/` and read its local `AGENTS.md`, `docs/`, `codex-rs/README.md`, and `justfile`.
 - `ci/scripts/` contains the content-addressed build-state engine, cache contracts, change classification, runner setup, packaging helpers, and regression tests.
 - `.github/workflows/` contains the dependency-aware producer workflows and the release orchestration workflow.
 
@@ -41,7 +39,7 @@ These values are deliberate port compatibility constraints:
 
 Do not update or align these versions by inference. A version update requires coordinated verification of the source ports and explicit authorization.
 
-Bun, OpenTUI, OpenCode, Kilo, and Codex source revisions are recorded in `ci/source-manifest.json`; external sources are pinned in `ci/external-sources.lock`. Source checkouts must be clean and must not contain nested Git metadata when a script validates them. WebKit is the exception: CI fetches its pinned external commit into `bun/build/webkit-src` and applies the explicit versioned overlay from `bun/webkit`.
+Bun, OpenTUI, OpenCode, and Kilo source revisions are recorded in `ci/source-manifest.json`; external sources are pinned in `ci/external-sources.lock`. Source checkouts must be clean and must not contain nested Git metadata when a script validates them. WebKit is the exception: CI fetches its pinned external commit into `bun/build/webkit-src` and applies the explicit versioned overlay from `bun/webkit`.
 
 ## Build commands
 
@@ -49,7 +47,7 @@ Routine builds run in GitHub Actions because WebKit and Bun are long native buil
 
 ```sh
 ci/scripts/build-pipeline.sh
-BUILD_KILO=1 BUILD_CODEX=1 ci/scripts/build-pipeline.sh
+BUILD_KILO=1 ci/scripts/build-pipeline.sh
 ```
 
 The pipeline invokes these product scripts in dependency order:
@@ -63,7 +61,6 @@ opentui/scripts/build-opentui.sh
 opencode/scripts/build-opencode.sh
 opencode/scripts/make-packages.sh
 kilo/scripts/build.sh                 # when BUILD_KILO=1
-codex/scripts/build-codex-android.sh  # when BUILD_CODEX=1
 ```
 
 Run an individual script only when its prerequisites and environment are already available. `bun/src/Makefile` is an old upstream interface; use the repository-owned scripts above for the Android port rather than treating that Makefile as the canonical build.
@@ -117,8 +114,6 @@ There is no separate repository-wide lint command documented for the port. Use t
 - `build-opentui.yml` builds `libopentui.so` with Zig for `aarch64-linux-android.24` and validates its Android `libc.so` dependency.
 - `build-opencode.yml` builds the standalone OpenCode bundle.
 - `build-kilo.yml` builds Kilo from the same Bun dependency graph.
-- `build-rusty-v8-android.yml` produces the Rusty V8 dependency used by Codex.
-- `build-codex.yml` builds Codex after the verified Rusty V8 artifact is available.
 - `build-android.yml` detects affected producers, runs the required dependency closure, and publishes only for `workflow_dispatch`. Push runs validate and upload artifacts but do not publish releases.
 
 Dispatch or inspect workflows with the local GitHub CLI:

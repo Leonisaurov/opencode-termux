@@ -1,8 +1,9 @@
-# Backup of the full Android stack DAG before Rusty V8 and Codex were
-# temporarily removed from the default flow. Kept tracked so the two jobs
-# can be restored by copying their blocks back into
-# .github/workflows/build-android.yml. This file is not executed: GitHub
-# only reads .github/workflows/*.yml.
+# Backup of the Android stack DAG from the period when Rusty V8 and Codex were
+# still wired into it. Those two producers now live permanently in
+# Leonisaurov/codex-termux, so this file is reference only: GitHub reads only
+# .github/workflows/*.yml, and copying these blocks back into
+# .github/workflows/build-android.yml would re-add a product this repository no
+# longer packages or publishes.
 
 name: Build and publish Android stack
 

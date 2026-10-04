@@ -12,14 +12,10 @@ class InstallerTests(unittest.TestCase):
         self.prefix = self.tmp / "prefix"; self.prefix.mkdir()
         self.manifest = self.tmp / "manifest.json"
         components = {}
-        specs = {"bun": "bun", "opentui": "libopentui.so", "opencode": "opencode", "kilo": "kilo", "codex": "codex-android"}
+        specs = {"bun": "bun", "opentui": "libopentui.so", "opencode": "opencode", "kilo": "kilo"}
         for component, filename in specs.items():
             payload = self.assets / filename; payload.write_text("#!/bin/sh\nprintf '%s\\n' version\n" % component); payload.chmod(0o755)
-            if component == "codex":
-                extra = self.assets / "codex-code-mode-host"; extra.write_text("#!/bin/sh\nexit 0\n"); extra.chmod(0o755)
-                sandbox = self.assets / "codex-linux-sandbox"; sandbox.write_text("#!/usr/bin/env bash\nexit 78\n"); sandbox.chmod(0o755)
-                files = [filename, extra.name, sandbox.name]
-            else: files = [filename]
+            files = [filename]
             archive = self.assets / (component + ".tar.gz")
             with tarfile.open(archive, "w:gz") as tar:
                 for name in files: tar.add(self.assets / name, arcname=name)
@@ -34,12 +30,26 @@ class InstallerTests(unittest.TestCase):
         r = self.run_installer("--dry-run"); self.assertEqual(r.returncode, 0, r.stderr); self.assertFalse((self.prefix / "bin").exists())
     def test_full_install_and_dependencies(self):
         r = self.run_installer(); self.assertEqual(r.returncode, 0, r.stderr)
-        for name in ("bun", "opencode", "kilo", "codex-android", "codex-code-mode-host", "codex-linux-sandbox"):
+        for name in ("bun", "opencode", "kilo"):
             self.assertTrue((self.prefix / "bin" / name).is_file(), name)
     def test_just_installs_standalones(self):
-        for component in ("opencode", "kilo", "codex"):
+        for component in ("opencode", "kilo"):
             r = self.run_installer("--just", component)
             self.assertEqual(r.returncode, 0, f"{component}: {r.stderr}")
+    def test_retired_codex_component_is_rejected(self):
+        r = self.run_installer("--just", "codex")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("invalid choice", r.stderr)
+        self.assertFalse((self.prefix / "bin" / "codex-android").exists())
+    def test_legacy_manifest_component_is_ignored(self):
+        # Releases published before the extraction still list Codex; the
+        # installer must install the stack it knows and skip the rest.
+        data = json.loads(self.manifest.read_text())
+        data["components"]["codex"] = dict(data["components"]["kilo"])
+        self.manifest.write_text(json.dumps(data))
+        r = self.run_installer()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse((self.prefix / "bin" / "codex").exists())
 
     def test_custom_prefix_uses_local_bin(self):
         prefix = self.tmp / ".local"

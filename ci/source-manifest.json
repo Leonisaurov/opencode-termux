@@ -16,11 +16,6 @@
       "mode": "vendored",
       "commit": "ea7ea9f91eacd2539929d53da9376828ca277aa2"
     },
-    "codex": {
-      "path": "codex/src",
-      "mode": "vendored",
-      "commit": "be2951ea34f0d295ed0becf97079f92fa5f6950e"
-    },
     "opentui-opencode": {
       "path": "opentui/src/opencode",
       "mode": "vendored",

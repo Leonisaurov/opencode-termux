@@ -56,7 +56,7 @@ Antes este workspace clonaba fuentes y les aplicaba parches en build mediante
 en `86b5916 ci: vendor Android source trees`: hoy las fuentes viven versionadas
 en el monorepo y cada producto fija su revisión en:
 
-- `ci/source-manifest.json` (productos vendorizados: bun, opencode, kilo, codex,
+- `ci/source-manifest.json` (productos vendorizados: bun, opencode, kilo,
   opentui-opencode, opentui-kilo).
 - `ci/external-sources.lock` (fuentes externas fijadas: WebKit, TinyCC).
 
@@ -196,10 +196,11 @@ resolvió el aborto.
 - **`include file 'tccdefs.h' not found`**: libtcc debe compilar sus predefinidos
   embebidos. `build-tinycc.sh` define `CONFIG_TCC_PREDEFS 1` y genera
   `tccdefs_.h` con `c2str`.
-- **Rusty V8/Codex fuera del flujo** (temporal): se quitaron de
-  `build-android.yml` y se guardó el DAG completo en
-  `ci/workflows/build-android.full.yml`. `publish` y el instalador toleran la
-  ausencia de `codex`.
+- **Codex/Rusty V8 fuera del stack** (permanente): se extrajeron a
+  `Leonisaurov/codex-termux`, con su propia pipeline, su manifest
+  (`codex-termux/v1`) y su instalador. El DAG histórico quedó en
+  `ci/workflows/build-android.full.yml` como referencia. `publish` y el
+  instalador ya no conocen `codex`; un manifest antiguo que lo liste se ignora.
 - **Kilo a base de fuente**: `kilo/scripts/build.sh` compila `libopentui.so`
   (0.3.4) y el bundle desde `opentui/src/kilo` y `kilo/src`. Las adaptaciones
   Android de Zig viven en el árbol vendorizado; el build las **verifica por
