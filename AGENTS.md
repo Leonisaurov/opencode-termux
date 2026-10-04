@@ -7,13 +7,13 @@ product directory that owns the change:
 
 - `opencode/`: OpenCode source, build, tests, patches, and artifacts.
 - `kilo/`: Kilo source, build, configuration, tests, and artifacts.
-- `codex/`: Codex source, build, tests, scripts, and artifacts. For Codex
-  work, enter this directory first and read its local `AGENTS.md`, `docs/`,
-  `codex-rs/README.md`, and `justfile`.
 - `bun/`: Bun source and Android runtime toolchain.
 - `opentui/`: OpenTUI checkouts for OpenCode and Kilo plus its port tests.
 - `ci/`: shared build-state helpers, runner setup, Docker assets, and pipeline
   orchestration; `.github/workflows/` contains CI entry points.
+
+Codex is not a product of this workspace: its Android/Termux port builds in
+`Leonisaurov/codex-termux` with its own pipeline, manifest, and installer.
 
 Dependencies are exposed through product-local `deps/` links. Do not create
 duplicate source checkouts, root-level build outputs, or ad-hoc test trees.

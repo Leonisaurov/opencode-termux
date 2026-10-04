@@ -12,5 +12,5 @@ python3 ci/scripts/validate-source-tree.py
 
 El verificador exige que cada checkout exista, apunte al commit exacto y esté
 limpio. Las adaptaciones que aún pertenecen a fuentes externas (WebKit, Zig
-vendorizado de Bun y Rusty V8) deben publicarse en commits reproducibles antes
+vendorizado de Bun) deben publicarse en commits reproducibles antes
 de retirar sus archivos históricos; el CI no los aplica silenciosamente.

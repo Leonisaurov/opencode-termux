@@ -21,31 +21,27 @@ skill `github-actions-cache`.
 
 - Regla aplicada: el NDK usa **un único path absoluto compartido**
   (`${{ github.workspace }}/.ci/android-ndk`) y el toolchain de Zig otro
-  (`${{ github.workspace }}/.ci/zig-<version>`), en core, bun, opentui, kilo,
-  codex y opencode. `actions/cache` versiona por la cadena de `path`, así que
+  (`${{ github.workspace }}/.ci/zig-<version>`), en core, bun, opentui, kilo
+  y opencode. `actions/cache` versiona por la cadena de `path`, así que
   paths distintos guardaban una copia por producto; ahora es una sola entrada.
   `test-workflow-cache-contracts.py` lo verifica.
 
 - Se conservan los **intermedios de objetos compilados** (WebKit `webkit-build`,
-  Bun `bun-build`, Codex `sccache`), que son lo que evita las recompilaciones
+  Bun `bun-build`), que son lo que evita las recompilaciones
   largas. Solo se descartan capas **redundantes o re-descargables**:
-  `codex-cargo-target` (redundante con `sccache`), `codex-cargo-dependencies` y
   `kilo-dependencies` (registries re-descargables) y el host Bun `~/.bun`
   (re-instalable). Los checkpoints de fallo conservan el árbol completo.
 
-## Fallback durable de Rusty V8
+## Fallback durable en Release (Rusty V8)
 
-Rusty V8 es el caso más caro: una compilación en frío tarda ~110 min y su
-artifact es pequeño (~36 MB). La cuota de cache (10 GiB) puede desalojarlo, así
-que su par staged (`.a.gz` + `src_binding.rs` + `.sha256`) también se publica en
-la Release **`rusty-v8-v<version>`**, que **no** está sujeta a la cuota.
-
-- `build-rusty-v8-android.yml` intenta primero la cache exacta; si falta,
-  **descarga la Release y valida `sha256sum`** antes de compilar desde fuente.
-  Un fallback válido evita por completo el rebuild de V8.
-- Tras un build desde fuente correcto, publica/actualiza la Release
-  (best-effort) para mantenerla fresca.
-- El job `rusty-v8` del orquestador tiene `contents: write` para poder publicar.
+Rusty V8 y Codex ya no se construyen aquí: viven en
+[`Leonisaurov/codex-termux`](https://github.com/Leonisaurov/codex-termux), donde
+el patrón sigue siendo válido — una compilación en frío de V8 tarda ~110 min y
+su artifact pesa ~36 MB, así que el par staged (`.a.gz` + `src_binding.rs` +
+`.sha256`) se publica además en la Release `rusty-v8-v<version>`, que **no**
+está sujeta a la cuota de cache. La lección para este repositorio es la misma
+para cualquier productor caro: si su rebuild en frío supera el tiempo que admite
+la cuota, espeja su artifact en una Release.
 
 
 ## Matriz de verificación

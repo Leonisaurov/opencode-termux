@@ -6,7 +6,7 @@ import argparse, hashlib, json, os, pathlib, re, shutil, stat, subprocess
 import sys, tarfile, tempfile, urllib.parse, urllib.request, zipfile
 
 SCHEMA = "opencode-termux.stack/v1"
-COMPONENTS = ("bun", "opentui", "opencode", "kilo", "codex")
+COMPONENTS = ("bun", "opentui", "opencode", "kilo")
 DEFAULT_PREFIX = "/data/data/com.termux/files/usr"
 DEFAULT_TMP = os.environ.get("TMPDIR", "/data/data/com.termux/files/usr/tmp")
 ABSOLUTE = re.compile(r"^(?:/|[A-Za-z]:[\\/])")
@@ -157,10 +157,7 @@ def validate_archive(path: pathlib.Path, kind: str, expected: list[str], out: pa
         if not (out / f).is_file() or (out / f).is_symlink(): fail(f"falta archivo esperado: {f}")
 
 def verify_file(path: pathlib.Path, component: str, name: str) -> None:
-    if name == "codex-linux-sandbox":
-        if subprocess.run(["bash", "-n", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode: fail("codex-linux-sandbox no es un script Bash válido")
-        return
-    if name.endswith(".so") or name in ("bun", "opencode", "kilo", "codex", "codex-android", "codex-code-mode-host"):
+    if name.endswith(".so") or name in ("bun", "opencode", "kilo"):
         if os.environ.get("CODEX_INSTALL_TEST_MODE") == "1": return
         info = subprocess.check_output(["file", str(path)], text=True)
         if "ELF" not in info or not re.search(r"aarch64|ARM aarch64", info): fail(f"{component}: arquitectura ELF inválida en {name}")
@@ -204,7 +201,7 @@ def main() -> None:
                 if hashlib.sha256(dl.read_bytes()).hexdigest() != c["sha256"]: fail(f"{n}: checksum inválido")
                 ext = stage / n / "extracted"; validate_archive(dl, c["archive"], c["files"], ext)
                 for f in c["files"]: verify_file(ext / f, n, f)
-                dest = {"bun":"bin/bun", "opentui":"lib/libopentui.so", "opencode":"bin/opencode", "kilo":"bin/kilo", "codex":"bin/codex-android"}[n]
+                dest = {"bun":"bin/bun", "opentui":"lib/libopentui.so", "opencode":"bin/opencode", "kilo":"bin/kilo"}[n]
                 for f in c["files"]:
                     target = dest if f == c["files"][0] else f"bin/{f}"
                     target_path = payload / target; target_path.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(ext / f, target_path); target_path.chmod(0o755)
@@ -221,7 +218,7 @@ def main() -> None:
                     dst = prefix / rel; dst.parent.mkdir(parents=True, exist_ok=True); os.replace(payload / rel, dst); moved.append((rel, dst))
                 for n in names:
                     if n == "opentui" or not args.smoke_test: continue
-                    exe = prefix / {"bun":"bin/bun", "opencode":"bin/opencode", "kilo":"bin/kilo", "codex":"bin/codex-android"}[n]
+                    exe = prefix / {"bun":"bin/bun", "opencode":"bin/opencode", "kilo":"bin/kilo"}[n]
                     if not smoke(exe, n): smoke_failures.append(n)
                 print("[✓] Instalación completa: archivos, checksum y arquitectura validados.", file=sys.stderr)
             except BaseException:

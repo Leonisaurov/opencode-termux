@@ -29,13 +29,6 @@
       "asset": "kilo-v0.1.0-android-aarch64.zip",
       "sha256": "<sha256 del artifact publicado>",
       "size": 0, "archive": "zip", "depends": ["bun"], "files": ["kilo"]
-    },
-    "codex": {
-      "version": "0.1.0", "tag": "codex-v0.1.0-android",
-      "asset": "codex-v0.1.0-android-aarch64.zip",
-      "sha256": "<sha256 del artifact publicado>",
-      "size": 0, "archive": "zip", "depends": [],
-      "files": ["codex-android", "codex-code-mode-host", "codex-linux-sandbox"]
     }
   }
 }

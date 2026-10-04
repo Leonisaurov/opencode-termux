@@ -1,15 +1,15 @@
 # OpenCode Termux Stack — Android aarch64
 
 > **Mapa para agentes y colaboradores:** lee primero [AGENTS.md](AGENTS.md).
-> Si el trabajo es de Codex, entra en `codex/` y sigue allí sus instrucciones;
-> para OpenCode, Kilo, Bun o el port usa el directorio indicado en ese mapa.
+> Para OpenCode, Kilo, Bun o el port usa el directorio indicado en ese mapa.
+> Codex ya no vive aquí: se construye en
+> [`Leonisaurov/codex-termux`](https://github.com/Leonisaurov/codex-termux).
 
 This repository builds and distributes a native Android/Termux stack for
-OpenCode, Kilo, and Codex. It is the maintained port and build ecosystem for
+OpenCode and Kilo. It is the maintained port and build ecosystem for
 the forked products, not a wrapper around a host installation: OpenCode and
 Kilo are standalone `aarch64` binaries with the Android Bun runtime and ARM64
-OpenTUI runtime incorporated into their bundle. Codex is distributed with its
-Android CLI, code-mode host, and sandbox helper.
+OpenTUI runtime incorporated into their bundle.
 
 Bun `1.2.13`, OpenCode `1.18.30`, Android API 24, and the `aarch64` target are
 deliberately pinned for compatibility with the Android source ports.
@@ -31,13 +31,12 @@ pipe:
 curl -fsSL https://raw.githubusercontent.com/Leonisaurov/opencode-termux/main/install.sh | sh
 ```
 
-That installs Bun, OpenTUI, OpenCode, Kilo, and Codex. The standalone products
+That installs Bun, OpenTUI, OpenCode, and Kilo. The standalone products
 can also be installed independently because their runtime is self-contained:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Leonisaurov/opencode-termux/main/install.sh | sh -s -- --just opencode
 curl -fsSL https://raw.githubusercontent.com/Leonisaurov/opencode-termux/main/install.sh | sh -s -- --just kilo
-curl -fsSL https://raw.githubusercontent.com/Leonisaurov/opencode-termux/main/install.sh | sh -s -- --just codex
 ```
 
 By default, files go to `/data/data/com.termux/files/usr/bin` and
@@ -51,8 +50,7 @@ curl -fsSL https://raw.githubusercontent.com/Leonisaurov/opencode-termux/main/in
 For example, OpenCode is installed as `$HOME/.local/bin/opencode` and
 OpenTUI as `$HOME/.local/lib/libopentui.so`.
 
-Codex installs `codex-android`, `codex-code-mode-host`, and
-`codex-linux-sandbox` together. To pin a release, append `1.18.11 --yes` (or
+To pin a release, append `1.18.11 --yes` (or
 use `--release 1.18.11 --yes`). Use `--dry-run` to validate without changing
 the Termux prefix.
 
@@ -76,14 +74,13 @@ See the upstream product documentation for provider configuration and usage.
 ## What This Repo Contains
 
 This repo is an organized workspace for the Android/Termux ports of OpenCode,
-Kilo, Codex, Bun, and OpenTUI. Full upstream checkouts are kept in their
+Kilo, Bun, and OpenTUI. Full upstream checkouts are kept in their
 own product directories; CI owns long builds and the repository keeps only
 reproducible state, scripts, and artifacts.
 
 ```
 opencode/{src,build,test,scripts,deps,artifacts}/
 kilo/{src,build,test,scripts,deps,artifacts,config}/
-codex/{src,build,test,scripts,artifacts}/
 bun/{src,build,test,scripts,artifacts,cmake}/
 opentui/{src/{opencode,kilo},build,test,scripts,artifacts}/
 ci/{scripts,docker}/              # shared state, runner, and CI helpers
@@ -149,10 +146,11 @@ validator or checkpoint-policy change cannot bless an artifact made by older
 cache logic. ICU, WebKit, TinyCC, and Bun checkpoints are separate so progress
 in one stage cannot overwrite a valid result from another stage.
 
-Codex follows the same dependency rule in CI: `build-codex.yml` calls the
-reusable Rusty V8 workflow first, downloads its verified artifact, and only
-then builds `codex-cli` and `codex-code-mode-host`. Codex builds run only for
-Codex/build workflow changes or manual dispatch.
+Codex followed the same dependency rule and no longer does: it builds, with its
+Rusty V8 dependency, in
+[`Leonisaurov/codex-termux`](https://github.com/Leonisaurov/codex-termux).
+Nothing in this repository's dependency graph, cache contracts, or release
+manifest refers to it.
 
 CI operations use the local `gh` CLI. Push-triggered runs validate and upload
 artifacts but intentionally do not publish a release; use `workflow_dispatch`

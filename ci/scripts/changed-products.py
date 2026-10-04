@@ -12,8 +12,8 @@ import argparse
 import subprocess
 from pathlib import PurePosixPath
 
-PRODUCTS = ("bun", "opentui", "opencode", "kilo", "codex")
-GRAPH_PRODUCTS = ("core", "opentui", "bun", "opencode", "kilo", "rusty_v8", "codex")
+PRODUCTS = ("bun", "opentui", "opencode", "kilo")
+GRAPH_PRODUCTS = ("core", "opentui", "bun", "opencode", "kilo")
 
 
 def classify(paths: list[str]) -> set[str]:
@@ -56,8 +56,6 @@ def affected_products(changed: set[str]) -> set[str]:
         affected.update({"core", "bun", "opentui", "opencode"})
     if "kilo" in changed:
         affected.update({"core", "bun", "kilo"})
-    if "codex" in changed:
-        affected.update({"rusty_v8", "codex"})
     return affected
 
 

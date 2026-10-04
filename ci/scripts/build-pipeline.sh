@@ -11,7 +11,6 @@ export BUILD_CHANGED_PRODUCTS
 echo "Changed products: $BUILD_CHANGED_PRODUCTS"
 
 BUILD_KILO="${BUILD_KILO:-0}"
-BUILD_CODEX="${BUILD_CODEX:-0}"
 
 echo "=== Incremental Android build pipeline ==="
 echo "State: $BUILD_STATE_DIR"
@@ -34,10 +33,6 @@ run_product opencode "$REPO_ROOT/opencode/scripts/make-packages.sh"
 
 if [ "$BUILD_KILO" = "1" ]; then
   run_product kilo "$REPO_ROOT/kilo/scripts/build.sh"
-fi
-
-if [ "$BUILD_CODEX" = "1" ]; then
-  run_product codex "$REPO_ROOT/codex/scripts/build-codex-android.sh"
 fi
 
 echo "=== Incremental pipeline complete ==="
