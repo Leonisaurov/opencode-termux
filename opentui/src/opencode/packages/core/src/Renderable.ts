@@ -1109,8 +1109,10 @@ export abstract class Renderable extends BaseRenderable {
     this._screenX = parentScreenX + this._x + this._translateX
     this._screenY = parentScreenY + this._y + this._translateY
 
-    const newWidth = Math.max(layout.width, 1)
-    const newHeight = Math.max(layout.height, 1)
+    // Yoga reports NaN for a node attached after this frame's layout pass.
+    // Keep the last size until the next pass lays the node out.
+    const newWidth = Number.isNaN(layout.width) ? oldWidth : Math.max(layout.width, 1)
+    const newHeight = Number.isNaN(layout.height) ? oldHeight : Math.max(layout.height, 1)
     const sizeChanged = oldWidth !== newWidth || oldHeight !== newHeight
 
     this._widthValue = newWidth
@@ -1429,8 +1431,8 @@ export abstract class Renderable extends BaseRenderable {
         y: scissorRect.y,
         width: scissorRect.width,
         height: scissorRect.height,
-        screenX: this._screenX,
-        screenY: this._screenY,
+        screenX: this.buffered ? this._screenX : scissorRect.x,
+        screenY: this.buffered ? this._screenY : scissorRect.y,
       })
     }
     // Most renderables expose all children. Skip building a visible-child list
@@ -1595,6 +1597,7 @@ export abstract class Renderable extends BaseRenderable {
   }
 
   public processMouseEvent(event: MouseEvent): void {
+    ;(event as { currentTarget: Renderable | null }).currentTarget = this
     this._mouseListener?.call(this, event)
     this._mouseListeners[event.type]?.call(this, event)
     this.onMouseEvent(event)
@@ -1739,6 +1742,7 @@ export type RenderCommand =
 
 export class RootRenderable extends Renderable {
   private renderList: RenderCommand[] = []
+  private _currentRenderable: Renderable | undefined
   private appliedLayoutGeneration: number = -1
   private appliedRenderListRevision: number = -1
   private renderListReusable: boolean = false
@@ -1765,7 +1769,18 @@ export class RootRenderable extends Renderable {
     this.calculateLayout()
   }
 
+  public get currentRenderable(): Renderable | undefined {
+    return this._currentRenderable
+  }
+
+  public takeCurrentRenderable(): Renderable | undefined {
+    const renderable = this._currentRenderable
+    this._currentRenderable = undefined
+    return renderable
+  }
+
   public render(buffer: OptimizedBuffer, deltaTime: number): void {
+    this._currentRenderable = undefined
     if (!this.visible) return
 
     // 0. Run lifecycle pass
@@ -1813,7 +1828,9 @@ export class RootRenderable extends Renderable {
         case "render":
           // Skip if renderable was destroyed during a previous render callback
           if (!command.renderable.isDestroyed) {
+            this._currentRenderable = command.renderable
             command.renderable.render(buffer, deltaTime)
+            this._currentRenderable = undefined
           }
           break
         case "pushScissorRect":

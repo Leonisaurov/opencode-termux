@@ -9,6 +9,7 @@ import {
 } from "./zig.js"
 import type { EditBuffer } from "./edit-buffer.js"
 import { createExtmarksController } from "./lib/index.js"
+import type { SelectionBehavior, SelectionOccupancy } from "./types.js"
 
 export interface Viewport {
   offsetY: number
@@ -37,6 +38,10 @@ export class EditorView {
     const lib = resolveRenderLib()
     const viewPtr = lib.createEditorView(editBuffer.ptr, viewportWidth, viewportHeight)
     return new EditorView(lib, viewPtr, editBuffer)
+  }
+
+  public get isDestroyed(): boolean {
+    return this._destroyed
   }
 
   private guard(): void {
@@ -117,6 +122,7 @@ export class EditorView {
     fgColor?: RGBA,
     updateCursor?: boolean,
     followCursor?: boolean,
+    behavior: SelectionBehavior = "cell",
   ): boolean {
     this.guard()
     return this.lib.editorViewSetLocalSelection(
@@ -129,6 +135,7 @@ export class EditorView {
       fgColor || null,
       updateCursor ?? false,
       followCursor ?? false,
+      behavior,
     )
   }
 
@@ -141,6 +148,7 @@ export class EditorView {
     fgColor?: RGBA,
     updateCursor?: boolean,
     followCursor?: boolean,
+    behavior: SelectionBehavior = "cell",
   ): boolean {
     this.guard()
     return this.lib.editorViewUpdateLocalSelection(
@@ -153,12 +161,39 @@ export class EditorView {
       fgColor || null,
       updateCursor ?? false,
       followCursor ?? false,
+      behavior,
     )
   }
 
   public resetLocalSelection(): void {
     this.guard()
     this.lib.editorViewResetLocalSelection(this.viewPtr)
+  }
+
+  public convertSelectionToCell(): boolean {
+    this.guard()
+    return this.lib.editorViewConvertSelectionToCell(this.viewPtr)
+  }
+
+  public setSelectionOccupancy(occupancy: SelectionOccupancy): void {
+    this.guard()
+    this.lib.editorViewSetSelectionOccupancy(this.viewPtr, occupancy)
+  }
+
+  public getSelectionOccupancy(): SelectionOccupancy {
+    this.guard()
+    this._textBufferViewPtr ??= this.lib.editorViewGetTextBufferView(this.viewPtr)
+    return this.lib.textBufferViewGetSelectionOccupancy(this._textBufferViewPtr)
+  }
+
+  public setSelectionInclusive(start: number, end: number, bgColor?: RGBA, fgColor?: RGBA): void {
+    this.guard()
+    this.lib.editorViewSetSelectionInclusive(this.viewPtr, start, end, bgColor || null, fgColor || null)
+  }
+
+  public setSelectionColors(bgColor?: RGBA, fgColor?: RGBA): void {
+    this.guard()
+    this.lib.editorViewSetSelectionColors(this.viewPtr, bgColor || null, fgColor || null)
   }
 
   public getSelectedText(): string {
@@ -235,6 +270,11 @@ export class EditorView {
     return this.lib.editorViewGetVisualEOL(this.viewPtr)
   }
 
+  public gotoVisualLineEnd(): void {
+    this.guard()
+    this.lib.editorViewGotoVisualLineEnd(this.viewPtr)
+  }
+
   public getLineInfo(): LineInfo {
     this.guard()
     return this.lib.editorViewGetLineInfo(this.viewPtr)
@@ -270,9 +310,7 @@ export class EditorView {
 
   public measureForDimensions(width: number, height: number): { lineCount: number; widthColsMax: number } | null {
     this.guard()
-    if (!this._textBufferViewPtr) {
-      this._textBufferViewPtr = this.lib.editorViewGetTextBufferView(this.viewPtr)
-    }
+    this._textBufferViewPtr ??= this.lib.editorViewGetTextBufferView(this.viewPtr)
     return this.lib.textBufferViewMeasureForDimensions(this._textBufferViewPtr, width, height)
   }
 
