@@ -348,3 +348,81 @@ Medido contra `oven-sh/bun` (las tags llevan prefijo `bun-`):
 Queda pendiente clasificar el ELF de ese asset (tipo, `PT_INTERP`, `NEEDED`, API mínima) antes de
 proponer cambiar el Bun del port de fuente a artefacto: eso contraviene el principio actual de compilar
 desde fuente y necesita autorización explícita.
+
+#### H2.0(a-i) Dónde cae exactamente la frontera y qué bloquea de verdad la ruta barata
+
+Barrido de `build.zig`/`Cargo.toml` por tag en `oven-sh/bun` (`gh api contents?ref=bun-vX`), el
+2026-10-06: `1.2.13`, `1.3.0`, `1.3.5`, `1.3.9`, `1.3.11`, `1.3.13` y `1.3.14` conservan `build.zig` y
+no tienen `Cargo.toml`; `1.4.0`, `1.4.1` y `1.4.2` invierten el estado. `bun-v1.3.15` **no existe** como
+tag, así que la cota es exacta: **1.3.14 último Zig, 1.4.0 primer Rust**. No hay escalón intermedio que
+probar.
+
+Lo que cambia el cálculo de coste es el carácter del requisito de Bun en v2. En `v2.0.24` el
+`bun@1.4.2` está declarado en `packageManager` del `package.json` raíz y **no hay campo `engines`** ni
+en la raíz ni en `packages/cli`; el propio 1.18.34 vendorizado declara `packageManager: bun@1.3.14`, o
+sea justo el último Bun Zig. Por tanto ningún chequeo de manifiesto impide bundlear fuente v2 con un
+Bun de era Zig: la exigencia 1.4.2 es cómo se construye upstream, no una barrera de ejecución. La
+decisión entre re-portear Bun a cargo/NDK (R1), consumir su asset android oficial (R2) o quedarse en
+Zig (R3) queda entonces condicionada por dos preguntas medibles en un runner, no por este barrido:
+
+1. si el código v2 usa APIs de runtime que nuestro Bun embebido no tenga, y
+2. si el runtime standalone rechaza un grafo escrito por un `bun build --compile` de versión distinta
+   (hoy empaquetamos y ejecutamos el mismo 1.2.13, así que nunca se ha probado el desajuste).
+
+Inventario nativo de `packages/cli@v2.0.24`, porque cada uno es un punto de fricción con Bionic
+semejante al swap de `libopentui.so`: `@opencode-ai/pty` 0.2.0, `@parcel/watcher` 2.5.1,
+`web-tree-sitter` 0.25.10, `tree-sitter-bash` 0.25.0, `tree-sitter-powershell` 0.25.10,
+`@silvia-odwyer/photon-node` 0.3.4 y el catálogo OpenTUI en `0.5.14` (`core`/`solid`/`keymap`, con
+`@effect/*` en `4.0.0-rc.112`). En 1.18.34 el catálogo sigue en `0.4.5`, lo que confirma que la
+reescritura de `patch-opentui-core-runtime.py` es obligatoria en la fase 2 y no opcional.
+
+Nota de higiene: `/usr/tmp/bun-142/v1_2_13.zig` y `v1_4_2.zig` quedaron en 0 bytes (ref inexistente en
+esa ruta); la evidencia válida son los listados `files-1213.txt` (10 233 rutas) y `files-142.txt`
+(19 743 rutas) generados del árbol de cada tag.
+
+#### H2.0(a-ii) El bun Bionic oficial de 1.4.2 corre acá, y el formato 1.4.2 se entiende
+
+Medido en el dispositivo el 2026-10-06 sobre `bun-linux-aarch64-android.zip` de la tag
+`bun-v1.4.2` (35 154 316 B comprimido, `bun` de 86 800 440 B), descargado en `$PREFIX/tmp`.
+
+Clasificación ELF (`readelf`):
+
+- `ELF64`, `Type: DYN` (PIE), `Machine: AArch64`, `PT_INTERP = /system/bin/linker64`.
+- `DT_NEEDED`: `libc.so`, `libm.so`, `libdl.so`; **cero** referencias `GLIBC_*` ⇒ Bionic verdadero,
+  no el ELF glibc que ya nos rompe el auto-update.
+- Nota `.note.android.ident` presente, con `r27c` en el campo de versión (NDK r27c; el port usa
+  28.1.13356709). API mínima no se puede leer de esa nota.
+- Ejecutado en el teléfono: `bun --version` → `1.4.2`, rc=0. Con 5 386 MB disponibles.
+
+Formato standalone, medido compilando un TS de 61 B con ese mismo bun (`bun build --compile`):
+`bun build --compile` **funciona en el build android** y el artefacto resultante **corre** (rc=0,
+imprime su salida). Pero el layout cambió respecto de lo que asume nuestra maquinaria:
+
+- `ci/scripts/module-graph-patch.ts:33-56` y `opencode/scripts/build-opencode-android.ts:196-229`
+  suponen `[bun][grafo][u64]`, con el trailer `\n---- Bun! ----\n` terminando 8 bytes antes del EOF.
+  En 1.4.2 el trailer está **128 549 bytes antes del EOF**: tras él van las **section headers del ELF**,
+  reubicadas.
+- Comparando el artefacto (88 536 832 B) contra el bun base byte a byte: **el único campo del header
+  ELF que cambia es `e_shoff`** (86 798 264 → 88 534 656). `e_type`, `e_machine`, `e_entry`, `e_phoff`,
+  `e_phnum` (8), `e_shnum` (34), `e_shentsize` (64) y `e_shstrndx` son idénticos, y en ambos archivos
+  `e_shoff + e_shnum·e_shentsize == tamaño del archivo`. La inserción del grafo desplazó las section
+  headers **1 736 392 bytes**.
+- Dentro del bloque de offsets de 32 bytes, `byte_count` ya no satisface la invariante
+  `byte_count == offsets_start` que el parser exige para no abortar: en 1.4.2 vale 163 para un grafo de
+  un solo módulo (lista de módulos en 98..150, argv en 162 de longitud 0), y el texto fuente embebido
+  aparece 163+32 bytes antes del trailer. Es decir, el campo sigue ahí y es interpretable, pero su
+  semántica relativa al tamaño total del grafo es otra.
+
+Consecuencia para los checkpoints del plan: **CP-A no dispara**. El cambio de formato es acotado y
+conocido — localizar el grafo escaneando el trailer hacia atrás (funciona), y reubicar las section
+headers parcheando `e_shoff` al ensamblar, que es exactamente lo que Bun 1.4.2 hace por dentro. No hay
+que reescribir `module-graph-patch.ts` desde cero, hay que añadirle la cola ELF. Tampoco hace falta
+re-portear Bun 1.4.x a cargo/NDK (R1) para tener un runtime Bionic de la versión que pide v2: la ruta
+R2 (consumir el asset android oficial como runtime embebido) pasa de teórica a empírica en el nivel
+"existe y arranca".
+
+Límites de lo afirmado acá: solo se ejecutaron `--version` y un standalone trivial compilado y corrido
+por el mismo bun 1.4.2. No está probado (a) que un grafo escrito por un bun host x86_64 de otra versión
+sea aceptado por este runtime, (b) que el ensamblado `[bun android 1.4.2] + [grafo]` de nuestra pipeline
+siga funcionando con la cola ELF, ni (c) que el binario aguante la carga real de OpenCode (JIT, fs,
+pty, SQLite) bajo este kernel. Nada de eso se afirma con esta medición.
