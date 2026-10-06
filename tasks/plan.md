@@ -22,7 +22,7 @@ al checkout correcto y lea sus instrucciones locales antes de modificar nada.
       dependencias.
 - [ ] Ejecutar preflight y builds pesados en el host/CI con aprobación de
       escalada; esta fase no los lanza automáticamente.
-- [x] Añadir contrato `ci-cache-v1`, rutas persistentes de caches y validación
+- [x] Añadir contrato `ci-cache-v2`, rutas persistentes de caches y validación
       reutilizable de outputs; falta medirlo en un runner real.
 - [x] Añadir resumen estándar de cache/estado/compilador/tiempo para jobs que
       lo incorporen; falta conectar estadísticas reales de cada compilador.
@@ -32,6 +32,13 @@ al checkout correcto y lea sus instrucciones locales antes de modificar nada.
 Los checkouts upstream conservan su documentación propia. La raíz solo
 documenta integración, portabilidad Android/Termux, rutas y artefactos que
 realmente existen en este workspace.
+
+## Estado de aceptación
+
+Las validaciones estáticas y las pruebas locales están verdes. Los pushes de
+esta sesión lanzaron la CI normal en `main`, pero sus resultados no se
+monitorizan por instrucción explícita; por tanto no se declara aquí un build
+remoto exitoso ni se inventan métricas de tiempo/cache.
 
 ## Plan: compilación incremental óptima para Bun, Zig, Rust y Android
 
