@@ -88,6 +88,12 @@ check_opencode_source() {
     # section-agnostic) and prove it is non-trivial with a canary symbol.
     rg -q 'readelf --dyn-syms' "$ROOT/.github/workflows/build-opentui.yml"
     rg -q 'grep -qx close "\$BIONIC"' "$ROOT/.github/workflows/build-opentui.yml"
+    # IFUNC must be part of the oracle: Bionic exports strcmp/strcpy/strchr/memchr
+    # as IFUNC, so a FUNC/OBJECT-only filter reports them as false "missing".
+    rg -q 'IFUNC' "$ROOT/.github/workflows/build-opentui.yml"
+    # Coverage comes from walking every stub in the triple (API subdirs plus
+    # libm/libdl); a single-level glob under-collects the public API.
+    rg -q "find \"\\\$STUB_DIR\" -name '\*\.so'" "$ROOT/.github/workflows/build-opentui.yml"
     # nm --defined-only drops stub symbols (they live at Ndx=UND) and yields an
     # empty oracle, i.e. every libc symbol as a false "missing".
     if rg -q 'nm -D --defined-only' "$ROOT/.github/workflows/build-opentui.yml"; then

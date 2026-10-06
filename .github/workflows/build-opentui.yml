@@ -282,25 +282,32 @@ jobs:
           BIONIC="$WORK_DIR/bionic-exports.txt"
           : > "$BIONIC"
           # Una stub del NDK declara su API publica con Ndx=UND, asi que hay que
-          # tomar todo GLOBAL/WEAK de tipo FUNC/OBJECT sin filtrar por seccion:
-          # un filtro defined-only sobre nm descartaria esas entradas y dejaria el
-          # oracio vacio, marcando como ausentes symbols que Bionic si exporta
-          # (close, calloc, clock_gettime...). readelf si esta presente en el runner.
-          for stub in "$STUB_DIR"/*.so; do
+          # tomar todo GLOBAL/WEAK de tipo FUNC/OBJECT/IFUNC sin filtrar por
+          # seccion: un filtro defined-only sobre nm descartaria esas entradas y
+          # dejaria el oracio vacio; y omitir IFUNC perderia strcmp/strcpy/strchr/
+          # memchr, que Bionic exporta como IFUNC, no como FUNC. readelf si esta
+          # presente en el runner. Las stubs reales que uso el linker viven en
+          # subdirectorios por API y en libm/libdl (atan2, dlopen), no solo en el
+          # padre, asi que se recorren todas: la union es un superset de la
+          # superficie publica Bionic.
+          STUB_COUNT=0
+          while IFS= read -r stub; do
+            STUB_COUNT=$((STUB_COUNT + 1))
             readelf --dyn-syms -W "$stub" 2>/dev/null \
-              | awk '($4=="FUNC"||$4=="OBJECT") && ($5=="GLOBAL"||$5=="WEAK"){n=$8; sub(/@.*/,"",n); if(length(n)>0) print n}' \
+              | awk '($4=="FUNC"||$4=="OBJECT"||$4=="IFUNC") && ($5=="GLOBAL"||$5=="WEAK"){n=$8; sub(/@.*/,"",n); if(length(n)>0) print n}' \
               >> "$BIONIC"
-          done
+          done < <(find "$STUB_DIR" -name '*.so')
           sort -u "$BIONIC" -o "$BIONIC"
+          UNDEF="$WORK_DIR/undefined-symbols.txt"
+          readelf --dyn-syms -W "$LIB" \
+            | awk '$7=="UND" && ($4=="FUNC"||$4=="OBJECT"||$4=="IFUNC"){n=$8; sub(/@.*/,"",n); if(length(n)>0) print n}' \
+            | sort -u > "$UNDEF"
+          echo "diagnostico: stubs=$STUB_COUNT bionic=$(wc -l < "$BIONIC") undef=$(wc -l < "$UNDEF")"
           test -s "$BIONIC" || { echo "ERROR: el oracio de exports Bionic quedo vacio (leer stubs del NDK)" >&2; exit 1; }
           # Canary: todo libc de Android exporta 'close'. Si el oracio no lo ve,
           # la herramienta de lectura fallo en silencio y la lista 'missing' de
           # abajo seria un falso positivo, no un problema real del .so.
           grep -qx close "$BIONIC" || { echo "ERROR: el oracio Bionic no contiene 'close'; lectura de stubs no fiable" >&2; exit 1; }
-          UNDEF="$WORK_DIR/undefined-symbols.txt"
-          readelf --dyn-syms -W "$LIB" \
-            | awk '$7=="UND" && ($4=="FUNC"||$4=="OBJECT"){n=$8; sub(/@.*/,"",n); if(length(n)>0) print n}' \
-            | sort -u > "$UNDEF"
           test -s "$UNDEF" || { echo "ERROR: libopentui.so no reporto symbols indefinidos (leer .dynsym)" >&2; exit 1; }
           MISSING="$WORK_DIR/missing-symbols.txt"
           comm -23 "$UNDEF" "$BIONIC" > "$MISSING"
