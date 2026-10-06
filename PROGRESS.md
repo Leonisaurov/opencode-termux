@@ -699,3 +699,38 @@ OpenTUI anterior a 0.5.14 — eso depende de la superficie de API que use su `pa
 está medida. Por lo tanto la pregunta que decide si la fase 2 sigue viva dejó de ser "¿re-porteamos 8
 ficheros?" y pasó a ser **"¿cuánto cuesta Zig 0.16 en Bionic?"**, y esa es la que hay responder antes
 de gastar un dispatch de OpenTUI.
+
+## H2.0(b-iv) Zig no es de OpenTUI: es una toolchain compartida por cuatro productos
+
+Comprobado el consumo de `ZIG_VERSION` (`env.sh:27` = `0.15.2`, mismo valor repetido en
+`setup-runner.sh:10`): lo declaran **`build-bun.yml:27`, `build-bun-target.yml:24`,
+`build-core.yml:21`, `build-kilo.yml:34`, `build-opencode.yml:58` y `build-opentui.yml:54`**, y los
+seis lo restauran de la **misma** key `ci-cache-v2-toolchain-<os>-<arch>-zig-<ZIG_VERSION>-api-…`.
+No es un detalle de nombrado: Bun compila código Zig en Android, y `bun/scripts/build-bun.sh` lo
+demuestra con su wiring explícito de caché (`$BUN_BUILD/cache/zig/{local,global}`, symlink
+`.zig-cache -> …`, target `clone-zig` en `cmake/tools/SetupZig.cmake:88`). Dentro de ese archivo upstream
+queda el rastro de la era del compilador: `# LLVM 18.1.7 does not compatible with what bitcode Zig
+0.13 outputs`.
+
+Consecuencia directa sobre la tabla de b-iii: **mover `ZIG_VERSION` a 0.16 para desbloquear OpenTUI
+≥ 0.5.2 no es un cambio de un pin, es un bump de toolchain transversal**. El efecto sería recompilar
+Bun 1.2.13 (código Zig era-0.13/0.14/0.15) contra un compilador dos menores más nuevo, con el
+coste adicional de miss garantizado en la toolchain compartida y en las caches `*-opentui-intermediates`
+y `*-bun-intermediates`, y poniendo a prueba a la vez el overlay WebKit, TinyCC y el heap-tagging que
+`build-bun.yml:42` valida por separado. Ninguna de esas cuatro cosas se tocó nunca desde que el port
+está verde.
+
+Las dos formas defendibles de seguir, ambas medidas y ninguna barata:
+
+1. **Toolchain por producto**: convertir `ZIG_VERSION` en un pin por consumidor (`ZIG_VERSION_BUN` vs
+   `ZIG_VERSION_OPENTUI`), con keys `ci-cache-v2-toolchain-…-zig-<ver>` ya separadas de facto por el
+   propio nombre del job. Es trabajo de workflows y de `test-workflow-cache-contracts.py` (paridad
+   productor/consumidor), pero deja a Bun intacto en 0.15.2.
+2. **Quedarse en OpenTUI ≤ 0.5.1** (era Zig 0.15.2, vieja ruta `packages/core/src/zig/`), que evita el
+   bump transversal pero paga igualmente las libs C de imagen (97/129 ficheros vendorizados) y el
+   drift de 19 ficheros Zig, y exige probar que el `packages/tui` de `v2.0.24` no usa APIs nacidas
+   después de 0.5.1.
+
+Ninguna está elegida. Lo que sí queda descartado por medición es el optimismo de b-i/b-ii: el coste de
+la fase 2 **no** era "re-aplicar 8 ficheros", porque la capa nativa de OpenTUI cambió de ruta, de
+toolchain mínima y de conjunto de dependencias C antes de llegar a 0.5.14.
