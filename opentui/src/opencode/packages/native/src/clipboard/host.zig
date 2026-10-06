@@ -101,10 +101,20 @@ const ErrorCode = enum(u32) {
 extern "c" fn pthread_mach_thread_np(thread: std.c.pthread_t) std.c.mach_port_t;
 extern "c" fn pthread_tryjoin_np(thread: std.Thread.Handle, result: ?*?*anyopaque) c_int;
 extern "c" fn pthread_peekjoin_np(thread: std.Thread.Handle, result: ?*?*anyopaque) c_int;
+extern "c" fn pthread_kill(thread: std.Thread.Handle, sig: c_int) c_int;
 
 fn tryJoinThread(thread: std.Thread) bool {
     return switch (builtin.os.tag) {
-        .linux => switch (pthread_tryjoin_np(thread.getHandle(), null)) {
+        // OTUI Android fix: Bionic exports neither pthread_tryjoin_np nor
+        // pthread_timedjoin_np, and a reference to either survives the link as
+        // an undefined symbol that only fails at dlopen ("cannot locate
+        // symbol"). Bionic answers ESRCH from pthread_kill(handle, 0) once a
+        // joinable thread has exited, and the join then reaps it immediately.
+        .linux => if (builtin.abi == .android) blk: {
+            if (pthread_kill(thread.getHandle(), 0) != @intFromEnum(std.posix.E.SRCH)) break :blk false;
+            thread.join();
+            break :blk true;
+        } else switch (pthread_tryjoin_np(thread.getHandle(), null)) {
             0 => true,
             @intFromEnum(std.posix.E.BUSY) => false,
             else => false,

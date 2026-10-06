@@ -366,9 +366,15 @@ fn addNativeAudioDependencies(
     switch (target.result.os.tag) {
         .macos => addMacOSSystemLibraries(b, module, macos_sdk_path.?),
         .linux => {
-            module.linkSystemLibrary("dl", .{});
-            module.linkSystemLibrary("pthread", .{});
-            module.linkSystemLibrary("m", .{});
+            // OTUI Android fix: Bionic folds dl, pthread and m into libc.so, and
+            // a --libc file gives Zig no system-library search path at all, so an
+            // Android link must request none of them (it would fail with
+            // "unable to find dynamic system library 'm' … searched paths: none").
+            if (target.result.abi != .android) {
+                module.linkSystemLibrary("dl", .{});
+                module.linkSystemLibrary("pthread", .{});
+                module.linkSystemLibrary("m", .{});
+            }
         },
         else => {},
     }
@@ -399,18 +405,68 @@ fn ghosttyVtAvailable(target: std.Build.ResolvedTarget) bool {
     };
 }
 
+/// OTUI Android fix: the TranslateC step propagates neither --libc nor the clang
+/// driver's Android predefines, so a cross translate-c of miniaudio.h/Yoga.h
+/// would (1) find no Bionic header directory and fail on <pthread.h>/<math.h>,
+/// (2) lose the API level, which <sys/cdefs.h> rejects as an unversioned triple,
+/// and (3) turn upstream Bionic's array-typed annotation
+/// (`const struct timeval __times[_Nullable 2]`) into a hard error. Both the
+/// directories and the API level are declared once because an option declared
+/// twice panics the build graph and these modules are built per target.
+const BionicTranslateConfig = struct {
+    include_dirs: [2]?[]const u8,
+    api_level: u32,
+};
+
+var bionic_translate_config: ?BionicTranslateConfig = null;
+var bionic_translate_declared = false;
+
+fn bionicTranslateConfig(b: *std.Build, target: std.Build.ResolvedTarget) ?BionicTranslateConfig {
+    if (target.result.abi != .android) return null;
+    if (!bionic_translate_declared) {
+        bionic_translate_config = .{
+            .include_dirs = .{
+                b.option([]const u8, "bionic-include-dir", "System include directory of the Bionic libc used by translate-c"),
+                b.option([]const u8, "bionic-sys-include-dir", "ABI-specific include directory of the Bionic libc used by translate-c"),
+            },
+            .api_level = b.option(u32, "bionic-api-level", "Android API level reported to translate-c") orelse
+                target.result.os.version_range.linux.android,
+        };
+        bionic_translate_declared = true;
+    }
+    return bionic_translate_config;
+}
+
+fn configureBionicTranslateC(b: *std.Build, step: *std.Build.Step.TranslateC, config: BionicTranslateConfig) void {
+    for (config.include_dirs) |maybe_dir| {
+        if (maybe_dir) |dir| step.addSystemIncludePath(.{ .cwd_relative = dir });
+    }
+    step.defineCMacroRaw(b.fmt("__ANDROID_MIN_SDK_VERSION__={d}", .{config.api_level}));
+    step.defineCMacro("__ANDROID_API__", "__ANDROID_MIN_SDK_VERSION__");
+    step.defineCMacro("__ANDROID_API_FUTURE__", "10000");
+    step.defineCMacro("__ANDROID__", null);
+    step.defineCMacro("__ANDROID_NDK__", null);
+    // Nullability says nothing to the translated bindings and Bionic applies it
+    // to array parameters, which the front end cannot accept.
+    step.defineCMacroRaw("_Nullable=");
+    step.defineCMacroRaw("_Nonnull=");
+}
+
 fn addTranslatedCImports(
     b: *std.Build,
     module: *std.Build.Module,
     optimize: std.builtin.OptimizeMode,
     target: std.Build.ResolvedTarget,
 ) void {
+    const config = bionicTranslateConfig(b, target);
+
     const miniaudio_translate = b.addTranslateC(.{
         .root_source_file = b.path("src/vendor/miniaudio/miniaudio.h"),
         .target = target,
         .optimize = optimize,
     });
     miniaudio_translate.addIncludePath(b.path("src"));
+    if (config) |c| configureBionicTranslateC(b, miniaudio_translate, c);
     module.addImport("miniaudio", miniaudio_translate.createModule());
 
     const yoga_dep = b.dependency("yoga", .{});
@@ -420,6 +476,7 @@ fn addTranslatedCImports(
         .optimize = optimize,
     });
     yoga_translate.addIncludePath(yoga_dep.path(""));
+    if (config) |c| configureBionicTranslateC(b, yoga_translate, c);
     module.addImport("yoga", yoga_translate.createModule());
 }
 
