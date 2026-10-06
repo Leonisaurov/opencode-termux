@@ -511,3 +511,45 @@ de re-vendor + pin coordinado + publicación + verificación en dispositivo est�
 el objetivo secundario de la fase 1. Lo medido no cubre providers, MCP ni sesiones reales: el
 criterio acordado fue arranque de TUI con evidencia, y paridad funcional más allá del smoke no se
 declara.
+
+## H2.0(b-i) De dónde sale realmente el OpenTUI del port y cuánto hay que re-portear
+
+Primer hecho, incómodo: el commit que versiona al OpenTUI de OpenCode — `658db4cbe0da…`, en
+`ci/source-manifest.json` bajo `opentui-opencode` con `mode: vendored` — **no resuelve en ningún
+repo plausible**: da 422 en `anomalyco/opentui` (el repo que declara `repository.url` del paquete),
+en `sst/opentui` y en `opentui/opentui`, y 404 en `Leonisaurov/opentui`. Tampoco es el `gitHead` que
+npm publica para `@opentui/core@0.4.5`, que es `0c8c4f7cff29…`. A diferencia de `opencode`
+(`aec0b9a6…`, verificado blob a blob) y `bun`, cuyo commit sí es comprobable contra upstream, el
+pin de OpenTUI hoy **no es verificable**: funciona como identificador opaco de cache, y la única
+garantía de que el árbol es 0.4.5 es el `version` declarado en `packages/core/package.json`.
+
+Medido el árbol vendorizado contra el árbol git upstream de 0.4.5 (`git/trees?recursive=1` de
+`0c8c4f7c`, 1117 blobs) comparando SHA de blob por ruta:
+
+- **0 ficheros ausentes** en lo local: no se tiró nada de upstream.
+- **67 ficheros con contenido distinto**, agrupados: 32 bajo `packages/core/src`, 20 bajo
+  `packages/web/src`, 4 en `packages/web/scripts`, 2 en `packages/core/scripts`, 2 en
+  `packages/examples/src`, más `README.md`, `bun.lock`, `packages/core/.gitignore`,
+  `packages/core/README.md`, `packages/core/package.json`, `packages/core/dev/print-env-vars.ts`
+  y `packages/core/docs/development.md`.
+- **732 rutas que solo existen en lo local**, concentradas en `packages/core/src/benchmark/…`, lo
+  que indica que el árbol no es un checkout git limpio sino una mezcla con material del paquete
+  publicado (y con `.zig-cache/` y `zig-pkg/` dentro del árbol de fuente, que no deberían estar
+  versionados).
+
+Lo que importa para la fase 2: el port Android vive en la capa **Zig**, no en un parche lateral. De
+los 67 ficheros distintos, ~10 son exactamente el núcleo nativo — `packages/core/src/zig/`
+con `build.zig`, `build.zig.zon`, `lib.zig`, `link.zig`, `renderer.zig`, `renderer-output.zig`,
+`grapheme.zig`, `audio.zig`, `buffer.zig` — además de `packages/core/src/lib/env.ts` y su test.
+Subir a `0.5.14` (el catálogo que fija `v2.0.24`, `gitHead` upstream `31a93fbe6699…`) no es cambiar
+un `opentui_ref`: es **re-aplicar ese port sobre una base que se movió**, archivo por archivo, sin
+historial común que cherry-pickear, porque hoy no existe un commit upstream verificable contra el
+que diffear.
+
+Consecuencia para **CP-B**: la pregunta "¿compila 0.5.14 como Bionic API 24?" está subordinada a
+otra más cara — "¿sabemos reconstruir el port Zig sobre 0.5.14?". Antes de despachar un build de
+prueba hay que resolver el linaje (fixear el pin a un commit upstream real y separar el port en
+commits propios visibles), porque sin eso no hay forma de decir qué es de upstream y qué es nuestro,
+y el intento de porteo se convierte en adivinanza. También encarece la ruta R3: si nos quedamos en
+Bun era-Zig pero OpenTUI 0.5.14 exige re-portear Zig, el coste de v2 ya no está en el runtime sino
+en esta capa.
