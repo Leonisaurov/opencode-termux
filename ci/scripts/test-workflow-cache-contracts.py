@@ -59,6 +59,40 @@ def main() -> None:
     same("bun", bun, [opencode])
     same("opentui", opentui, [opencode])
 
+    # The value parity above compares option *names*, so two workflows can share
+    # a contract and still compute different digests: cache-contract.py embeds
+    # env ZIG_VERSION, and OpenTUI 0.5.14 pins its own compiler in build.zig
+    # while Bun/core keep the previous one. Zig is therefore a per-product
+    # toolchain, and the consumer must recompute each product with the literal
+    # version its producer runs, or the restore key never matches.
+    def zig_versions(name: str) -> dict[str, str]:
+        text = (WORKFLOWS / name).read_text(encoding="utf-8")
+        return dict(re.findall(r"^\s*((?:BUN_)?ZIG_VERSION):\s*['\"]([\w.]+)['\"]", text, re.MULTILINE))
+
+    opentui_zig = zig_versions("build-opentui.yml")["ZIG_VERSION"]
+    assert zig_versions("build-opencode.yml")["ZIG_VERSION"] == opentui_zig, \
+        "build-opencode.yml: OpenTUI consumed with a different Zig than its producer"
+    bun_zig = zig_versions("build-core.yml")["ZIG_VERSION"]
+    assert zig_versions("build-bun.yml")["ZIG_VERSION"] == bun_zig, "core and bun Zig diverged"
+    assert zig_versions("build-opencode.yml")["BUN_ZIG_VERSION"] == bun_zig, \
+        "build-opencode.yml: BUN_ZIG_VERSION does not match the bun producers"
+    assert bun_zig != opentui_zig, "Bun and OpenTUI must pin distinct Zig versions"
+    # The consumer overrides the env only for the products rebuilt by Bun/core.
+    assert 'ZIG_VERSION="$BUN_ZIG_VERSION" python3 ci/scripts/cache-contract.py' in (
+        WORKFLOWS / "build-opencode.yml").read_text(encoding="utf-8"), "core/bun keys: no Zig override"
+    assert 'UPSTREAM_COMMIT="$OPENTUI_COMMIT" python3 ci/scripts/cache-contract.py' in (
+        WORKFLOWS / "build-opencode.yml").read_text(encoding="utf-8"), "opentui_key: unexpected Zig override"
+
+    # OpenTUI 0.5.14 moved its native tree to packages/native; the older
+    # checkout still built for Kilo keeps packages/core. The stack that publishes
+    # libopentui.so must reference only the new layout.
+    for name in ("build-opentui.yml", "build-opencode.yml"):
+        text = (WORKFLOWS / name).read_text(encoding="utf-8")
+        assert "packages/native/lib" in text, f"{name}: native lib layout missing"
+        assert "packages/core/src/lib" not in text, f"{name}: stale OpenTUI lib layout"
+    consumer = (ROOT / "opencode/scripts/build-opencode.sh").read_text(encoding="utf-8")
+    assert "packages/native/lib" in consumer and "packages/core/src/lib" not in consumer
+
     # The vendored source trees must be part of their product keys so a port
     # edit invalidates the artifact even when the upstream pin is unchanged.
     assert "OPENTUI_SOURCE_TREE" in opentui["opentui"][1]

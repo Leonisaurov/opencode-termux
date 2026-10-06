@@ -22,7 +22,7 @@ incremental_exec opencode \
     --input "$REPO_ROOT/ci/scripts/patch-opentui-core-runtime.py" \
     --input "$REPO_ROOT/ci/scripts/env.sh" --input "$OPENCODE_SRC" \
     --input "$BUN_BUILD/bun" \
-    --input "$OPENTUI_SRC/packages/core/src/lib/aarch64-linux-android.24/libopentui.so" \
+    --input "$OPENTUI_SRC/packages/native/lib/aarch64-linux-android.24/libopentui.so" \
     --value "OPENCODE_VERSION=$OPENCODE_VERSION" --value "BUN_VERSION=$BUN_VERSION" \
     --output "$DIST_DIR/opencode"
 
@@ -55,8 +55,8 @@ if [ ! -f "$ANDROID_BUN" ]; then
 fi
 
 # Find ARM64 libopentui.so
-# build.zig installs to ../lib/{target} relative to the zig dir
-ARM64_LIBOPENTUI="$OPENTUI_SRC/packages/core/src/lib/aarch64-linux-android.24/libopentui.so"
+# OpenTUI >= 0.5.2 installs the native library under packages/native/lib.
+ARM64_LIBOPENTUI="$OPENTUI_SRC/packages/native/lib/aarch64-linux-android.24/libopentui.so"
 if [ ! -f "$ARM64_LIBOPENTUI" ]; then
     echo "ERROR: ARM64 libopentui.so not found at $ARM64_LIBOPENTUI"
     echo "       Run scripts/build-opentui.sh first."

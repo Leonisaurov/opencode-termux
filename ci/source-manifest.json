@@ -19,7 +19,7 @@
     "opentui-opencode": {
       "path": "opentui/src/opencode",
       "mode": "vendored",
-      "commit": "658db4cbe0da0adfeb5edac0273ee68911b29c3e"
+      "commit": "31a93fbe66992298d6d0f27481fa781f43d0c1e2"
     },
     "opentui-kilo": {
       "path": "opentui/src/kilo",

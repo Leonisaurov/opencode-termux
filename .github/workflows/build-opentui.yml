@@ -1,23 +1,20 @@
 # build-opentui.yml
 #
-# Cross-compila libopentui.so para Android ARM64 (aarch64) usando Zig estándar
-# y el libc.so del NDK. El port de fuente produce el ELF Android directamente.
+# Cross-compila libopentui.so para Android ARM64 (aarch64) usando Zig y el
+# libc.so del NDK. El port de fuente produce el ELF Android directamente.
 #
 # Flujo:
-#   1. Restaura/instala el NDK y Zig 0.15.2.
+#   1. Restaura/instala el NDK y el Zig pinned del producto.
 #   2. Usa el árbol de OpenTUI vendorizado en el checkout raíz.
-#   3. opentui/scripts/build-opentui.sh valida el árbol y compila
-#      `aarch64-linux-android.24` con el libc.so del NDK.
-#   5. Verifica NEEDED: libc.so y sube el artifact
+#   3. opentui/scripts/build-opentui.sh valida el árbol, prepara zig-deps y
+#      compila `-Dlibrary-target=aarch64-linux-android.24` con el libc del NDK.
+#   4. Verifica NEEDED: libc.so y sube el artifact
 #      `opentui-android-aarch64-<commit>`.
 #
-# El artifact es consumido por build-opencode.yml (Fase 2) para ensamblar
-# OpenCode. El .so se guarda TAMBIÉN en el cache con key
-# `build-v4-opentui-<commit>-<hash>`
-# (path REAL: $OPENTUI_SRC/packages/core/src/lib) para que
-# build-opencode.yml lo restaure sin recompilar. Además se cachea la fuente
-# keyed por commit para rebuilds rápidos y compartición del toolchain zig
-# con los otros workflows.
+# El artifact es consumido por build-opencode.yml para ensamblar OpenCode. El
+# .so se guarda TAMBIÉN en el cache con la key del contrato (path REAL:
+# $OPENTUI_SRC/packages/native/lib) para que build-opencode.yml lo restaure sin
+# recompilar. Además se cachea la fuente keyed por commit para rebuilds rápidos.
 
 name: Build libopentui.so (Android ARM64)
 
@@ -34,14 +31,14 @@ on:
       opentui_ref:
         description: 'Commit exacto de OpenTUI versionado en este repositorio.'
         required: false
-        default: '658db4cbe0da0adfeb5edac0273ee68911b29c3e'
+        default: '31a93fbe66992298d6d0f27481fa781f43d0c1e2'
   workflow_call:
     inputs:
       opentui_ref:
         description: 'Commit, tag o branch de OpenTUI'
         required: false
         type: string
-        default: '658db4cbe0da0adfeb5edac0273ee68911b29c3e'
+        default: '31a93fbe66992298d6d0f27481fa781f43d0c1e2'
 
 permissions:
   contents: read
@@ -51,11 +48,13 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  ZIG_VERSION: "0.15.2"                    # ziglang.org estándar (NO oven-sh)
+  # OpenTUI 0.5.14 pins Zig in its own build.zig (SUPPORTED_ZIG_VERSIONS), so
+  # this product moves to 0.16.0 while Bun and core keep the shared 0.15.2.
+  ZIG_VERSION: "0.16.0"                     # ziglang.org estándar (NO oven-sh)
   OPENTUI_TARGET: "aarch64-linux-android.24"
   ANDROID_API: "24"
   ANDROID_NDK_VERSION: "28.1.13356709"
-  OPENTUI_REF: "${{ inputs.opentui_ref || '658db4cbe0da0adfeb5edac0273ee68911b29c3e' }}"
+  OPENTUI_REF: "${{ inputs.opentui_ref || '31a93fbe66992298d6d0f27481fa781f43d0c1e2' }}"
   PRODUCT: opentui
   WORK_DIR: "${{ github.workspace }}/opentui/build"
   # Shared across products so the NDK produces a single cache entry instead of
@@ -106,7 +105,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: |
-            ${{ env.OPENTUI_SRC }}/packages/core/src/lib
+            ${{ env.OPENTUI_SRC }}/packages/native/lib
             ${{ env.WORK_DIR }}/state/nodes/opentui.json
           key: ${{ steps.contract.outputs.key }}-artifact
 
@@ -114,7 +113,7 @@ jobs:
         id: validate-opentui
         run: |
           set -euo pipefail
-          LIB="$OPENTUI_SRC/packages/core/src/lib/$OPENTUI_TARGET/libopentui.so"
+          LIB="$OPENTUI_SRC/packages/native/lib/$OPENTUI_TARGET/libopentui.so"
           if test -s "$LIB" \
              && test "$(readelf -h "$LIB" | sed -n 's/^ *Class: *//p')" = ELF64 \
              && test "$(readelf -h "$LIB" | sed -n 's/^ *Machine: *//p')" = AArch64 \
@@ -225,11 +224,17 @@ jobs:
         if: steps.validate-opentui.outputs.ready != 'true'
         run: |
           set -euo pipefail
-          test -f "$OPENTUI_SRC/packages/core/src/zig/build.zig"
+          # 0.5.14 moved the native build from packages/core/src/zig to
+          # packages/native and vendored its Zig dependencies as a tarball.
+          test -f "$OPENTUI_SRC/packages/native/build.zig"
+          test -f "$OPENTUI_SRC/packages/native/src/vendor/zig-deps.tar.gz"
+          test -f "$OPENTUI_SRC/packages/native/scripts/prepare-zig-deps.sh"
           test ! -e "$OPENTUI_SRC/.git"
           git ls-files --error-unmatch \
-            opentui/src/opencode/packages/core/src/zig/build.zig \
-            opentui/src/opencode/packages/core/src/zig/renderer.zig >/dev/null
+            opentui/src/opencode/packages/native/build.zig \
+            opentui/src/opencode/packages/native/src/renderer.zig \
+            opentui/src/opencode/packages/native/src/vendor/zig-deps.tar.gz \
+            opentui/src/opencode/packages/native/scripts/prepare-zig-deps.sh >/dev/null
           echo ">>> Vendored OpenTUI source ready at origin revision $OPENTUI_REF"
 
       - name: Enable zram swap
@@ -251,7 +256,7 @@ jobs:
 
       - name: Verify libopentui.so
         run: |
-          LIB="$OPENTUI_SRC/packages/core/src/lib/$OPENTUI_TARGET/libopentui.so"
+          LIB="$OPENTUI_SRC/packages/native/lib/$OPENTUI_TARGET/libopentui.so"
           ls -lh "$LIB"
           file "$LIB"
           readelf -h "$LIB" | grep -E "Machine|Class"
@@ -263,10 +268,38 @@ jobs:
           fi
           test "$(readelf -h "$LIB" | sed -n 's/^ *Machine: *//p')" = "AArch64"
 
+      # Un artifact que no pasa esto es un verde inutil: el linker de Android
+      # resuelve cada simbolo indefinido contra las stubs publicas del NDK en el
+      # momento del dlopen, y una ausencia aborta la carga del .so en runtime
+      # (fue el caso de pthread_tryjoin_np, invisible para readelf -d).
+      - name: Verify dynamic symbols resolve against Bionic
+        run: |
+          set -euo pipefail
+          LIB="$OPENTUI_SRC/packages/native/lib/$OPENTUI_TARGET/libopentui.so"
+          STUB_DIR="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android"
+          test -d "$STUB_DIR"
+          mkdir -p "$WORK_DIR"
+          BIONIC="$WORK_DIR/bionic-exports.txt"
+          : > "$BIONIC"
+          for stub in "$STUB_DIR"/*.so; do
+            nm -D --defined-only "$stub" 2>/dev/null | awk '{print $NF}' | sed -E 's/@.*$//' >> "$BIONIC"
+          done
+          sort -u "$BIONIC" -o "$BIONIC"
+          UNDEF="$WORK_DIR/undefined-symbols.txt"
+          nm -D --undefined-only "$LIB" | awk '{print $NF}' | sed -E 's/@.*$//' | sort -u > "$UNDEF"
+          MISSING="$WORK_DIR/missing-symbols.txt"
+          comm -23 "$UNDEF" "$BIONIC" > "$MISSING"
+          if [ -s "$MISSING" ]; then
+            echo "ERROR: libopentui.so pide simbolos que Bionic no exporta; el dlopen fallaria en el dispositivo:" >&2
+            sed 's/^/  /' "$MISSING" >&2
+            exit 1
+          fi
+          echo "OK: $(wc -l < "$UNDEF") simbolos indefinidos resuelven contra las stubs publicas del NDK"
+
       # ── Artifact ───────────────────────────────────────────────
       - name: Write build info
         run: |
-          LIB_DIR="$OPENTUI_SRC/packages/core/src/lib/$OPENTUI_TARGET"
+          LIB_DIR="$OPENTUI_SRC/packages/native/lib/$OPENTUI_TARGET"
           {
             echo "workflow=$GITHUB_WORKFLOW"
             echo "opentui_ref=$OPENTUI_REF"
@@ -282,7 +315,7 @@ jobs:
         id: final-opentui
         run: |
           set -euo pipefail
-          LIB="$OPENTUI_SRC/packages/core/src/lib/$OPENTUI_TARGET/libopentui.so"
+          LIB="$OPENTUI_SRC/packages/native/lib/$OPENTUI_TARGET/libopentui.so"
           ready=false
           if test -s "$LIB" \
              && python3 ci/scripts/build-state.py verify --root "$GITHUB_WORKSPACE" \
@@ -315,7 +348,7 @@ jobs:
         with:
           mode: save-final
           path: |
-            ${{ env.OPENTUI_SRC }}/packages/core/src/lib
+            ${{ env.OPENTUI_SRC }}/packages/native/lib
             ${{ env.WORK_DIR }}/state/nodes/opentui.json
           key: ${{ steps.contract.outputs.key }}-artifact
 
@@ -361,7 +394,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: opentui-android-aarch64-${{ env.OPENTUI_REF }}
-          path: ${{ env.OPENTUI_SRC }}/packages/core/src/lib/${{ env.OPENTUI_TARGET }}/
+          path: ${{ env.OPENTUI_SRC }}/packages/native/lib/${{ env.OPENTUI_TARGET }}/
           if-no-files-found: error
 
       - name: Save OpenTUI resumable checkpoint

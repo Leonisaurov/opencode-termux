@@ -21,7 +21,7 @@ on:
         default: '1.2.13'
       opentui_ref:
         required: true
-        default: '658db4cbe0da0adfeb5edac0273ee68911b29c3e'
+        default: '31a93fbe66992298d6d0f27481fa781f43d0c1e2'
       opencode_version:
         required: true
         default: '1.18.34'
@@ -105,7 +105,7 @@ jobs:
     if: needs.detect.outputs.opentui == 'true'
     uses: ./.github/workflows/build-opentui.yml
     with:
-      opentui_ref: ${{ inputs.opentui_ref || '658db4cbe0da0adfeb5edac0273ee68911b29c3e' }}
+      opentui_ref: ${{ inputs.opentui_ref || '31a93fbe66992298d6d0f27481fa781f43d0c1e2' }}
     secrets: inherit
   bun:
     needs: [detect, core]
@@ -120,7 +120,7 @@ jobs:
     uses: ./.github/workflows/build-opencode.yml
     with:
       bun_version: ${{ inputs.bun_version || '1.2.13' }}
-      opentui_ref: ${{ inputs.opentui_ref || '658db4cbe0da0adfeb5edac0273ee68911b29c3e' }}
+      opentui_ref: ${{ inputs.opentui_ref || '31a93fbe66992298d6d0f27481fa781f43d0c1e2' }}
       opencode_version: ${{ inputs.opencode_version || '1.18.34' }}
       require_dependency_artifacts: true
     secrets: inherit
@@ -149,7 +149,7 @@ jobs:
         env:
           RELEASE: ${{ inputs.release || '1.18.11' }}
           BUN_VERSION: ${{ inputs.bun_version || '1.2.13' }}
-          OPENTUI_REF: ${{ inputs.opentui_ref || '658db4cbe0da0adfeb5edac0273ee68911b29c3e' }}
+          OPENTUI_REF: ${{ inputs.opentui_ref || '31a93fbe66992298d6d0f27481fa781f43d0c1e2' }}
           OPENCODE_VERSION: ${{ inputs.opencode_version || '1.18.34' }}
           KILO_VERSION: ${{ inputs.kilo_version || '7.4.20' }}
         run: |
