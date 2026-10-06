@@ -426,3 +426,45 @@ por el mismo bun 1.4.2. No está probado (a) que un grafo escrito por un bun hos
 sea aceptado por este runtime, (b) que el ensamblado `[bun android 1.4.2] + [grafo]` de nuestra pipeline
 siga funcionando con la cola ELF, ni (c) que el binario aguante la carga real de OpenCode (JIT, fs,
 pty, SQLite) bajo este kernel. Nada de eso se afirma con esta medición.
+
+#### H2.0(a-iii) La frontera de formato está justo en 1.3.14/1.4.0, y eso elige la ruta
+
+Mismo experimento con el Bun **1.3.14** que ya está instalado en el teléfono
+(`$PREFIX/bin/bun`, el último tag con `build.zig`), compilando el mismo TS de una línea:
+
+- `filesize = 91 609 755`, trailer en `91 609 731` ⇒ **cierra 8 bytes antes del EOF**, como
+  supone nuestro parser.
+- `byte_count = 139`, lista de módulos en `86..138`, argv en `138` de longitud 0. Aplicando la
+  fórmula de `build-opencode-android.ts:220` (`hostBunSize = len - 8 - (byte_count + 32 + 16)`)
+  da **91 609 560**, que es el tamaño real del binario `bun` de Termux: **delta 0, exacto**.
+- El `u64` final vale `91 609 755`, igual al tamaño del archivo.
+
+Comparado con el 1.4.2 medido arriba (trailer a 128 549 bytes del EOF, `e_shoff` reescrito, sin
+`u64` final), la conclusión es que **la rotura de formato coincide exactamente con la frontera
+Zig→Rust**: hasta `1.3.14` el ensamblado `[bun][grafo][u64]` sigue intacto; desde `1.4.0` hay que
+reubicar la tabla de secciones ELF al ensamblar.
+
+Otro dato que baja el riesgo y sale del propio repo (`.github/workflows/build-opencode.yml:51`,
+`ci/scripts/setup-runner.sh:14`): el Bun host que escribe el grafo hoy es **1.3.2** mientras el
+runtime embebido se compila desde **1.2.13**. Es decir, el artefacto que publicamos ya ejerce en
+producción un desajuste de versiones entre productor del grafo y runtime, así que la hipótesis de
+que Bun rechace un grafo de otra versión está refutada en la práctica para ese salto.
+
+**Decisión de ruta que queda habilitada.** Para la fase 2 el eje deja de ser "Bun" y pasa a ser
+OpenTUI:
+
+- **R3 (Bun ≤1.3.14, era Zig) es la vía barata y pasa a ser la primera a intentar.** No toca
+  `module-graph-patch.ts` ni el ensamblado de `build-opencode-android.ts`; conserva Zig 0.15.2,
+  el overlay de WebKit, TinyCC e ICU, y el techo 1.3.14 es además el último punto donde conviven
+  "aún Zig" y "asset android oficial ya existe". Lo único que habría que subir es nuestro port
+  Android de Bun de 1.2.13 a 1.3.14 (re-vendor de `bun/src`, mismo toolchain).
+- **R1 (re-portear Bun 1.4.x a cargo/NDK)** queda como último recurso: además del port del
+  toolchain obliga a escribir la cola ELF en el ensamblado.
+- **R2 (consumir el asset android oficial)** es técnicamente viable en el nivel "existe, es
+  Bionic y arranca", pero sigue contraviniendo el principio de compilar desde fuente y necesita
+  autorización explícita; con R3 abierta, no es la que hay que pedir primero.
+
+Lo que R3 **no** resuelve, y es el riesgo que queda por medir: si el código de `v2.0.24` usa APIs
+de runtime que un Bun 1.3.14 no implemente, y si `@opentui/{core,solid,keymap}@0.5.14` compila
+contra Bionic API 24 (CP-B, que sigue siendo el candidato fatal). Ninguna de las dos se decide con
+esta medición.
