@@ -553,3 +553,149 @@ commits propios visibles), porque sin eso no hay forma de decir qué es de upstr
 y el intento de porteo se convierte en adivinanza. También encarece la ruta R3: si nos quedamos en
 Bun era-Zig pero OpenTUI 0.5.14 exige re-portear Zig, el coste de v2 ya no está en el runtime sino
 en esta capa.
+
+## H2.0(b-ii) El linaje resuelto: la base real es `9eabce70` y el port son 8 ficheros Zig
+
+Medición fechada 2026-10-05, comparando por SHA de blob el árbol vendorizado contra árboles
+`git/trees?recursive=1` de upstream. Esta sección **corrige** dos afirmaciones de b-i.
+
+La base upstream del árbol vendorizado es el commit **`9eabce704096837148d935554fcae9c19e6e21f4`**
+(`feat(core): add audio input capture (#1297)`, 2026-07-29T12:09:07Z). El testeo fue por barrido de
+la ventana entre el `gitHead` de 0.4.5 (`0c8c4f7c`, 2026-07-17) y el commit de image rendering
+(`078bb448`, 2026-08-02), puntuando cada candidato contra los 1.142 blobs locales sin junk:
+
+| candidato | fechas | upOnly | localOnly | SHA distinto |
+|---|---|---|---|---|
+| **`9eabce70`** | 07-29 | **0** | **0** | **8** |
+| `da5507e1` | 07-30 | 0 | 0 | 10 |
+| `5918d8e5` | 08-02 | 0 | 0 | 12 |
+| `a1503fbe` | 08-02 | 3 | 0 | 22 |
+| `078bb448` | 08-02 | 140 | 1 | 72 |
+
+Cero rutas sobrantes y cero faltantes significa que el árbol **es** un checkout de ese commit, no
+una mezcla con el paquete publicado como sugería b-i. Las 732 rutas "solo locales" se descomponen en
+**533 de `zig-pkg/` + 174 de `.zig-cache/`** y **25 fuentes reales**, y las 25 están todas explicadas
+por commits entre 07-17 y 07-29 (`b5dae243` FFI fast-path, `6064dcdc` skill/docs, `f26eb147`
+render-runtime bench, `34e78b2f` stdin-log, `9eabce70` audio capture). Los 67 ficheros "distintos"
+que reportaba b-i contra 0.4.5 eran **drift de upstream**, no adaptaciones nuestras. La aritmética
+cuadra: 1.675 rutas versionadas (`git ls-files`) + 174 de caché local sin versionar (`.zig-cache`,
+cubierto por `.gitignore`) = 1.849 en disco, de las que 1.142 son fuentes reales.
+
+Detalle que invierte la sospecha de b-i sobre el `zig-pkg/` versionado: **no es basura, es parte del
+port**. `build.zig.zon` es uno de los 8 ficheros modificados y su delta es exactamente convertir las
+dependencias de red en dependencias locales:
+
+```
+- .uucode = { .url = "…/uucode/archive/84ceda85….tar.gz", .hash = … }
++ .uucode = { .path = "zig-pkg/uucode-0.1.0-ZZjBPtA_…" }
+- .yoga   = { .url = "git+https://github.com/facebook/yoga#v3.2.1", .hash = … }
++ .yoga   = { .path = "zig-pkg/N-V-__8AAOYl0gAU…" }
+```
+
+Es decir: 20 MB de `zig-pkg/` están commitados para que el build Bionic sea **hermético/offline**, y
+borrarlos rompería la propiedad que AGENTS.md exige (CI no debe bajar y mutar dependencias).
+
+Corolario que achica el problema: el port Android es **exactamente 8 ficheros** bajo
+`packages/core/src/zig/`, y nada más. `lib/env.ts` y su test, `platform/ffi.ts`, `platform/runtime.ts`,
+`audio.zig` y `renderer.ts` coinciden **bit a bit** con upstream en esa base, así que b-i se equivocó
+al contarlos como núcleo del port. El delta real, medido contra los blobs de `9eabce70`:
+
+| fichero | líneas |
+|---|---|
+| `renderer.zig` | +145 −12 |
+| `grapheme.zig` | +85 −34 |
+| `build.zig` | +36 −37 |
+| `link.zig` | +29 −10 |
+| `buffer.zig` | +27 −6 |
+| `lib.zig` | +6 −6 |
+| `renderer-output.zig` | +6 −0 |
+| `build.zig.zon` | +2 −4 |
+
+Total **+236 −103 en 8 ficheros**, con 36 marcadores explícitos `Android/Bionic/Termux`. Es superficie
+re-porteable a mano con revisión, no una reescritura de capas.
+
+El coste de 0.5.14 medido contra esa base (`31a93fbe6699…`, 2026-09-30) cambia el cuadro en dos ejes
+distintos:
+
+1. **Deriva de contenido**: los mismos 8 ficheros acumulan **4.841 líneas cambiadas en 155 hunks**
+   (`renderer.zig` 1.864, `lib.zig` 1.219, `buffer.zig` 1.016, `build.zig` 375, `renderer-output.zig`
+   316, `grapheme.zig` 29, `link.zig` 6, `build.zig.zon` 16). Re-portear sobre eso es merge de tres
+   bandas contra ficheros que se movieron ~5× más que nuestro parche.
+2. **Deriva estructural**: desde `6dec16a7` (`native: move Zig sources into packages/native (#1391)`,
+   2026-08-20) **`packages/core/src/zig/` deja de existir**: en 0.5.14 hay 0 ficheros `.zig` ahí y 128
+   en `packages/native/src/` + `packages/native/build.zig{,.zon}`. Los 8 ficheros del port tienen
+   contraparte directa en la ruta nueva (verificado, descargado), pero el wiring de build (target,
+   linker, la capa que consume nuestro overlay WebKit/TinyCC) vive en un paquete que aún no existía.
+
+Las fechas de release acotan la alternativa barata: `0.5.0` 08-03, `0.5.2` 08-12, `0.5.4` 08-18,
+`0.5.6` 08-20, `0.5.7` 08-23. Un objetivo **≤ 0.5.5 conserva la vieja ruta** `packages/core/src/zig/`
+y reduce la deriva de 4.841 líneas a fracción, pero `v2.0.24` fija en su catálogo
+`@opentui/core: "0.5.14"` **exacto** (medido en `package.json` raíz, bloque `workspaces.catalog`; no
+en `dependencies`), así que bajar la versión solo es defendible si se prueba que el código TUI de v2
+no usa APIs introducidas después de 0.5.5. Eso no está medido: es el siguiente paso, y es de fuente,
+no de build.
+
+Qué queda afirmable y qué no: la base `9eabce70` está probada por coincidencia exacta de rutas y por
+un delta de 8 ficheros que se puede leer entero. **No** se afirma que el port se aplique limpia sobre
+0.5.14 ni sobre 0.5.5 — la primera choca contra el move y los 155 hunks, la segunda exige la verificación
+de superficie de API. **No** se toca todavía el pin `658db4cb…`: moverlo a `9eabce70…` es metadata
+correcta (el pin actual no lo valida nada: `validate-source-tree.py` no mira el campo `commit` y ningún
+test lo referencia), pero `OPENTUI_REF` entra en las keys `ci-cache-v2-opentui-intermediates-*` del
+productor y de los tres consumidores, en el nombre del artefacto y en el `build-info.txt` que se
+atestigua, así que re-anclarlo cuesta un miss garantizado de OpenTUI (recompilación Zig completa) y
+debe ir en su propio commit coordinado, igual que H1.2. El pin de Kilo (`5b3d5205…`) quedó **sin
+resolver**: su árbol no coincide con ninguna de las bases medidas (182 upOnly / 264 SHA distintos
+contra `9eabce70`), y no se lo toca porque Kilo comparte Bun pero no esta decisión.
+
+## H2.0(b-iii) La puerta real de CP-B no es el diff de 8 ficheros: es Zig 0.16 y las libs C
+
+Medición sobre los `gitHead` que publica npm por versión (no sobre tags anotados), cruzando
+`minimum_zig_version` del manifiesto Zig y el contenido vendorizado. Dos hechos cambian el orden de
+magnitud del problema:
+
+**1) La frontera de toolchain está en 0.5.2, no en 0.5.14.**
+
+| versión | fecha | gitHead | `minimum_zig_version` | dónde vive el Zig |
+|---|---|---|---|---|
+| 0.4.5 | 07-17 | `0c8c4f7c` | **0.15.2** | `packages/core/src/zig/` |
+| **nuestra base** | 07-29 | `9eabce70` | **0.15.2** | `packages/core/src/zig/` |
+| 0.5.0 | 08-03 | `1bc4d2a5` | 0.15.2 | `packages/core/src/zig/` |
+| 0.5.1 | 08-04 | `ad9a818d` | 0.15.2 | `packages/core/src/zig/` |
+| 0.5.2 | 08-12 | `14b3d135` | **0.16.0** | `packages/core/src/zig/` |
+| 0.5.6 | 08-20 | `c1ae55b4` | 0.16.0 | `packages/native/src/` (move `6dec16a7`) |
+| 0.5.14 | 09-30 | `31a93fbe` | 0.16.0 | `packages/native/src/` |
+
+Nuestro pin es `ZIG_VERSION=0.15.2` (`ci/scripts/env.sh:27`) y upstream declara `.zig-version =
+0.16.0` desde 0.5.2. Zig **rechaza** construir un paquete cuyo `minimum_zig_version` supera al
+compilador activo, así que cualquier objetivo ≥ 0.5.2 obliga a subir Zig, y eso no es un cambio de
+número: es revalidar contra 0.16 el cruce a Bionic que hoy sostiene el overlay WebKit, TinyCC y el
+heap tagging que medimos en el port de Bun. Ese trabajo no estaba en el plan.
+
+**2) El stack de libs C que hoy no compilamos entra ya en 0.5.0.** Contando blobs bajo `*/vendor/*`
+(mismo método, árbol upstream puro): nuestra base tiene **1**, `0.5.0` tiene **97** y `0.5.1` **129**,
+con el mismo reparto que `0.5.14` (**149**): `libwebp` 85, `lcms2` 32, `stb` 6, `wuffs` 3, `miniaudio`
+1 más `README.md`/`update.sh`. En 0.5.14 se añade además `ghostty-vt` (`src/ghostty-vt.zig`,
+`src/embedded-terminal/ghostty.zig`, dependencia `.lazy` en `packages/native/build.zig.zon`) y el par
+de scripts `vendor/update-zig-deps.sh` / `vendor/update.sh`. Es decir: decodificación de imágenes
+(webp + perfiles de color + SIMD) pasa por C que hay que cross-compilar contra
+`aarch64-linux-android.24` con NDK, y **el coste aparece desde 0.5.0**, no solo en 0.5.14; ghostty es
+lo único exclusivo del escalón caro.
+
+Con esto, el árbol de decisiones de **CP-B** queda medido en tres escalones de coste creciente:
+
+- **≤ 0.5.1** (Zig 0.15.2, vieja ruta): no exige subir Zig, pero introduce las cinco libs C y deja
+  19 ficheros Zig del port con drift contra el resto del árbol (182 rutas upstream que aún no
+  tenemos y 80 con SHA distinto; la única ruta local que upstream ya no tiene es
+  `packages/examples/src/audio-capture-demo.test.ts`, borrada aguas arriba, no un añadido nuestro).
+- **0.5.2–0.5.5** (Zig 0.16, vieja ruta): subir Zig **y** las libs C.
+- **0.5.6+ / 0.5.14** (Zig 0.16, `packages/native`, ghostty-vt): las dos anteriores más la
+  reubicación estructural y 4.841 líneas de drift en los 8 ficheros del port.
+
+Ninguno de los tres es "barato", y el que el catálogo de `v2.0.24` exige es el tercero (`0.5.14`
+exacto, medido en `workspaces.catalog`). Lo que **no** se afirma: que subir Zig 0.16 rompa el port
+(destruye la cache y obliga a revalidar el overlay, pero no está probado que falle); que las libs C
+compilen o no en Bionic API 24 (todavía no se intentó ninguna); ni que opencode v2 funcione con un
+OpenTUI anterior a 0.5.14 — eso depende de la superficie de API que use su `packages/tui`, que tampoco
+está medida. Por lo tanto la pregunta que decide si la fase 2 sigue viva dejó de ser "¿re-porteamos 8
+ficheros?" y pasó a ser **"¿cuánto cuesta Zig 0.16 en Bionic?"**, y esa es la que hay responder antes
+de gastar un dispatch de OpenTUI.
