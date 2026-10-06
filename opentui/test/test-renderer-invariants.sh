@@ -94,6 +94,10 @@ check_opencode_source() {
     # Coverage comes from walking every stub in the triple (API subdirs plus
     # libm/libdl); a single-level glob under-collects the public API.
     rg -q "find \"\\\$STUB_DIR\" -name '\*\.so'" "$ROOT/.github/workflows/build-opentui.yml"
+    # The walk must tolerate per-file readelf failure: the sysroot has ASCII
+    # linker-script .so entries, and an unguarded readelf under pipefail aborts
+    # the whole step with no diagnostics (silent false failure).
+    rg -q 'readelf --dyn-syms -W "\$stub" 2>/dev/null \|\| true' "$ROOT/.github/workflows/build-opentui.yml"
     # nm --defined-only drops stub symbols (they live at Ndx=UND) and yields an
     # empty oracle, i.e. every libc symbol as a false "missing".
     if rg -q 'nm -D --defined-only' "$ROOT/.github/workflows/build-opentui.yml"; then

@@ -293,7 +293,11 @@ jobs:
           STUB_COUNT=0
           while IFS= read -r stub; do
             STUB_COUNT=$((STUB_COUNT + 1))
-            readelf --dyn-syms -W "$stub" 2>/dev/null \
+            # 'find' puede toparse con entradas .so que son scripts de enlazado
+            # ASCII (no ELF) en el sysroot del NDK; readelf falla sobre ellas y,
+            # bajo pipefail, eso abortaria el paso entero. Se tolera el fallo por
+            # archivo y se lee lo que readelf si pueda volcar.
+            { readelf --dyn-syms -W "$stub" 2>/dev/null || true; } \
               | awk '($4=="FUNC"||$4=="OBJECT"||$4=="IFUNC") && ($5=="GLOBAL"||$5=="WEAK"){n=$8; sub(/@.*/,"",n); if(length(n)>0) print n}' \
               >> "$BIONIC"
           done < <(find "$STUB_DIR" -name '*.so')
