@@ -84,6 +84,16 @@ check_opencode_source() {
     # that cannot be dlopened: the NDK stub libraries are the public Bionic API.
     rg -q 'Verify dynamic symbols resolve against Bionic' "$ROOT/.github/workflows/build-opentui.yml"
     rg -q 'comm -23 "\$UNDEF" "\$BIONIC"' "$ROOT/.github/workflows/build-opentui.yml"
+    # The oracle must read the stubs' public API (all GLOBAL/WEAK FUNC/OBJECT,
+    # section-agnostic) and prove it is non-trivial with a canary symbol.
+    rg -q 'readelf --dyn-syms' "$ROOT/.github/workflows/build-opentui.yml"
+    rg -q 'grep -qx close "\$BIONIC"' "$ROOT/.github/workflows/build-opentui.yml"
+    # nm --defined-only drops stub symbols (they live at Ndx=UND) and yields an
+    # empty oracle, i.e. every libc symbol as a false "missing".
+    if rg -q 'nm -D --defined-only' "$ROOT/.github/workflows/build-opentui.yml"; then
+        echo "ERROR: the symbol oracle uses nm --defined-only, which empties NDK stub exports" >&2
+        return 1
+    fi
     echo "OpenCode OpenTUI: versioned renderer invariants OK"
 }
 
