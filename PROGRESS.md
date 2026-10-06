@@ -233,3 +233,70 @@ reescribe una clave existente, así que el segundo escritor pierde. Los bytes es
 cache. Es solapamiento productor/productor del propio DAG (dos jobs guardan el mismo
 intermedio de tinycc), no algo introducido aquí, y no afectó a las salidas finales.
 
+
+## Upgrade de OpenCode: por qué v2 y qué se comprobó antes de mover el pin (2026-10-05)
+
+La petición fue «actualizar OpenCode a su última versión v2». Antes de tocar un pin
+verificamos qué es «v2» aguas arriba, porque el pin actual (`1.18.30`, commit
+`3104c1428ec91f809e5ab86631300de41eb6952e`) está declarado deliberadamente por AGENTS.md.
+
+- **v2 existe y es la línea principal**: rama `v2` activa (head `b78d10cd`), tags `v2.0.1`…`v2.0.24`
+  (`v2.0.24` → commit `e7a34f09…`, 2026-10-06) y publicación real como npm **`@opencode/cli`**
+  (`dist-tags.latest = 2.0.24`) con binarios por target. Lo que engaña es el rótulo: el
+  «Latest» de GitHub y `opencode-ai` (1.x) apuntan a **`v1.18.34`** (2026-09-30), línea congelada.
+- v2 **no es un bump sino un re-port**: `packages/opencode/` desaparece (ahora `packages/cli`,
+  `server`, `core`, `tui`), el root `package.json` pide `bun@1.4.2` (aquí 1.2.13) y el catalog
+  sube `@opentui/*` de `0.4.5` a `0.5.14`, cuyo artefacto publicado cambia de nombres de chunk y
+  invalida el matching string-exacto de `ci/scripts/patch-opentui-core-runtime.py`. Además
+  `script/build.ts` de upstream fija 12 targets linux/darwin/win32 **sin android/bionic**, así que
+  el pipeline propio (`opencode/scripts/build-opencode.sh` con su swap de `libopentui.so`) se
+  re-ubica, no se reutiliza.
+- Se acordó con el usuario: **dos fases** (primero 1.18.30 → 1.18.34, que valida la maquinaria de
+  re-vendor; después v2 en rama `feat/opencode-v2`, con `main` siguiendo publica 1.18.x), pines de
+  Bun y OpenTUI autorizados para la fase 2, y criterio de aceptación = TUI arrancando de verdad en
+  el teléfono, no «compila».
+
+### H1.0 — Comprobación de acoplamiento contra `v1.18.34` (sin tocar el árbol)
+
+Objetivo fijado por tag pelado: `aec0b9a6d8898f68f923aaf08b7306d931fd9d76` (2026-09-30T22:39:32Z);
+tarball `codeload` con sha256 `c2c60efde22639b64c7bfa740da39b9c8079391a7540e2f67bf91b36e5797f17`.
+
+Fidelidad de la fuente, medida y no supuesta: los 6641 blobs del árbol git de upstream contra lo
+extraído en disco dan **0 diferencias de contenido y 0 de modo**; la única entrada sin
+contrapartida en el filesystem es `packages/console/app/public/email`, un symlink de modo `120000`
+que `os.walk` recorre como directorio. El tarball reproduce el commit bit a bit.
+
+Línea base del vendor actual, medida con el mismo método: `opencode/src` es exactamente
+`3104c142` con **una sola** diferencia de contenido — `packages/core/src/global.ts`, el fallback
+Termux de `TMPDIR` del commit `0d2185b` — y 0 diferencias de modo. No hay marcas locales ocultas.
+
+Detalle reproducible: lo trackeado son los blobs de upstream **menos 8** rutas, y las 8 existen en
+disco pero están ignoradas porque el snapshot arrastra los `.gitignore` de upstream y esas reglas
+se filtran al workspace: `.opencode/.gitignore` y `.opencode/themes/.gitignore` (regla `.gitignore`
+anidada), `.vscode/*.example.json` (`.vscode`), dos `opencode-brand-assets.zip` (`*.zip`),
+`packages/opencode/script/build-node.ts` (`script/build-*.ts`) y `packages/storybook/debug-storybook.log`
+(`*.log`). `validate-source-tree.py` solo exige tracked + sin `.git` anidado + sin gitlinks, así que
+el estado es correcto; conviene saber, sin embargo, que un patrón así puede **silenciar fuentes que
+sí hacen falta** en cuanto upstream las ponga en esas rutas.
+
+Puntos de acoplamiento del build, comprobados uno a uno contra `v1.18.34`:
+
+| Punto | 1.18.30 vendorizado | 1.18.34 | Consecuencia |
+|---|---|---|---|
+| `packages/opencode/` (ruta que fija `build-opencode.sh:36`) | presente | presente | intacto |
+| `packages/opencode/src/index.ts` (entrypoint, `build-opencode-android.ts:148`) | `13540a73` | `13540a73` | blob idéntico |
+| `packages/opencode/src/cli/tui/worker.ts` (`workerPath`, `:123`) | `4cf6b2d4` | `4cf6b2d4` | blob idéntico |
+| `packages/core/src/global.ts` (nuestro fix) | `a192a4b4` | `a192a4b4` | el fix re-aplica limpio |
+| `migration/<YYYYMMDDHHMMSS>/migration.sql` (`:76-86`) | 1 dir, `20260511173437_session-metadata` | 1 dir, el mismo, `migration.sql` 42 B | glob intacto |
+| catalog `@opentui/core`/`solid`/`keymap` | `0.4.5` | `0.4.5` | `patch-opentui-core-runtime.py` sigue aplicando |
+| `packageManager` | `bun@1.3.14` | `bun@1.3.14` | no se toca el pin de Bun en esta fase |
+| `patches/*.patch` upstream | 19 | 19 | viaja con `bun.lock` (878 275 B) |
+
+El delta real entre ambas tags, en lo que nos afecta, es de dependencias de providers:
+`@ai-sdk/gateway` `3.0.104→3.0.191`, `@ai-sdk/provider` `3.0.8→3.0.16`, `@ai-sdk/togetherai`
+`2.0.41→2.0.68`, `gitlab-ai-provider` `6.15.0→6.18.0`, y `open` `10.1.2→11.0.4` que sube a
+devDependencies de la raíz. Nada de esto toca el grafo de módulos ni el bundle standalone, que es
+donde viven nuestras adaptaciones.
+
+Veredicto H1.0: la Fase 1 es un re-vendor mecánico de riesgo bajo, y el árbol 1.18.34 es apto para
+sustituir el actual sin re-derivar ninguna adaptación.
