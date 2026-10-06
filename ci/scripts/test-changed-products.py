@@ -20,7 +20,9 @@ def main() -> None:
     assert MODULE.classify(["ci/scripts/env.sh"]) == set(MODULE.PRODUCTS)
     assert MODULE.classify([".github/workflows/build-bun.yml"]) == set(MODULE.PRODUCTS)
     assert MODULE.classify(["README.md"]) == set()
-    assert MODULE.classify(["codex/src/codex-rs/Cargo.lock"]) == set()
+    # Una ruta fuera del grafo de productos no selecciona nada: es lo que protege
+    # de que un producto jubilado o ajeno vuelva a colarse en el DAG del stack.
+    assert MODULE.classify(["retired/src/crate/Cargo.lock"]) == set()
     assert MODULE.affected_products({"bun"}) == {"core", "bun", "opentui", "opencode", "kilo"}
     assert MODULE.affected_products(set(MODULE.PRODUCTS)) == set(MODULE.GRAPH_PRODUCTS)
     print("changed-products tests: OK")

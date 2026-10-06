@@ -24,7 +24,7 @@ class InstallerTests(unittest.TestCase):
     def tearDown(self):
         import shutil; shutil.rmtree(self.tmp, ignore_errors=True)
     def run_installer(self, *args):
-        env = os.environ | {"CODEX_INSTALL_TEST_MODE":"1", "TMPDIR":str(self.tmp)}
+        env = os.environ | {"STACK_INSTALL_TEST_MODE":"1", "TMPDIR":str(self.tmp)}
         return subprocess.run(["bash", str(INSTALL), "--manifest", str(self.manifest), "--prefix", str(self.prefix), "--yes", *args], env=env, text=True, capture_output=True)
     def test_dry_run_does_not_touch_prefix(self):
         r = self.run_installer("--dry-run"); self.assertEqual(r.returncode, 0, r.stderr); self.assertFalse((self.prefix / "bin").exists())
@@ -36,20 +36,19 @@ class InstallerTests(unittest.TestCase):
         for component in ("opencode", "kilo"):
             r = self.run_installer("--just", component)
             self.assertEqual(r.returncode, 0, f"{component}: {r.stderr}")
-    def test_retired_codex_component_is_rejected(self):
-        r = self.run_installer("--just", "codex")
+    def test_unknown_component_is_rejected(self):
+        r = self.run_installer("--just", "retired-product")
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("invalid choice", r.stderr)
-        self.assertFalse((self.prefix / "bin" / "codex-android").exists())
     def test_legacy_manifest_component_is_ignored(self):
-        # Releases published before the extraction still list Codex; the
-        # installer must install the stack it knows and skip the rest.
+        # Los releases publicados antes de la separacion listan un componente que
+        # este instalador ya no conoce: instala el stack y omite el resto.
         data = json.loads(self.manifest.read_text())
-        data["components"]["codex"] = dict(data["components"]["kilo"])
+        data["components"]["retired-product"] = dict(data["components"]["kilo"])
         self.manifest.write_text(json.dumps(data))
         r = self.run_installer()
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertFalse((self.prefix / "bin" / "codex").exists())
+        self.assertFalse((self.prefix / "bin" / "retired-product").exists())
 
     def test_custom_prefix_uses_local_bin(self):
         prefix = self.tmp / ".local"

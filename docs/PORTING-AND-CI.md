@@ -198,9 +198,13 @@ resolvió el aborto.
   `tccdefs_.h` con `c2str`.
 - **Codex/Rusty V8 fuera del stack** (permanente): se extrajeron a
   `Leonisaurov/codex-termux`, con su propia pipeline, su manifest
-  (`codex-termux/v1`) y su instalador. El DAG histórico quedó en
-  `ci/workflows/build-android.full.yml` como referencia. `publish` y el
-  instalador ya no conocen `codex`; un manifest antiguo que lo liste se ignora.
+  (`codex-termux/v1`) y su instalador. El DAG pre-extracción se quedó como archivo
+  muerto en `ci/workflows/` (puntaba a `build-codex.yml` y a un
+  `package-stack-release.py --codex` que ya no existen aquí) y se borró; su último
+  estado está en el history, en `718689a`. `publish` y el instalador no conocen ese
+  producto: un manifest antiguo que liste un componente ausente se ignora, y las
+  variables del instalador pasaron a `STACK_INSTALL_{REPO,REF,MANIFEST_BASE,TEST_MODE}`
+  para no chocar con las homónimas del instalador del otro repositorio.
 - **Kilo a base de fuente**: `kilo/scripts/build.sh` compila `libopentui.so`
   (0.3.4) y el bundle desde `opentui/src/kilo` y `kilo/src`. Las adaptaciones
   Android de Zig viven en el árbol vendorizado; el build las **verifica por
