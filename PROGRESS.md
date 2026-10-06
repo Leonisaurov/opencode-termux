@@ -211,3 +211,25 @@ upstream, no el port.
 Estático antes de subir: `bash -n install.sh ci/scripts/*.sh` OK y los 14
 `ci/scripts/test-*.py` OK.
 
+### La corrida de `main` que lo confirma (run `37403852475`, merge `1a32dcd`)
+
+Verde, 34 min de `detect` a `kilo`, con `publish` `skipped` (aquí publicar sigue siendo
+dispatch manual). Duraciones leídas: detect 17 s, opentui 1 m 15 s, core 6 m 29 s,
+bun 21 m 58 s, opencode 5 m 28 s, kilo 3 m 8 s. Artifacts de esa misma run:
+`bun-android-aarch64-1.2.13` (36 990 886 B), `opentui-android-aarch64-658db4cb…` (3 792 622 B), `opencode-android-aarch64-1.18.30`
+(59 872 712 B),
+`kilo-android-aarch64-7.4.20` (56 008 845 B) y `opencode-termux-1.18.30` (150 523 763 B).
+Ninguno es de Codex.
+
+El coste previsto se cumplió sin convertirse en build fría: el digest del contrato cambió
+(`…02830c65…` de ayer → `…30c55442…` en esta run), los productos restauraron intermedios
+por prefijo y revalidaron — WebKit no se recompiló; bun tardó 22 min, no horas.
+
+Una anotación que aparece y **no** es regresión del cambio: `Cache save failed` en
+`bun / build-bun` por `Unable to reserve cache with key ci-cache-v2-core-tinycc-
+intermediates-…-30c55442…`. El `core` job ya había guardado esa clave exacta 21 minutos
+antes (`gh cache list`: una entrada con ese key creado a las `02:29:50`); GitHub no
+reescribe una clave existente, así que el segundo escritor pierde. Los bytes están en
+cache. Es solapamiento productor/productor del propio DAG (dos jobs guardan el mismo
+intermedio de tinycc), no algo introducido aquí, y no afectó a las salidas finales.
+
