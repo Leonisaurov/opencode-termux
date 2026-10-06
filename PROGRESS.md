@@ -734,3 +734,93 @@ Las dos formas defendibles de seguir, ambas medidas y ninguna barata:
 Ninguna está elegida. Lo que sí queda descartado por medición es el optimismo de b-i/b-ii: el coste de
 la fase 2 **no** era "re-aplicar 8 ficheros", porque la capa nativa de OpenTUI cambió de ruta, de
 toolchain mínima y de conjunto de dependencias C antes de llegar a 0.5.14.
+
+## H2.0(b-v) CP-B resuelto en fuente: cuatro causas medidas, ninguna necesita `patchelf`
+
+**Decisión de toolchain.** Se implementó la opción 1 de b-iv (toolchain por producto), no el bump
+transversal: `build-opentui.yml:53` fija `ZIG_VERSION: "0.16.0"` (el `SUPPORTED_ZIG_VERSIONS` del
+`build.zig` de 0.5.14 lo exige) y `build-opencode.yml` declara los dos valores (`ZIG_VERSION "0.16.0"`
+para el consumidor de OpenTUI, `BUN_ZIG_VERSION "0.15.2"` para core/bun, que siguen intactos). El
+peligro era silencioso: `test-workflow-cache-contracts.py` comparaba solo *nombres* de options, así que
+una divergencia literal de valores no la detectaba nadie. Se añadieron afirmaciones explícitas de que
+(a) OpenTUI y quien consume su lib pinnean el mismo Zig, (b) core/bun/build-bun comparten 0.15.2,
+(c) Bun y OpenTUI pinnean Zig **distintos** por diseño, y (d) la key del job opentui se recalcula con
+`ZIG_VERSION` y las de core/bun con `BUN_ZIG_VERSION`, para que queden byte-idénticas a sus productores.
+
+**Causa 1 — `TranslateC` no propaga `--libc`.** En Zig 0.15.2 **y** 0.16.0 el paso `TranslateC` ignora
+el archivo `--libc`: clang no recibe ningún directorio de encabezados Bionic y miniaudio.h/Yoga.h
+fallan en `<pthread.h>`/`<math.h>`. El defecto no es de la versión, es del paso. Por eso 0.4.5 nunca lo
+vio: su grafo no tenía **ningún** `b.addTranslateC`, todo `@cImport` corría dentro del `Compile`, que sí
+obedece `--libc`. 0.5.14 introdujo los pasos sueltos de miniaudio y Yoga y ahí apareció la clase de
+fallo. El fix pasa los dos directorios como `-isystem` (`addSystemIncludePath`), derivados del mismo
+`android-libc.txt` que usa el link: si header search y link config se leen por separado, driftean.
+
+**Causa 2 — se pierde el API level.** `<sys/cdefs.h>` aborta con `#error Unversioned target triples are
+not supported!` cuando no hay `__ANDROID_MIN_SDK_VERSION__`, porque el driver clang se lo inyecta al
+target Android y translate-c no. Se reponen los predefines del driver en el paso:
+`__ANDROID_MIN_SDK_VERSION__=<api>`, `__ANDROID_API__=__ANDROID_MIN_SDK_VERSION__`,
+`__ANDROID_API_FUTURE__=10000`, `__ANDROID__`, `__ANDROID_NDK__`. La forma `-D nombre=valor` partida en
+argv es exactamente la que emite `defineCMacro`, y el nivel se pide con `-Dbionic-api-level` con
+fallback al query del target.
+
+**Causa 3 — anotación de nullability dentro del declarador de array.** AOSP escribe
+`const struct timeval __times[_Nullable 2]` (`sys/time.h:47`), sintaxis que el frente de translate-c
+rechaza como error duro aunque el camino `cc` la tolera (los system headers silenciaban el diagnóstico).
+No es un capricho de Termux: la línea es idéntica en el header upstream, luego el NDK de CI se comporta
+igual. Se neutralizan `_Nullable`/`_Nonnull` a vacío — no dicen nada a los bindings traducidos.
+
+**Causa 4 — `-lm` no es resoluble.** Con archivo `--libc`, Zig no deja **ninguna** ruta de búsqueda de
+bibliotecas del sistema (`unable to find dynamic system library 'm' … searched paths: none`), y Bionic ya
+pliega `dl`, `pthread` y `m` dentro de `libc.so`. Los tres salen del link Android; la línea de comando
+real que el probe generó para `aarch64-linux-android.24` audita el inventario final: termina en
+`-lc++ -lc` y nada más. Esto reproduce la decisión que ya validó 0.4.5 (dl/pthread guardados) y añade
+`m`, que es lo que 0.5.14 trajo dentro.
+
+**Validación local sin gastar CI.** En el teléfono, con Zig 0.16.0 y los headers Bionic reales de
+Termux: translate-c de miniaudio.h y Yoga.h sale limpio (stderr de 0 bytes) y el grafo completo
+`zig build build-aarch64-linux-android.24` avanza hasta compilar **libc++, libc++abi y libunwind desde
+fuente** para `-target aarch64-unknown-linux5.10.0-android24` con `-isystem $PREFIX/include` e
+`-isystem $PREFIX/include/aarch64-linux-android`. El enlace local fue posible con un `--libc` cuyo
+`crt_dir` apunta a enlaces simbólicos de **Bionic real del sistema** (`/system/lib64/libc.so`, `libm.so`,
+`libdl.so`), que es lo que las stubs del NDK representan en CI; el resultado es `ELF64/AArch64`,
+`Type: DYN`, `for Android 24` y `NEEDED libm.so, libc.so, libdl.so`, sin `libc++_shared.so` (la C++
+runtime queda estática).
+
+## H2.0(b-vi) "compila" no era la respuesta: el primer .so no cargaba
+
+El artefacto anterior pasó translate-c, compiló todo, **enlazó y cumplía todos los checks que hace el
+workflow** (ELF64, AArch64, `NEEDED: libc.so`). Y sin embargo era inservible: `dlopen` lo rechazó con
+`cannot locate symbol "pthread_tryjoin_np"`. La causa es de ABI, no de compilación:
+`src/clipboard/host.zig` (backend de portapapeles Wayland/X11, nuevo en la serie 0.5) declara
+`extern "c" fn pthread_tryjoin_np` y lo llama en la rama `.linux` de `tryJoinThread`. Para Zig, Android
+**es** `.linux` (solo difiere el `abi`), así que la rama se instancia, el enlace la deja como símbolo
+indefinido y el fallo aparece en runtime. Medido sobre el Bionic real del aparato: no existe ni
+`pthread_tryjoin_np` ni `pthread_timedjoin_np`; sí existen `pthread_join`, `pthread_detach`,
+`pthread_kill`.
+
+El fix emula la prueba de terminación con lo que Bionic garantiza: `pthread_kill(handle, 0)` devuelve
+**ESRCH** justo cuando el hilo joinable ya terminó sin ser cosechado (medido en el teléfono con un
+programa C: `rc=3` y `pthread_join` inmediato después), y entonces se cosecha con `thread.join()`.
+Vive detrás de `builtin.abi == .android` en la misma rama `.linux`, de forma que glibc/freebsd/macos/windows
+conservan su camino intacto.
+
+**El contrato que esto obliga.** `readelf -d` no puede ver esta clase de defecto, así que el workflow
+ahora sí: el paso `Verify dynamic symbols resolve against Bionic` lista los símbolos indefinidos del
+`.so` y exige que **todos** resuelvan contra las stubs públicas del NDK
+(`sysroot/usr/lib/aarch64-linux-android/*.so`), que son exactamente la superficie que el linker de
+Android permite enlazar a una app. Con el artefacto roto el comando señalaba `pthread_tryjoin_np`; con
+el fix señala **0 de 179**. `test-renderer-invariants.sh` fija además la adaptación y una afirmación
+negativa que falla si alguien vuelve a dejar `tryjoin` en el camino Android.
+
+**Veredicto CP-B: no se dispara.** OpenTUI `0.5.14` compila, enlaza y **carga como
+`aarch64-linux-android.24` con Zig `0.16.0`**, verificado con `dlopen` real en el teléfono. Lo que CI
+todavía tiene que confirmar, y solo eso: que el enlace con el NDK r28b y `-Doptimize=ReleaseSafe`
+produce el mismo ELF verificable (mismo inventario de símbolos, mismas `NEEDED`), y que el paso nuevo
+pasa sobre ese artefacto. Ninguna de las otras dos trampas de H2.0 se activó: CP-A quedó cerrado en
+(a) y CP-C se mide en (c).
+
+**Lo que NO se afirma:** que el `.so` de CI sea byte-idéntico al del probe (modo de optimización y
+`crt_dir` distintos); que cargar la lib equivale a que el TUI de OpenCode v2 funcione con ella (eso es
+H2.3/H2.6); que la emulación de tryjoin esté probada bajo carga real de portapapeles — el backend
+Wayland/X11 no tiene display server en Termux, de modo que su `tryJoinThread` no se ejercita en el
+camino que nos importa; y no se afirma nada sobre `models-snapshot` ni las migraciones de v2 (H2.0(d)).
