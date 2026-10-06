@@ -35,7 +35,7 @@ These values are deliberate port compatibility constraints:
 - WebKit/JSC: commit `017930ebf915121f8f593bef61cbbca82d78132d`
 - ICU: `75.1`
 - Zig: `0.15.2`
-- OpenCode: `1.18.30`
+- OpenCode: `1.18.34`
 
 Do not update or align these versions by inference. A version update requires coordinated verification of the source ports and explicit authorization.
 
