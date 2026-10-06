@@ -300,3 +300,51 @@ donde viven nuestras adaptaciones.
 
 Veredicto H1.0: la Fase 1 es un re-vendor mecánico de riesgo bajo, y el árbol 1.18.34 es apto para
 sustituir el actual sin re-derivar ninguna adaptación.
+
+### H1.1–H1.2 — Re-vendor y pins de 1.18.34 (commit `0fd589a`)
+
+El árbol `opencode/src` es ahora el commit upstream `aec0b9a6` medido, no inferido: contra el
+`git/trees` de la tag da **0 diferencias de contenido y 0 de modo** sobre 6641 blobs, con una única
+desviación intencional — `packages/core/src/global.ts` (blob `77372df0`, el fallback Termux de
+`TMPDIR`), que viaja byte a byte idéntico al que ya teníamos. El delta de la fuente son 249 ficheros.
+Lo trackeado vuelve a ser upstream menos las mismas 8 rutas que filtran los `.gitignore` de upstream
+(`*.zip`, `*.log`, `.vscode`, `.gitignore` anidados y `script/build-*.ts`), así que la regla del vendor
+anterior se reprodujo sin tocarla.
+
+Pins movidos en el mismo commit: `ci/source-manifest.json`, `ci/scripts/env.sh` (versión y
+`OPENCODE_SOURCE_COMMIT`), defaults de `build-opencode.yml`, `build-android.yml` y
+`build-opencode-docker.yml`, el fallback de `build-opencode-android.ts`, `releases/manifest.example.json`
+(tag `opencode-v1.18.34-android`) y `AGENTS.md`/`CLAUDE.md`/`README.md`. No queda ninguna aparición de
+`1.18.30` ni de `3104c142` fuera del histórico de este archivo. Los 14 `ci/scripts/test-*.py` y
+`validate-source-tree.py` pasan, y `bash -n ci/scripts/env.sh` también.
+
+Se compró ademas que la resolución de OpenTUI no se mueve: `bun.lock` viejo y nuevo fijan
+`@opentui/{core,solid,keymap}@0.4.5` con los mismos prefijos `sha512`, lo que es la condición real de
+que `ci/scripts/patch-opentui-core-runtime.py` siga apuntando a los mismos bytes. El pin de Bun queda
+en 1.2.13 porque 1.18.34 sigue declarando `packageManager: bun@1.3.14`, igual que 1.18.30.
+
+### H2.0(a) — El riesgo de Bun en la fase v2 es el toolchain, no el formato
+
+Medido contra `oven-sh/bun` (las tags llevan prefijo `bun-`):
+
+- **`bun-v1.4.2` ya no tiene build Zig**: 0 ficheros `.zig`, `build.zig` eliminado y 1532 `.rs`, con
+  `src/standalone_graph/` como nueva casa del grafo. El techo aún-Zig es **`bun-v1.3.14`** (1299 `.zig`,
+  `build.zig` presente). Subir el Bun del port a 1.4.x no es mover un pin: es re-portear el runtime a
+  cargo/NDK y re-validar ahí WebKit, TinyCC e ICU.
+- **El formato del grafo sobrevive**: el trailer `\n---- Bun! ----\n` está tal cual en
+  `src/standalone_graph/StandaloneModuleGraph.rs:863`. Es decir, la hipótesis de
+  `ci/scripts/module-graph-patch.ts` (`TRAILER`, `OFFSETS_SIZE = 32`) no la rompe la riscritura; el
+  problema es cómo se construye el binario, no cómo se lee.
+- **Bun publica builds android oficiales desde `bun-v1.3.14`**: `bun-linux-aarch64-android.zip` aparece
+  en 1.3.14, 1.4.0 y 1.4.2 (35 154 316 B en 1.4.2), y **no existe** en 1.2.13 ni en 1.3.2. Eso abre una
+  tercera vía para la fase 2 que hoy no está decidida.
+- Lo que fija la decisión es arquitectónico y está verificado en el source:
+  `opencode/scripts/build-opencode-android.ts:290-311` ensambla el producto como
+  `[bytes del bun Android] + [module graph] + [u64]`. Bun no es solo el compilador del bundle, es el
+  **runtime embebido** del binario final. Un bun de glibc es inviable (el port ya carga ese problema con
+  el binario glibc del auto-update oficial), pero un bun Bionic oficial sería, en principio, una base
+  válida para ese ensamblado, y alinearía versiones: hoy conviven host 1.3.2 y runtime 1.2.13.
+
+Queda pendiente clasificar el ELF de ese asset (tipo, `PT_INTERP`, `NEEDED`, API mínima) antes de
+proponer cambiar el Bun del port de fuente a artefacto: eso contraviene el principio actual de compilar
+desde fuente y necesita autorización explícita.
