@@ -6,7 +6,7 @@
 - [x] Documentar la regla de `TMPDIR` y el preflight de builds pesados.
 - [x] Añadir manifiestos y caches verificables al mapa de builds.
 - [x] Mantener los checkouts Codex/Kilo aislados de los scripts comunes.
-- [ ] Revisar este mapa cuando cambien checkouts, workflows o artefactos.
+- [x] Revisar este mapa cuando cambien checkouts, workflows o artefactos.
 
 ## Compilación incremental
 
@@ -27,9 +27,13 @@
       externo, toolchain, lockfile y script de manifest.
 - [x] Separar instalación, bundling y ensamblado de OpenCode; Kilo conserva su
       cache de dependencias independiente.
-- [ ] Añadir detector de cambios y fallback de cache validado al DAG.
+- [x] Añadir detector conservador de cambios (`ci/scripts/changed-products.py`)
+      y exponer `BUILD_CHANGED_PRODUCTS` al pipeline; los productores siguen
+      siendo obligatorios cuando falta un output validado.
 - [x] Añadir resumen de observabilidad por job y pruebas de contrato/hit/
       invalidación/corrupción de manifest.
 - [ ] Medir cold/warm/pequeño/dependencia/toolchain en un runner CI real.
-- [ ] Ejecutar actionlint/YAML/shell/tests y una comparación de tiempos antes y
-      después; no lanzar builds locales pesadas.
+- [x] Ejecutar actionlint/YAML/shell/tests y `git diff --check`; no lanzar
+      builds locales pesadas.
+- [ ] Comparar tiempos y resultados cold/warm en CI; se deja pendiente porque
+      la instrucción de la sesión impide monitorizar los runs remotos.

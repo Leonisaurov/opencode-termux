@@ -13,7 +13,7 @@ mkdir -p "$TMPDIR"
 test -d "$TMPDIR" && test -w "$TMPDIR"
 INSTALLER=$(mktemp "$TMPDIR/opencode-termux-installer.XXXXXX")
 trap 'rm -f "$INSTALLER"' EXIT HUP INT TERM
-REPO=${CODEX_INSTALL_REPO:-Leonisaurov/opencode-termux}
-REF=${CODEX_INSTALL_REF:-main}
+REPO=${STACK_INSTALL_REPO:-Leonisaurov/opencode-termux}
+REF=${STACK_INSTALL_REF:-main}
 curl -fsSL "https://raw.githubusercontent.com/$REPO/$REF/ci/scripts/installer.py" -o "$INSTALLER"
 exec python3 "$INSTALLER" "$@"

@@ -36,7 +36,7 @@ def parse_args() -> argparse.Namespace:
     return a
 
 def preflight(args: argparse.Namespace) -> pathlib.Path:
-    test = os.environ.get("CODEX_INSTALL_TEST_MODE") == "1"
+    test = os.environ.get("STACK_INSTALL_TEST_MODE") == "1"
     if not test and not pathlib.Path("/data/data/com.termux").is_dir(): fail("Este instalador requiere Termux/Android")
     if not test and os.uname().machine != "aarch64": fail(f"Arquitectura no soportada: {os.uname().machine}")
     for tool in ("curl", "mktemp", "sha256sum", "tar", "unzip", "file", "python3"):
@@ -53,8 +53,8 @@ def preflight(args: argparse.Namespace) -> pathlib.Path:
     return tmp
 
 def source_manifest(args: argparse.Namespace, tmp: pathlib.Path) -> tuple[pathlib.Path, str]:
-    repo = os.environ.get("CODEX_INSTALL_REPO", "Leonisaurov/opencode-termux")
-    base = os.environ.get("CODEX_INSTALL_MANIFEST_BASE", f"https://github.com/{repo}/releases/download")
+    repo = os.environ.get("STACK_INSTALL_REPO", "Leonisaurov/opencode-termux")
+    base = os.environ.get("STACK_INSTALL_MANIFEST_BASE", f"https://github.com/{repo}/releases/download")
     if args.manifest: source = args.manifest
     elif args.release == "latest": source = f"https://github.com/{repo}/releases/latest/download/manifest.json"
     else: source = f"{base}/stack-v{args.release}/manifest.json"
@@ -158,7 +158,7 @@ def validate_archive(path: pathlib.Path, kind: str, expected: list[str], out: pa
 
 def verify_file(path: pathlib.Path, component: str, name: str) -> None:
     if name.endswith(".so") or name in ("bun", "opencode", "kilo"):
-        if os.environ.get("CODEX_INSTALL_TEST_MODE") == "1": return
+        if os.environ.get("STACK_INSTALL_TEST_MODE") == "1": return
         info = subprocess.check_output(["file", str(path)], text=True)
         if "ELF" not in info or not re.search(r"aarch64|ARM aarch64", info): fail(f"{component}: arquitectura ELF inválida en {name}")
 
