@@ -855,3 +855,48 @@ forma del oracio y prohíbe reintroducir `nm -D --defined-only`.
 **Lo que NO se afirma aquí:** que la corrida de confirmación (`37489824791`) esté verde todavía — eso
 se lee al cerrar. Que el `.so` de CI sea byte-idéntico al del probe. Seguir en H2.3/H2.6 la
 integración real de la TUI; este hito cierra CP-B (compila + enlaza + carga como Bionic), no el TUI v2.
+
+## H2.0(b-viii) CI verde: CP-B confirmado a nivel de artefacto, tras corregir tres falsos negativos del gate
+
+La sustancia de CP-B se confirmó en la **primera** corrida (`37488100178`): los pasos
+`Build libopentui.so` y `Verify libopentui.so` fueron verdes con NDK r28b + Zig `0.16.0`, es decir
+el `.so` compila y enlaza como `aarch64-linux-android.24` (ELF AArch64, `NEEDED libc.so`). El único
+fallo era el paso nuevo de verificación de símbolos, que bloqueaba la subida del artefacto. Ese paso
+dio **tres falsos negativos**, cada uno reproducido en local antes de tocar nada:
+
+1. `nm -D --defined-only` sobre stubs del NDK devuelve un oracio vacío: los símbolos públicos de una
+   stub linker viven con `Ndx=UND`, y `--defined-only` los descarta todos ⇒ marcaba como "missing"
+   toda la libc. Corregido leyendo `.dynsym` con `readelf` y tomando todo `GLOBAL/WEAK` sin filtrar
+   por sección (commit `131fa12`).
+2. Faltaban **IFUNC** y **cobertura**: Bionic exporta `strcmp/strcpy/strchr/memchr` como IFUNC (no
+   FUNC), y el glob de un solo nivel se dejaba fuera las stubs por API y `libm`/`libdl` (`socket`,
+   `pthread_create`, `dlopen`, `atan2`). Corregido aceptando `FUNC/OBJECT/IFUNC` y recorriendo
+   `find "$STUB_DIR" -name '*.so'` de todo el triple (commit `c936223`). Prueba local: sin el arreglo
+   de string-func quedaban 6 IFUNC "missing".
+3. `find` barre también entradas `.so` que en el sysroot son **scripts de enlazado ASCII** (no ELF);
+   `readelf` falla sobre ellas y bajo `pipefail` abortaba el paso entero en ~20 ms sin diagnóstico.
+   Corregido envolviendo el `readelf` del recorrido con `{ ... || true; }`, dejando estricta la
+   lectura del `.so` real (commit `d8fdcad`). Reproducido en local: loop estricto ⇒ rc=1 sin salida;
+   con `|| true` ⇒ rc=0 y oracio lleno.
+
+**Corrida verde de cierre — `37491176567` (HEAD `d8fdcad`): `completed / success`.**
+
+- Gate: `diagnostico: stubs=328 bionic=6624 undef=170` y `OK: 170 simbolos indefinidos resuelven`.
+  `Build libopentui.so`, `Verify libopentui.so`, `Write build info`, `Save libopentui.so a cache` y
+  `Upload libopentui.so artifact` todos success.
+- Artefacto publicado por CI: `opentui-android-aarch64-31a93fbe66992298d6d0f27481fa781f43d0c1e2`,
+  6 247 603 bytes, `expired=false`.
+
+**Nota de inventario.** El `.so` de CI reporta 170 símbolos indefinidos frente a 179 del probe del
+teléfono: la diferencia se debe a modo de optimización (`ReleaseSafe`) y `crt_dir` distintos, no a
+una divergencia de ABI. El invariante que importa es que **todos** resuelvan contra la API pública de
+Bionic, y así es (missing vacío), igual que el dlopen real en dispositivo.
+
+**Veredicto CP-B: no se dispara, confirmado a nivel de artefacto.** OpenTUI `0.5.14` compila, enlaza,
+**carga** y ahora CI lo valida y lo publica como `aarch64-linux-android.24` con Zig `0.16.0`, sin
+`patchelf`. El gate queda como contrato anti-regresión: ya no se puede publicar un `.so` con un
+símbolo fuera de Bionic.
+
+**Lo que NO se afirma:** que el `.so` de CI sea byte-idéntico al del probe; que esto valide el TUI de
+OpenCode v2 con la lib (eso es H2.3/H2.6); nada sobre `models-snapshot` ni migraciones (H2.0(d)); ni
+que la emulación de `tryjoin` esté probada bajo carga real de portapapeles (no hay display server).
