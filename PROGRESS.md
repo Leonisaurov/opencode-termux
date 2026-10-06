@@ -824,3 +824,34 @@ pasa sobre ese artefacto. Ninguna de las otras dos trampas de H2.0 se activó: C
 H2.3/H2.6); que la emulación de tryjoin esté probada bajo carga real de portapapeles — el backend
 Wayland/X11 no tiene display server en Termux, de modo que su `tryJoinThread` no se ejercita en el
 camino que nos importa; y no se afirma nada sobre `models-snapshot` ni las migraciones de v2 (H2.0(d)).
+
+## H2.0(b-vii) CI: el build y el enlace Bionic son verdes; la puerta de símbolos era el falso negativo
+
+Corrida `37488100178` (feat/opencode-v2, HEAD `da69561`), NDK r28b + Zig `0.16.0`:
+
+- Paso 17 `Build libopentui.so` **success** y paso 18 `Verify libopentui.so` **success** ⇒ el `.so`
+  se compila y enlaza como `aarch64-linux-android.24` y es ELF `AArch64` con `NEEDED libc.so`.
+  **CP-B queda confirmado en CI**: la fuente compila y enlaza como Bionic con el NDK real.
+- Falló el paso 19 `Verify dynamic symbols resolve against Bionic`, y la subida del artefacto se
+  saltó por eso. La lista "missing" eran símbolos que Bionic exporta sí o sí (`close`, `calloc`,
+  `clock_gettime`, `accept4`, `__system_property_get`, `abort`…). Firmas de un **oracio vacío**, no
+  de un `.so` roto.
+
+**Causa.** El gate construía el set Bionic con `nm -D --defined-only` sobre las stubs del NDK. En una
+stub linker los símbolos de la API pública están en `.dynsym` con `st_shndx = UND`; `--defined-only`
+los descarta todos ⇒ `BIONIC` vacío ⇒ `comm -23` reporta cada símbolo indefinido como ausente. El
+mismo `.so`, cargado en el teléfono, da dlopen OK (H2.0(b-vi)).
+
+**Fix** (commit `131fa12`, solo workflow + test; no altera ninguna cache key porque el paso es
+post-build). El oracio se construye con `readelf --dyn-syms -W` tomando todo `GLOBAL/WEAK` de tipo
+`FUNC/OBJECT` **sin filtrar por sección**, que vale tanto para stub (Ndx=UND) como para lib real. Se
+añade canary positivo (`grep -qx close "$BIONIC"`) y un `test -s` sobre ambos lados, para que un
+oracio roto falle explícito y no con una "missing" engañosa. `test-renderer-invariants.sh` fija la
+forma del oracio y prohíbe reintroducir `nm -D --defined-only`.
+
+**Validación local del oracio corregido**, contra el `.so` del probe y libs Android reales:
+`undef=179`, `bionic=4275`, `comm -23` **vacío**; YAML parsea (29 pasos) y las invariantes pasan.
+
+**Lo que NO se afirma aquí:** que la corrida de confirmación (`37489824791`) esté verde todavía — eso
+se lee al cerrar. Que el `.so` de CI sea byte-idéntico al del probe. Seguir en H2.3/H2.6 la
+integración real de la TUI; este hito cierra CP-B (compila + enlaza + carga como Bionic), no el TUI v2.
