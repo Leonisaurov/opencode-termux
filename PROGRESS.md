@@ -468,3 +468,46 @@ Lo que R3 **no** resuelve, y es el riesgo que queda por medir: si el código de 
 de runtime que un Bun 1.3.14 no implemente, y si `@opentui/{core,solid,keymap}@0.5.14` compila
 contra Bionic API 24 (CP-B, que sigue siendo el candidato fatal). Ninguna de las dos se decide con
 esta medición.
+
+## Fase 1 cerrada: 1.18.34 publicado y verificado con la TUI real (2026-10-06)
+
+**CI.** La corrida de push `37412517206` sobre el commit `0fd589a` terminó `success` en los seis
+nodos (`detect`, `core`, `opentui`, `bun`, `opencode`, `kilo`), con `publish` saltado por ser
+empuje. Confirmó la predicción del plan sobre las caches: `core` y `opentui` resolvieron por
+**hit** de restore-key (`ci-cache-v2-core-icu-intermediates-…`, `ci-cache-v2-opentui-intermediates-…`),
+es decir el pin nuevo no ensució los nodos que no lo consumen, mientras el nodo `opencode`
+recompiló desde el árbol vendorizado y pasó `Build OpenCode standalone binary` + `Verify OpenCode
+binary`. El `detect` además ejecutó `Validate static CI contracts` en verde.
+
+**Publicación.** `build-android.yml` por `workflow_dispatch` (`37416769756`, `release=1.18.34`,
+`bun=1.2.13`, `opentui_ref=658db4cb…`, `opencode=1.18.34`, `kilo=7.4.20`) quedó `success` con el
+job `publish` corrido, y publicó el tag **`stack-v1.18.34`** (2026-10-06T05:11:29Z) con
+`manifest.json` y los cuatro assets (`bun-1.2.13-…`, `opentui-658db4cb…-…`, `opencode-1.18.34-android-aarch64.tar.gz`,
+`kilo-7.4.20-…`). El `publish` consumió artefactos de esa misma corrida, sin rempaquetado local.
+
+**Dispositivo.** `install.sh 1.18.34 --just opencode --prefix ~/.local --yes --smoke-test` instaló
+limpio (checksum y arquitectura validados) y `opencode --version` responde `1.18.34`. Antes de
+probar hubo que corregir una regresión del entorno: `~/.config/fish/config.fish` tenía una segunda
+línea `fish_add_path ~/.opencode/bin` que el instalador oficial vuelve a agregar, y con eso
+`opencode` resolvía al ELF **glibc** del auto-update (`interpreter /lib/ld-linux-aarch64.so.1`),
+que no arranca en Bionic. Sacada esa ruta de `fish_user_paths` y comentada la línea, `opencode`
+vuelve a resolver a `~/.local/bin/opencode`.
+
+**TUI real.** Manejada con `ci/scripts/tui-smoke.sh` y capturas tmux escalonadas sobre una sesión
+de 120x32. El arnés se validó antes contra `top` en la misma pane (pintó), para no confundir una
+espera corta con un fallo del artefacto. Resultados con 1.18.34:
+
+- t=20 s pane vacía (el binario ya toma la pantalla alternativa y limpia); t=40 s **12 líneas
+  renderizadas**: logo, caja de entrada con `Ask anything…`, línea `Build · Fledge Alpha Free
+  OpenCode Zen`, ayuda `tab agents  ctrl+p commands` y estado `~/Develop/Patch/opencode-termux:main`
+  con la versión. Es el mismo perfil de arranque en frío que dio 1.18.30 (≈30-40 s), así que el
+  re-vendor no cambió el tiempo de arranque perceptiblemente.
+- Entrada viva: escrito `hola desde la prueba` sin Enter, el texto aparece en la caja (`┃ hola desde
+  la prueba`), y dos `Ctrl+C` devuelven el control y cierran la ventana sin quedar colgada.
+- Ninguna captura mostró `panic`, `Unexpected error` ni trazas nativas.
+
+Con esto H1.3 y H1.4 quedan cerrados: **1.18.34 es la versión publicada del stack** y la maquinaria
+de re-vendor + pin coordinado + publicación + verificación en dispositivo está ejercitada, que era
+el objetivo secundario de la fase 1. Lo medido no cubre providers, MCP ni sesiones reales: el
+criterio acordado fue arranque de TUI con evidencia, y paridad funcional más allá del smoke no se
+declara.
