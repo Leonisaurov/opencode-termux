@@ -16,7 +16,10 @@ mkdir -p "$P"
 
 # Los postinstall del arbol (fix-node-pty) invocan `bun` pelado: el host bajo
 # prueba debe estar primero en PATH para que install/compile usen el mismo bun.
-export PATH="$(dirname "$HOST_BUN"):$PATH"
+# El binario descargado se llama bun-<version>, asi que se expone como bin/bun.
+mkdir -p "$P/bin"
+ln -sf "$HOST_BUN" "$P/bin/bun"
+export PATH="$P/bin:$PATH"
 
 cp -a "$TREE_SRC" "$P/src"
 cd "$P/src"
