@@ -56,3 +56,53 @@ Estáticos por commit: `test-build-state.py`, `validate-source-tree.py`, `test-w
 ## Límites de lo afirmable
 
 "Compila" ≠ "arranca". Un `bun build` en host no valida el binario Bionic. El cache-hit no prueba que el binario corresponda al pin. La paridad funcional v2 (providers, MCP, sesiones, portapapeles) no se declara más allá del smoke. CP-C sigue abierto hasta A1.
+
+## Epílogo — la travesía v2 (2026-10-05 → 2026-10-07)
+
+**Salida.** Con la fase 1 cerrada (OpenCode 1.18.34 vendorizado, publicado como
+`stack-v1.18.34` y verificado con la TUI real en el teléfono), el plan aprobó subir a la
+línea v2 por pasos, con esta hoja como archivo de seguimiento y el mandato de cerrar cada
+paso con evidencia, nunca con "compila".
+
+**Corte de riesgo (H2.0).** Antes de tocar productos se midieron las cuatro incógnitas:
+CP-A el formato standalone de Bun sigue parseable por `module-graph-patch.ts`; CP-B la
+librería OpenTUI 0.5.14 compila y **carga** como Bionic `aarch64-linux-android.24` con Zig
+0.16 (tres falsos negativos del gate de símbolos medidos y corregidos; `patchelf` nunca fue
+opción); CP-C un `bun build --compile` propio sobre el árbol v2 es viable (la ruta del
+`script/build.ts` de upstream, sin targets android, se descartó documentadamente); CP-D las
+migraciones v2 viajan versionadas (`packages/core/src/database/*`), sin defines 1.18.
+
+**Re-port atómico (B1–B5).** `6550ea3` re-vendió `e7a34f09` completo con su fix de rutas
+Termux reubicado. La matriz de emisores B2 resolvió lo que parecía un bump obligatorio de
+Bun: el grafo del host 1.3.2 carga en el runtime Android 1.2.13, así que **Bun no se
+subió a 1.4.2** — los pines coordinados quedaron 1.2.13/1.3.2 y el riesgo Rust quedó fuera
+del port. `f4a38f5` reescribió el parche de runtime JS para el layout de chunks 0.5.14.
+`cf2cf3e` reescribió el bundler v2 (`packages/cli`, plugins espejo de upstream: assets
+web-ui vacíos, stub `pty-binding`, require estático del watcher glibc) y, como la rama no
+puede materializar Bun por CI (cache scopeada por rama, artefactos intra-DAG), nació la
+sonda `v2-probe-assembly.yml`: baja los artefactos verdes de main con las validaciones del
+producto y corre el script real. `0761fe6` movió pines, docs y defaults a 2.0.24.
+
+**Dispositivo (B6) y la lección cara.** La primera release publicada instalaba, respondía
+`--version` y hasta listaba modelos — pero la TUI moría en `resolveRenderLib`. `strings`
+sobre el binario dio la causa: el grafo embebía **solo** `@opentui/core-linux-x64`; el
+bundler resuelve el paquete nativo contra el **host del runner**, no contra el teléfono, y
+el swap a arm64 de B4 nunca llegó a los bytes embebidos. `5abfad6` restauró el contrato de
+1.18 (swap sobre x64) y la re-publicación (37602945465) generó el asset correcto. Con el
+asset **publicado** instalado en el teléfono: TUI renderizando en tmux en los dos modos
+(standalone y background service), 48 migraciones drizzle v2 ejecutadas sobre Bionic, y dos
+sesiones reales de extremo a extremo (`TERMUXOK`, `RELEASEOK`) con auth, red y server
+funcionando desde el dispositivo.
+
+**Llegada.** Tag `opencode-v2.0.24-android` sobre `5abfad6`, release `stack-v2.0.24`
+regenerada, sondas desechables retiradas, 8 suites estáticas verdes, y merge a `main`
+(`557185d`) ejecutado solo con B6 verde — que era la condición del plan.
+
+**Lo que se aprendió y queda vigente.**
+1. "Compila/instala/--version OK" no toca la ruta TUI: la aceptación era el teléfono y lo
+   salvó el teléfono.
+2. El contrato del swap lo decide **dónde corre el bundler**, no dónde corre el binario.
+3. Los artefactos de GitHub son repo-wide pero las caches son por rama: una rama puede
+   sondear artefactos verdes de main, no su cache.
+4. Cada pin movido genera keys nuevas: los bumps van atómicos por producto o el contrato
+   de paridad los rechaza antes de gastar CI.
