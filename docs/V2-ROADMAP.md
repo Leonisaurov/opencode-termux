@@ -9,21 +9,22 @@ marca sin su criterio de cierre. Rama de trabajo: `feat/opencode-v2`.
 - [x] **Fase 1 completa** — OpenCode 1.18.34 vendorizado (upstream `aec0b9a6…`), release `stack-v1.18.34`, instalado y validado en el teléfono. `main` publica 1.18.x.
 - [x] **H2.0(a) / CP-A cerrado** — formato standalone de Bun compatible con `ci/scripts/module-graph-patch.ts`.
 - [x] **H2.0(b) / CP-B cerrado (nivel artefacto)** — OpenTUI 0.5.14 compila, enlaza y carga como `aarch64-linux-android.24` con Zig 0.16.0 (sin `patchelf`). CI verde `37491176567`: gate `stubs=328 bionic=6624 undef=170 → OK`. Layout real: `packages/native/lib/aarch64-linux-android.24/libopentui.so`.
-- [ ] Pendiente: H2.0(c), H2.0(d), decisión CP-C, y el re-port atómico H2.1–H2.6.
+- [x] **H2.0(c) / CP-C cerrado** — `bun build --compile` emite un standalone con grafo extraible desde `packages/cli` de v2 (evidencia `37567822938`). **H2.0(d) cerrado** — tabla de acoplamiento verificada. Gate Fase A verde.
+- [ ] Pendiente: el re-port atómico H2.1–H2.6.
 
 Hechos de upstream (tag `v2.0.24`): commit re-vendor `e7a34f09bfd9134dfade5a8ddb843f7030bc9a69`; `@opencode/cli` bin `./bin/opencode.cjs`, dev-entry `src/index.ts`, TUI vía `@opencode/tui` + `src/server-process.ts`; migraciones en `packages/core/src/database/{drizzle,migration}`; `script/build.ts` tiene targets fijos sin android ⇒ **no** se adopta.
 
 ## Fase A — corte de riesgo restante (runner desechable, antes de builds caros)
 
-- [ ] **A1 · H2.0(c)** — árbol v2 y viabilidad de `bun --compile` a Bionic (decide **CP-C**).
+- [x] **A1 · H2.0(c)** — árbol v2 y viabilidad de `bun --compile` a Bionic (decide **CP-C**). **CERRADO 2026-10-07 (CP-C no se dispara).** `37567822938`: `bun install` del workspace v2 OK con Bun 1.4.2; Test B emite standalone ELF de 135 MB con trailer `---- Bun! ----` presente. Ver evidencia en `PROGRESS.md`.
       `bun install` de snapshot `e7a34f09`; confirmar entrada standalone `packages/cli/src/index.ts` (o `bin/opencode.cjs`); localizar worker del TUI (`@opencode/tui` + `server-process.ts`); **producir un `bun build --compile` real** que intente target bionic; decidir explícitamente no usar `script/build.ts`.
       **Cierre:** veredicto escrito en `PROGRESS.md` + log del probe. CP-C: si `packages/cli` no permite `--compile` propio a Bionic ⇒ abandonar v2 y reportar; si permite ⇒ continuar. (Validar en host NO prueba el binario Bionic.)
 
-- [ ] **A2 · H2.0(d)** — migraciones, esquema y puntos de acoplamiento del build.
+- [x] **A2 · H2.0(d)** — migraciones, esquema y puntos de acoplamiento del build. **CERRADO 2026-10-07.** Tabla ruta-1.18→ruta-v2 con existencia verificada (entrada `packages/cli/src/index.ts`; migraciones `.ts` vía `migration.gen.ts` + drizzle/Effect en runtime; fix Termux → `packages/util/src/global-roots.ts`). Ver `PROGRESS.md`.
       Resolver el glob correcto para `opencode/scripts/build-opencode-android.ts` contra `packages/core/src/database/{drizzle,migration}`; verificar equivalentes de `models-snapshot` y `workerPath`/`entrypoints`/`tsconfig`; confirmar dónde vive el override de rutas de Termux en v2 (prepara B1).
       **Cierre:** tabla ruta-1.18 → ruta-v2 con existencia verificada en el árbol, en `PROGRESS.md`.
 
-**Gate:** A1 y A2 verdes antes de invertir en el re-port. Si CP-C se dispara, se detiene aquí.
+**Gate:** **[VERDE 2026-10-07]** A1 y A2 verdes ⇒ se autoriza el re-port (Fase B). CP-C no se disparó.
 
 ## Fase B — re-port atómico (solo si A verde). Cada paso = commit + validación
 

@@ -900,3 +900,45 @@ símbolo fuera de Bionic.
 **Lo que NO se afirma:** que el `.so` de CI sea byte-idéntico al del probe; que esto valide el TUI de
 OpenCode v2 con la lib (eso es H2.3/H2.6); nada sobre `models-snapshot` ni migraciones (H2.0(d)); ni
 que la emulación de `tryjoin` esté probada bajo carga real de portapapeles (no hay display server).
+
+## H2.0(c) y H2.0(d) — corte de riesgo v2 restante (2026-10-07)
+
+Corrida de evidencia: workflow de sondeo desechable `V2 Probe (H2.0c / CP-C)` sobre el upstream
+público `anomalyco/opencode` en `e7a34f09…`, Bun `1.4.2`, runner efímero (`37567822938`: todos los
+pasos success). Tres corridas previas (`37567333898`, `37567583229`, `37567822938`) afinaron el
+*harness* (no el port): el workflow inyecta `bash -e`, así que `bun build … ; rc=$?` abortaba antes
+de capturar; y los `find | head | tee` bajo `pipefail` daban SIGPIPE. Ambos ya corregidos.
+
+**H2.0(c) / CP-C: NO se dispara, confirmado.**
+
+- `bun install` del workspace v2 completo **resuelve** con Bun 1.4.2 (postinstall: `bun run --cwd
+  packages/core fix-node-pty` — apuntar para la pty de Android en B4).
+- **Test B** (`Bun.build({compile})` con plugin `@opentui/solid` + un proveedor del módulo virtual
+  `virtual:opencode-app-assets`): emite un standalone ELF real de **135 308 768 bytes** con el trailer
+  `\n---- Bun! ----\n` **presente** (`success=true`). Ese trailer es la entrada que
+  `ci/scripts/module-graph-patch.ts` y `opencode/scripts/build-opencode-android.ts` necesitan para
+  extraer el grafo de módulos y montarlo sobre el binario Bun de Android. Luego el pipeline de
+  intercambio de grafo tiene input válido desde el árbol v2.
+- **Test A** (bare, sin plugins): falla **solo** en `Could not resolve: "virtual:opencode-app-assets"`
+  (`packages/cli/src/app-assets.ts:11`). Es un asunto de plugin de build, no incapacidad de Bun: el
+  upstream lo provee con `packages/cli/script/app-assets.ts` (hornea assets web brotli); en B4 se
+  registra el equivalente. `load()` además tiene fallback por runtime si `OPENCODE_LOCAL`.
+
+**H2.0(d) — tabla de acoplamiento ruta-1.18 → ruta-v2 (existencia verificada en el árbol):**
+
+| Punto | 1.18.x (nuestro pipeline) | v2.0.24 (verificado) | Acción |
+|---|---|---|---|
+| Paquete de entrada | `packages/opencode/src/index.ts` | `packages/cli/src/index.ts` (dev entry; `bin/opencode.cjs` se genera en build) | `build-opencode.sh:36` OPENCODE_PKG → `packages/cli` |
+| Migraciones | `packages/opencode/migration/<ts>/migration.sql` (inline como define `OPENCODE_MIGRATIONS`) | `packages/core/src/database/migration/*.ts` + `migration.gen.ts` (imports estáticos; aplicadas vía drizzle-orm + Effect **en runtime**) | Eliminar el paso 2 de SQL-inline; las migraciones viajan en el grafo; riesgo → B6 (SQLite sobre Bionic) |
+| models-snapshot | fetch `models.dev/api.json` → `src/provider/models-snapshot.js` en build | generado y versionado por `packages/core/script/update-models-snapshot.ts`; providers en `packages/ai/src/providers/*` | No hace falta fetch en build; verificar snapshot versionado presente tras re-vendor |
+| worker TUI | `./src/cli/tui/worker.ts` + `@opentui/core/parser.worker.js` | `@opencode/tui` (`packages/tui/src`) + `packages/cli/src/server-process.ts`; parser worker de `@opentui/core` sigue presente | Reubicar `workerPath`/`entrypoints`; confirmar worker en B4 |
+| Fix rutas Termux | `packages/core/src/global.ts` (tmp → `$PREFIX/tmp` cuando TMPDIR no definido) | `packages/util/src/global-roots.ts` (`os.tmpdir()`; XDG por `os.homedir()`) | **Portar el fallback de tmp** a `global-roots.ts` (no suponer, verificar en B1) |
+| tsconfig | `./tsconfig.json` en `packages/opencode` | `packages/cli/tsconfig.json` | Apuntar entrypoint/tsconfig al paquete cli |
+
+**Gate Fase A: A1 y A2 verdes** ⇒ se autoriza el re-port atómico (Fase B). Se elimina el workflow de
+sondeo (su pregunta está respondida).
+
+**Lo que NO se afirma:** que el standalone host (ELF x86-64/glibc) sea el binario Bionic — eso se
+re-confirma con `build-bun.yml` y en el teléfono. Que el plugin virtual del Test B (default vacío)
+sustituya al de assets real (eso es B4). Nada sobre migraciones ejecutándose en Bionic (B6); ni sobre
+paridad de providers/MCP/pty (más allá del smoke).
