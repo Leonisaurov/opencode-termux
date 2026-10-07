@@ -11,7 +11,7 @@ on:
         default: '31a93fbe66992298d6d0f27481fa781f43d0c1e2'
       opencode_version:
         required: false
-        default: '1.18.34'
+        default: '2.0.24'
       bun_version:
         required: false
         default: '1.2.13'
@@ -47,6 +47,6 @@ jobs:
     with:
       bun_version: ${{ inputs.bun_version || '1.2.13' }}
       opentui_ref: ${{ inputs.opentui_ref || '31a93fbe66992298d6d0f27481fa781f43d0c1e2' }}
-      opencode_version: ${{ inputs.opencode_version || '1.18.34' }}
+      opencode_version: ${{ inputs.opencode_version || '2.0.24' }}
       require_dependency_artifacts: true
     secrets: inherit

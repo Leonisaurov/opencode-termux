@@ -15,7 +15,7 @@ on:
     inputs:
       release:
         required: true
-        default: '1.18.11'
+        default: '2.0.24'
       bun_version:
         required: true
         default: '1.2.13'
@@ -24,7 +24,7 @@ on:
         default: '31a93fbe66992298d6d0f27481fa781f43d0c1e2'
       opencode_version:
         required: true
-        default: '1.18.34'
+        default: '2.0.24'
       kilo_version:
         required: true
         default: '7.4.20'
@@ -121,7 +121,7 @@ jobs:
     with:
       bun_version: ${{ inputs.bun_version || '1.2.13' }}
       opentui_ref: ${{ inputs.opentui_ref || '31a93fbe66992298d6d0f27481fa781f43d0c1e2' }}
-      opencode_version: ${{ inputs.opencode_version || '1.18.34' }}
+      opencode_version: ${{ inputs.opencode_version || '2.0.24' }}
       require_dependency_artifacts: true
     secrets: inherit
   kilo:
@@ -147,10 +147,10 @@ jobs:
           path: release-input
       - name: Verify all producers and create manifest
         env:
-          RELEASE: ${{ inputs.release || '1.18.11' }}
+          RELEASE: ${{ inputs.release || '2.0.24' }}
           BUN_VERSION: ${{ inputs.bun_version || '1.2.13' }}
           OPENTUI_REF: ${{ inputs.opentui_ref || '31a93fbe66992298d6d0f27481fa781f43d0c1e2' }}
-          OPENCODE_VERSION: ${{ inputs.opencode_version || '1.18.34' }}
+          OPENCODE_VERSION: ${{ inputs.opencode_version || '2.0.24' }}
           KILO_VERSION: ${{ inputs.kilo_version || '7.4.20' }}
         run: |
           set -euo pipefail
@@ -159,8 +159,8 @@ jobs:
       - name: Publish immutable release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: stack-v${{ inputs.release || '1.18.11' }}
-          name: opencode-termux stack ${{ inputs.release || '1.18.11' }}
+          tag_name: stack-v${{ inputs.release || '2.0.24' }}
+          name: opencode-termux stack ${{ inputs.release || '2.0.24' }}
           files: release-output/*
           make_latest: true
           fail_on_unmatched_files: true

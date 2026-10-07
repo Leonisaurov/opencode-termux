@@ -20,7 +20,7 @@ class InstallerTests(unittest.TestCase):
             with tarfile.open(archive, "w:gz") as tar:
                 for name in files: tar.add(self.assets / name, arcname=name)
             components[component] = {"version":"1.0.0", "tag":"test", "asset":"assets/" + archive.name, "sha256":hashlib.sha256(archive.read_bytes()).hexdigest(), "size":archive.stat().st_size, "archive":"tar.gz", "depends":[], "files":files}
-        self.manifest.write_text(json.dumps({"schema":"opencode-termux.stack/v1", "stack_version":"1", "release":"v1.18.11", "stability":"stable", "android":{"arch":"aarch64","abi":"arm64-v8a","api":24}, "components":components}))
+        self.manifest.write_text(json.dumps({"schema":"opencode-termux.stack/v1", "stack_version":"1", "release":"v2.0.24", "stability":"stable", "android":{"arch":"aarch64","abi":"arm64-v8a","api":24}, "components":components}))
     def tearDown(self):
         import shutil; shutil.rmtree(self.tmp, ignore_errors=True)
     def run_installer(self, *args):
