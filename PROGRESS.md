@@ -1094,3 +1094,43 @@ producto antes de verificar en dispositivo). Consecuencia conocida: editar `env.
 invalida las keys `ci-cache-v2-bun-core/bun` también en `main` la próxima vez — no
 contamina a `main` (caches scopeadas por rama) pero B6 en rama reconstruirá Bun desde
 bun-core (WebKit incluido): corrida de varias horas, dentro del diseño del DAG.
+
+## B6 · H2.6 — EN CURSO (2026-10-07): fix del swap y verificación en dispositivo
+
+**Hallazgo en dispositivo (bloqueante).** La primera release `stack-v2.0.24` (corrida
+37576120255, commit `2739d3e`) instalaba y respondía `opencode v2.0.24` rc=0, pero la TUI
+moría en `resolveRenderLib`: "Failed to open library". Diagnóstico sobre el binario: el
+grafo embebía **solo** `@opentui/core-linux-x64/libopentui.so` (2 referencias, cero arm64).
+El bundler resuelve el paquete nativo contra el **host del runner** (linux x64), no contra
+el teléfono: el swap a `core-linux-arm64` introducido en B4 dejaba dentro del grafo la
+`.so` glibc-x86_64 real. Precedente 1.18 confirmaba el swap sobre x64 como el contrato
+correcto.
+
+**Fix:** `5abfad6` — `build-opencode.sh` vuelve al swap `@opentui/core-linux-x64` y
+`test-downstream-bundle-contracts.py` fija el assert en x64 (contrato verde en local).
+
+**Re-ensamblado (sonda).** `v2-probe-assembly.yml` corrida 37587769635 (push-trigger,
+commit `5abfad6`): job `assembly` **success**; log verifica el swap aplicado sobre
+`core-linux-x64@0.5.14`; standalone AArch64 172,487,178 bytes.
+
+**Dispositivo (evidencia fechada, 2026-10-07, artefacto de la sonda):**
+- `opencode --version` ⇒ `opencode v2.0.24` rc=0.
+- TUI modo `--standalone` en tmux (tui-smoke, 120x32, wait 45): banner ASCII, prompt
+  "Ask anything…", agente Build, versión 2.0.24 en estado — **renderiza**.
+- TUI modo por defecto (background service, wait 135): mismo frame completo — **renderiza**.
+- Migraciones SQLite v2 sobre Bionic: `~/.local/share/opencode/opencode.db` tabla
+  `migration` con **48 filas** aplicadas y WAL actualizado en la corrida; tablas v2
+  presentes (`session_v2`, `event_sequence`, `instruction_*`).
+- Sesión real de extremo a extremo: `opencode run -m ollama-cloud/nemotron-3-nano:30b`
+  ⇒ respuesta **TERMUXOK** rc=0 desde el teléfono (auth, red, server y TUI funcionando).
+  Canales con credenciales agotadas probados antes del éxito: apmix (key inválida),
+  ollama-cloud retire/plan (errores de política del proveedor, no del port). El provider
+  "Console" del usuario devuelve "Endpoint is unavailable" (estado del endpoint, no del port).
+- Degradados observados en TUI: aviso "1 plugin failed /plugins" (plugin de usuario
+  `herdr-opencode`, ajeno al port); watcher/fff/pty siguen degradados por diseño (stub B4).
+
+**Pendiente de cierre:** re-publicar la release (dispatch `build-android.yml`
+37602945465 sobre `5abfad6`, inputs release=2.0.24) para regenerar
+`opencode-2.0.24-android-aarch64.tar.gz` con el swap correcto; reinstalar asset
+publicado en el teléfono y repetir `--version` + TUI; tag `opencode-v2.0.24-android`;
+merge a `main` solo con esta evidencia verde.
