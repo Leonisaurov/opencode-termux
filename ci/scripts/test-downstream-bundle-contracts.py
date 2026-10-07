@@ -11,6 +11,7 @@ BUNDLE_VALIDATOR = ROOT / "ci/scripts/validate-android-bundle.py"
 KILO_BUILD = ROOT / "kilo/scripts/build.sh"
 KILO_ZIG_MANIFEST = ROOT / "opentui/src/kilo/packages/core/src/zig/build.zig.zon"
 OPENCODE_WORKER = ROOT / "opencode/src/packages/opencode/src/cli/tui/worker.ts"
+OPENCODE_ENTRY = ROOT / "opencode/src/packages/cli/src/index.ts"
 KILO_WORKER = ROOT / "kilo/src/packages/opencode/src/cli/tui/worker.ts"
 UUCODE_PACKAGE = ROOT / (
     "opentui/src/kilo/packages/core/src/zig/zig-pkg/"
@@ -35,10 +36,23 @@ def main() -> None:
     assert 'validateAndroidStandalone' in opencode
     assert 'patchAndroidModuleGraph' in kilo
     assert 'validateAndroidStandalone' in kilo
-    assert 'const workerPath = "./src/cli/tui/worker.ts"' in opencode
-    assert "./src/cli/cmd/tui/worker.ts" not in opencode
     assert 'const workerPath = "./src/cli/tui/worker.ts"' in kilo
-    assert OPENCODE_WORKER.is_file()
+
+    # OpenCode v2: the CLI entrypoint is the only graph entrypoint; the worker,
+    # migration and models-snapshot defines of the 1.18 pipeline must not come
+    # back, and the Bionic-incompatible native bindings are stubbed.
+    assert 'entrypoints: ["./src/index.ts"]' in opencode
+    assert "workerPath" not in opencode
+    assert "OPENCODE_WORKER_PATH" not in opencode
+    assert "OTUI_TREE_SITTER_WORKER_PATH" not in opencode
+    assert "OPENCODE_MIGRATIONS" not in opencode
+    assert "models-snapshot" not in opencode
+    assert 'virtual:opencode-app-assets' in opencode
+    assert 'export default undefined' in opencode
+    assert 'persistent-pty' in opencode
+    assert '"process.env.OPENTUI_LIBC"' in opencode
+    assert OPENCODE_ENTRY.is_file()
+    assert not OPENCODE_WORKER.exists()
     assert KILO_WORKER.is_file()
 
     restore = 'if [ -n "$BUILT_SO" ] && [ -f "$BUILT_SO" ]; then'
@@ -48,6 +62,9 @@ def main() -> None:
     assert kilo_build.index(restore) < kilo_build.index(fallback)
     assert 'ci/scripts/module-graph-patch.ts' in opencode_build
     assert 'ci/scripts/module-graph-patch.ts' in kilo_build
+    assert 'OPENCODE_PKG="$OPENCODE_SRC/packages/cli"' in opencode_build
+    assert '--os="*" --cpu="*"' in opencode_build
+    assert "@opentui/core-linux-x64/libopentui.so" in opencode_build
     assert 'module graph still contains' in module_graph_patch
     assert 'total_byte_count does not match file size' in module_graph_patch
     assert 'module graph contains vulnerable' in bundle_validator

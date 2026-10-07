@@ -10,11 +10,11 @@ on:
       opentui_ref:
         description: 'Commit, tag o branch de OpenTUI'
         required: false
-        default: '658db4cbe0da0adfeb5edac0273ee68911b29c3e'
+        default: '31a93fbe66992298d6d0f27481fa781f43d0c1e2'
       opencode_version:
         description: 'OpenCode version to build'
         required: false
-        default: '1.18.34'
+        default: '2.0.24'
   workflow_call:
     inputs:
       bun_version:
@@ -26,12 +26,12 @@ on:
         description: 'Commit, tag o branch de OpenTUI'
         required: false
         type: string
-        default: '658db4cbe0da0adfeb5edac0273ee68911b29c3e'
+        default: '31a93fbe66992298d6d0f27481fa781f43d0c1e2'
       opencode_version:
         description: 'Versión de OpenCode'
         required: false
         type: string
-        default: '1.18.34'
+        default: '2.0.24'
       require_dependency_artifacts:
         description: 'Falla si faltan artifacts producidos por el DAG caller'
         required: false
@@ -49,13 +49,18 @@ env:
   PRODUCT: opencode
   BUN_VERSION: "${{ inputs.bun_version || '1.2.13' }}"
   HOST_BUN_VERSION: "1.3.2"
-  OPENTUI_REF: "${{ inputs.opentui_ref || '658db4cbe0da0adfeb5edac0273ee68911b29c3e' }}"
-  OPENCODE_VERSION: "${{ inputs.opencode_version || '1.18.34' }}"
+  OPENTUI_REF: "${{ inputs.opentui_ref || '31a93fbe66992298d6d0f27481fa781f43d0c1e2' }}"
+  OPENCODE_VERSION: "${{ inputs.opencode_version || '2.0.24' }}"
   ANDROID_API: "24"
   ANDROID_NDK_VERSION: "28.1.13356709"
   ICU_VERSION: "75.1"
   TINYCC_SOURCE: "current"
-  ZIG_VERSION: "0.15.2"
+  # Zig is only used here by the OpenTUI rebuild fallback, so it tracks the
+  # version that build-opentui.yml pins. Bun and bun-core keep their own older
+  # Zig and are hashed with BUN_ZIG_VERSION to stay byte-identical to their
+  # producers.
+  ZIG_VERSION: "0.16.0"
+  BUN_ZIG_VERSION: "0.15.2"
   WORK_DIR: "${{ github.workspace }}/opencode/build"
   ANDROID_NDK_HOME: "${{ github.workspace }}/.ci/android-ndk"
   ANDROID_NDK_ROOT: "${{ github.workspace }}/.ci/android-ndk"
@@ -98,7 +103,7 @@ jobs:
             --path bun/cmake/webkit-android-toolchain.cmake
             --value "ICU_VERSION=$ICU_VERSION"
             --value "TINYCC_SOURCE=$TINYCC_SOURCE")
-          core_key="$(env -u OPENTUI_COMMIT python3 ci/scripts/cache-contract.py key "${core_args[@]}")"
+          core_key="$(env -u OPENTUI_COMMIT ZIG_VERSION="$BUN_ZIG_VERSION" python3 ci/scripts/cache-contract.py key "${core_args[@]}")"
           bun_args=(--root "$GITHUB_WORKSPACE" --product bun
             --path bun/scripts/build-bun.sh
             --path ci/scripts/env.sh --path ci/scripts/test-android-heap-tagging.py
@@ -107,7 +112,7 @@ jobs:
             --value "ICU_VERSION=$ICU_VERSION"
             --value "BUN_SOURCE_COMMIT=$bun_source_commit"
             --value "CORE_CACHE_KEY=$core_key")
-          bun_key="$(env -u OPENTUI_COMMIT python3 ci/scripts/cache-contract.py key "${bun_args[@]}")"
+          bun_key="$(env -u OPENTUI_COMMIT ZIG_VERSION="$BUN_ZIG_VERSION" python3 ci/scripts/cache-contract.py key "${bun_args[@]}")"
           echo "bun=$bun_key" >> "$GITHUB_OUTPUT"
           opentui_args=(--root "$GITHUB_WORKSPACE" --product opentui
             --path opentui/scripts/build-opentui.sh --path ci/scripts/env.sh
@@ -187,7 +192,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: |
-            ${{ github.workspace }}/opentui/src/opencode/packages/core/src/lib
+            ${{ github.workspace }}/opentui/src/opencode/packages/native/lib
             ${{ github.workspace }}/opentui/build/state/nodes/opentui.json
           key: ${{ steps.contract.outputs.opentui }}-artifact
 
@@ -200,7 +205,7 @@ jobs:
           checkpoint-path: |
             ${{ github.workspace }}/opencode/src
             ${{ env.WORK_DIR }}
-            ${{ github.workspace }}/opentui/src/opencode/packages/core/src/lib
+            ${{ github.workspace }}/opentui/src/opencode/packages/native/lib
             ${{ github.workspace }}/opentui/build
             ~/.bun
 
@@ -274,7 +279,7 @@ jobs:
             fi
             echo 'OpenTUI artifact is absent/stale; the local dependency cache or build will provide it.'
           else
-            DEST="$GITHUB_WORKSPACE/opentui/src/opencode/packages/core/src/lib/aarch64-linux-android.24"
+            DEST="$GITHUB_WORKSPACE/opentui/src/opencode/packages/native/lib/aarch64-linux-android.24"
             mkdir -p "$DEST"
             install -m 0755 "$LIB" "$DEST/libopentui.so"
           fi
@@ -329,7 +334,7 @@ jobs:
         id: validate-opentui
         run: |
           set -euo pipefail
-          LIB="$GITHUB_WORKSPACE/opentui/src/opencode/packages/core/src/lib/aarch64-linux-android.24/libopentui.so"
+          LIB="$GITHUB_WORKSPACE/opentui/src/opencode/packages/native/lib/aarch64-linux-android.24/libopentui.so"
           open_tui=false
           if test -s "$LIB" \
              && test "$(readelf -h "$LIB" | sed -n 's/^ *Class: *//p')" = ELF64 \
@@ -389,7 +394,7 @@ jobs:
         with:
           mode: save-final
           path: |
-            ${{ github.workspace }}/opentui/src/opencode/packages/core/src/lib
+            ${{ github.workspace }}/opentui/src/opencode/packages/native/lib
             ${{ github.workspace }}/opentui/build/state/nodes/opentui.json
           key: ${{ steps.contract.outputs.opentui }}-artifact
 
@@ -478,7 +483,7 @@ jobs:
           checkpoint-path: |
             ${{ github.workspace }}/opencode/src
             ${{ env.WORK_DIR }}
-            ${{ github.workspace }}/opentui/src/opencode/packages/core/src/lib
+            ${{ github.workspace }}/opentui/src/opencode/packages/native/lib
             ${{ github.workspace }}/opentui/build
             ~/.bun
 

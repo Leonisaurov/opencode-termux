@@ -7,6 +7,10 @@
 #   Build with Zig's aarch64-linux-android.24 target and the versioned Android
 #   source port. The generated android-libc.txt points Zig at the NDK Bionic
 #   headers/CRT, so the final ELF is linked for Android without post-link hacks.
+#
+#   OpenTUI >= 0.5.2 keeps the native build in packages/native and requires the
+#   Zig version named by packages/native/build.zig (SUPPORTED_ZIG_VERSIONS);
+#   the compiler is pinned per product by the workflows that call this script.
 
 set -euo pipefail
 
@@ -16,6 +20,7 @@ source "$SCRIPT_DIR/../../ci/scripts/env.sh"
 OPENTUI_TARGET="${OPENTUI_TARGET:-aarch64-linux-android.24}"
 ANDROID_NDK_LIB_DIR="${ANDROID_NDK_LIB_DIR:-${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/${ANDROID_API}}"
 ZIG_LIBC_FILE="${ZIG_LIBC_FILE:-${WORK_DIR}/android-libc.txt}"
+OPENTUI_NATIVE_DIR="$OPENTUI_SRC/packages/native"
 export OPENTUI_TARGET ANDROID_NDK_LIB_DIR
 
 if [ ! -f "$ZIG_LIBC_FILE" ] && [ -d "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot" ]; then
@@ -40,7 +45,7 @@ incremental_exec opentui \
     --value "ZIG_VERSION=$ZIG_VERSION" --value "ANDROID_API=$ANDROID_API" \
     --value "OPENTUI_TARGET=$OPENTUI_TARGET" --value "ANDROID_NDK_LIB_DIR=$ANDROID_NDK_LIB_DIR" \
     --value "ZIG_LIBC_FILE=$ZIG_LIBC_FILE" \
-    --output "$OPENTUI_SRC/packages/core/src/lib/$OPENTUI_TARGET/libopentui.so"
+    --output "$OPENTUI_NATIVE_DIR/lib/$OPENTUI_TARGET/libopentui.so"
 
 ZIG_BIN="${ZIG_BIN:-zig}"
 
@@ -49,33 +54,54 @@ echo "=== Building libopentui.so for Android aarch64 ==="
 validate_source_checkout "$OPENTUI_SRC" "$OPENTUI_OPENCODE_SOURCE_COMMIT" "OpenTUI"
 echo ">>> OpenTUI source exists at $OPENTUI_SRC"
 
-OPENTUI_ZIG_DIR="$OPENTUI_SRC/packages/core/src/zig"
-
-if [ ! -f "$OPENTUI_ZIG_DIR/build.zig" ]; then
-    echo "ERROR: build.zig not found at $OPENTUI_ZIG_DIR"
+if [ ! -f "$OPENTUI_NATIVE_DIR/build.zig" ]; then
+    echo "ERROR: build.zig not found at $OPENTUI_NATIVE_DIR"
     exit 1
 fi
 
+# The native Zig graph reads its dependencies from the ignored zig-deps
+# directory, which the tree ships as a deterministic archive.
+sh "$OPENTUI_NATIVE_DIR/scripts/prepare-zig-deps.sh"
+
 # Build against Android/Bionic using the NDK libc path supplied above.
+# -Dlibrary-target accepts a custom target and names its output directory after
+# the target string, so the artifact lands in packages/native/lib/<target>/.
 echo ">>> Building with Zig (target: $OPENTUI_TARGET)..."
-cd "$OPENTUI_ZIG_DIR"
+cd "$OPENTUI_NATIVE_DIR"
 
 LIBC_ARGS=()
 if [ -f "$ZIG_LIBC_FILE" ]; then
     LIBC_ARGS=(--libc "$ZIG_LIBC_FILE")
 fi
 
-"$ZIG_BIN" build \
-    -Dtarget="$OPENTUI_TARGET" \
+# Zig's translate-c steps do not read --libc, so they get the same directories
+# parsed out of the libc file: header search and link configuration must not be
+# able to drift apart. Missing directories are fatal because translate-c would
+# otherwise fail later inside clang with an error that hides this cause.
+BUILD_ARGS=("${LIBC_ARGS[@]}")
+BUILD_ARGS+=("-Dbionic-api-level=${ANDROID_API}")
+for key in include_dir sys_include_dir; do
+    case "$key" in
+        include_dir) option=-Dbionic-include-dir ;;
+        sys_include_dir) option=-Dbionic-sys-include-dir ;;
+    esac
+    value="$(sed -n "s/^[[:space:]]*${key}=[[:space:]]*//p" "$ZIG_LIBC_FILE" 2>/dev/null \
+        | tail -n 1 | sed -e 's/[[:space:]]*$//')"
+    if [ -z "$value" ] || [ ! -d "$value" ]; then
+        echo "ERROR: $ZIG_LIBC_FILE does not resolve a usable $key, so translate-c would compile against no Bionic headers" >&2
+        exit 1
+    fi
+    BUILD_ARGS+=("${option}=${value}")
+done
+
+"$ZIG_BIN" build "build-$OPENTUI_TARGET" \
+    -Dlibrary-target="$OPENTUI_TARGET" \
     -Doptimize=ReleaseSafe \
     --cache-dir "$ZIG_LOCAL_CACHE_DIR" \
     --global-cache-dir "$ZIG_GLOBAL_CACHE_DIR" \
-    --prefix . "${LIBC_ARGS[@]}" 2>&1
+    "${BUILD_ARGS[@]}" 2>&1
 
-# The build.zig installs to dest_dir="../lib/{output_name}" relative to
-# the --prefix dir. With --prefix=. (= OPENTUI_ZIG_DIR), the .so ends
-# up one directory above under packages/core/src/lib/$OPENTUI_TARGET/.
-LIBOPENTUI="$OPENTUI_ZIG_DIR/../lib/$OPENTUI_TARGET/libopentui.so"
+LIBOPENTUI="$OPENTUI_NATIVE_DIR/lib/$OPENTUI_TARGET/libopentui.so"
 if [ ! -f "$LIBOPENTUI" ]; then
     echo "ERROR: libopentui.so not found"
     echo "  Expected at: $LIBOPENTUI"

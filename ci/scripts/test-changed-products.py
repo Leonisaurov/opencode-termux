@@ -14,7 +14,8 @@ SPEC.loader.exec_module(MODULE)
 
 def main() -> None:
     assert MODULE.classify(["bun/src/file.cc"]) == {"bun"}
-    assert MODULE.classify(["opentui/src/opencode/packages/core/src/zig/renderer.zig"]) == {"opentui"}
+    assert MODULE.classify(["opentui/src/opencode/packages/native/src/renderer.zig"]) == {"opentui"}
+    assert MODULE.classify(["opentui/src/kilo/packages/core/src/zig/renderer.zig"]) == {"opentui"}
     assert MODULE.classify(["ci/source-manifest.json"]) == set(MODULE.PRODUCTS)
     assert MODULE.classify(["opencode/src/index.ts", "kilo/scripts/build.sh"]) == {"opencode", "kilo"}
     assert MODULE.classify(["ci/scripts/env.sh"]) == set(MODULE.PRODUCTS)

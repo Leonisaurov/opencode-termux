@@ -9,7 +9,7 @@
     "opencode": {
       "path": "opencode/src",
       "mode": "vendored",
-      "commit": "aec0b9a6d8898f68f923aaf08b7306d931fd9d76"
+      "commit": "e7a34f09bfd9134dfade5a8ddb843f7030bc9a69"
     },
     "kilo": {
       "path": "kilo/src",
@@ -19,7 +19,7 @@
     "opentui-opencode": {
       "path": "opentui/src/opencode",
       "mode": "vendored",
-      "commit": "658db4cbe0da0adfeb5edac0273ee68911b29c3e"
+      "commit": "31a93fbe66992298d6d0f27481fa781f43d0c1e2"
     },
     "opentui-kilo": {
       "path": "opentui/src/kilo",

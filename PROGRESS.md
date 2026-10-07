@@ -734,3 +734,419 @@ Las dos formas defendibles de seguir, ambas medidas y ninguna barata:
 Ninguna está elegida. Lo que sí queda descartado por medición es el optimismo de b-i/b-ii: el coste de
 la fase 2 **no** era "re-aplicar 8 ficheros", porque la capa nativa de OpenTUI cambió de ruta, de
 toolchain mínima y de conjunto de dependencias C antes de llegar a 0.5.14.
+
+## H2.0(b-v) CP-B resuelto en fuente: cuatro causas medidas, ninguna necesita `patchelf`
+
+**Decisión de toolchain.** Se implementó la opción 1 de b-iv (toolchain por producto), no el bump
+transversal: `build-opentui.yml:53` fija `ZIG_VERSION: "0.16.0"` (el `SUPPORTED_ZIG_VERSIONS` del
+`build.zig` de 0.5.14 lo exige) y `build-opencode.yml` declara los dos valores (`ZIG_VERSION "0.16.0"`
+para el consumidor de OpenTUI, `BUN_ZIG_VERSION "0.15.2"` para core/bun, que siguen intactos). El
+peligro era silencioso: `test-workflow-cache-contracts.py` comparaba solo *nombres* de options, así que
+una divergencia literal de valores no la detectaba nadie. Se añadieron afirmaciones explícitas de que
+(a) OpenTUI y quien consume su lib pinnean el mismo Zig, (b) core/bun/build-bun comparten 0.15.2,
+(c) Bun y OpenTUI pinnean Zig **distintos** por diseño, y (d) la key del job opentui se recalcula con
+`ZIG_VERSION` y las de core/bun con `BUN_ZIG_VERSION`, para que queden byte-idénticas a sus productores.
+
+**Causa 1 — `TranslateC` no propaga `--libc`.** En Zig 0.15.2 **y** 0.16.0 el paso `TranslateC` ignora
+el archivo `--libc`: clang no recibe ningún directorio de encabezados Bionic y miniaudio.h/Yoga.h
+fallan en `<pthread.h>`/`<math.h>`. El defecto no es de la versión, es del paso. Por eso 0.4.5 nunca lo
+vio: su grafo no tenía **ningún** `b.addTranslateC`, todo `@cImport` corría dentro del `Compile`, que sí
+obedece `--libc`. 0.5.14 introdujo los pasos sueltos de miniaudio y Yoga y ahí apareció la clase de
+fallo. El fix pasa los dos directorios como `-isystem` (`addSystemIncludePath`), derivados del mismo
+`android-libc.txt` que usa el link: si header search y link config se leen por separado, driftean.
+
+**Causa 2 — se pierde el API level.** `<sys/cdefs.h>` aborta con `#error Unversioned target triples are
+not supported!` cuando no hay `__ANDROID_MIN_SDK_VERSION__`, porque el driver clang se lo inyecta al
+target Android y translate-c no. Se reponen los predefines del driver en el paso:
+`__ANDROID_MIN_SDK_VERSION__=<api>`, `__ANDROID_API__=__ANDROID_MIN_SDK_VERSION__`,
+`__ANDROID_API_FUTURE__=10000`, `__ANDROID__`, `__ANDROID_NDK__`. La forma `-D nombre=valor` partida en
+argv es exactamente la que emite `defineCMacro`, y el nivel se pide con `-Dbionic-api-level` con
+fallback al query del target.
+
+**Causa 3 — anotación de nullability dentro del declarador de array.** AOSP escribe
+`const struct timeval __times[_Nullable 2]` (`sys/time.h:47`), sintaxis que el frente de translate-c
+rechaza como error duro aunque el camino `cc` la tolera (los system headers silenciaban el diagnóstico).
+No es un capricho de Termux: la línea es idéntica en el header upstream, luego el NDK de CI se comporta
+igual. Se neutralizan `_Nullable`/`_Nonnull` a vacío — no dicen nada a los bindings traducidos.
+
+**Causa 4 — `-lm` no es resoluble.** Con archivo `--libc`, Zig no deja **ninguna** ruta de búsqueda de
+bibliotecas del sistema (`unable to find dynamic system library 'm' … searched paths: none`), y Bionic ya
+pliega `dl`, `pthread` y `m` dentro de `libc.so`. Los tres salen del link Android; la línea de comando
+real que el probe generó para `aarch64-linux-android.24` audita el inventario final: termina en
+`-lc++ -lc` y nada más. Esto reproduce la decisión que ya validó 0.4.5 (dl/pthread guardados) y añade
+`m`, que es lo que 0.5.14 trajo dentro.
+
+**Validación local sin gastar CI.** En el teléfono, con Zig 0.16.0 y los headers Bionic reales de
+Termux: translate-c de miniaudio.h y Yoga.h sale limpio (stderr de 0 bytes) y el grafo completo
+`zig build build-aarch64-linux-android.24` avanza hasta compilar **libc++, libc++abi y libunwind desde
+fuente** para `-target aarch64-unknown-linux5.10.0-android24` con `-isystem $PREFIX/include` e
+`-isystem $PREFIX/include/aarch64-linux-android`. El enlace local fue posible con un `--libc` cuyo
+`crt_dir` apunta a enlaces simbólicos de **Bionic real del sistema** (`/system/lib64/libc.so`, `libm.so`,
+`libdl.so`), que es lo que las stubs del NDK representan en CI; el resultado es `ELF64/AArch64`,
+`Type: DYN`, `for Android 24` y `NEEDED libm.so, libc.so, libdl.so`, sin `libc++_shared.so` (la C++
+runtime queda estática).
+
+## H2.0(b-vi) "compila" no era la respuesta: el primer .so no cargaba
+
+El artefacto anterior pasó translate-c, compiló todo, **enlazó y cumplía todos los checks que hace el
+workflow** (ELF64, AArch64, `NEEDED: libc.so`). Y sin embargo era inservible: `dlopen` lo rechazó con
+`cannot locate symbol "pthread_tryjoin_np"`. La causa es de ABI, no de compilación:
+`src/clipboard/host.zig` (backend de portapapeles Wayland/X11, nuevo en la serie 0.5) declara
+`extern "c" fn pthread_tryjoin_np` y lo llama en la rama `.linux` de `tryJoinThread`. Para Zig, Android
+**es** `.linux` (solo difiere el `abi`), así que la rama se instancia, el enlace la deja como símbolo
+indefinido y el fallo aparece en runtime. Medido sobre el Bionic real del aparato: no existe ni
+`pthread_tryjoin_np` ni `pthread_timedjoin_np`; sí existen `pthread_join`, `pthread_detach`,
+`pthread_kill`.
+
+El fix emula la prueba de terminación con lo que Bionic garantiza: `pthread_kill(handle, 0)` devuelve
+**ESRCH** justo cuando el hilo joinable ya terminó sin ser cosechado (medido en el teléfono con un
+programa C: `rc=3` y `pthread_join` inmediato después), y entonces se cosecha con `thread.join()`.
+Vive detrás de `builtin.abi == .android` en la misma rama `.linux`, de forma que glibc/freebsd/macos/windows
+conservan su camino intacto.
+
+**El contrato que esto obliga.** `readelf -d` no puede ver esta clase de defecto, así que el workflow
+ahora sí: el paso `Verify dynamic symbols resolve against Bionic` lista los símbolos indefinidos del
+`.so` y exige que **todos** resuelvan contra las stubs públicas del NDK
+(`sysroot/usr/lib/aarch64-linux-android/*.so`), que son exactamente la superficie que el linker de
+Android permite enlazar a una app. Con el artefacto roto el comando señalaba `pthread_tryjoin_np`; con
+el fix señala **0 de 179**. `test-renderer-invariants.sh` fija además la adaptación y una afirmación
+negativa que falla si alguien vuelve a dejar `tryjoin` en el camino Android.
+
+**Veredicto CP-B: no se dispara.** OpenTUI `0.5.14` compila, enlaza y **carga como
+`aarch64-linux-android.24` con Zig `0.16.0`**, verificado con `dlopen` real en el teléfono. Lo que CI
+todavía tiene que confirmar, y solo eso: que el enlace con el NDK r28b y `-Doptimize=ReleaseSafe`
+produce el mismo ELF verificable (mismo inventario de símbolos, mismas `NEEDED`), y que el paso nuevo
+pasa sobre ese artefacto. Ninguna de las otras dos trampas de H2.0 se activó: CP-A quedó cerrado en
+(a) y CP-C se mide en (c).
+
+**Lo que NO se afirma:** que el `.so` de CI sea byte-idéntico al del probe (modo de optimización y
+`crt_dir` distintos); que cargar la lib equivale a que el TUI de OpenCode v2 funcione con ella (eso es
+H2.3/H2.6); que la emulación de tryjoin esté probada bajo carga real de portapapeles — el backend
+Wayland/X11 no tiene display server en Termux, de modo que su `tryJoinThread` no se ejercita en el
+camino que nos importa; y no se afirma nada sobre `models-snapshot` ni las migraciones de v2 (H2.0(d)).
+
+## H2.0(b-vii) CI: el build y el enlace Bionic son verdes; la puerta de símbolos era el falso negativo
+
+Corrida `37488100178` (feat/opencode-v2, HEAD `da69561`), NDK r28b + Zig `0.16.0`:
+
+- Paso 17 `Build libopentui.so` **success** y paso 18 `Verify libopentui.so` **success** ⇒ el `.so`
+  se compila y enlaza como `aarch64-linux-android.24` y es ELF `AArch64` con `NEEDED libc.so`.
+  **CP-B queda confirmado en CI**: la fuente compila y enlaza como Bionic con el NDK real.
+- Falló el paso 19 `Verify dynamic symbols resolve against Bionic`, y la subida del artefacto se
+  saltó por eso. La lista "missing" eran símbolos que Bionic exporta sí o sí (`close`, `calloc`,
+  `clock_gettime`, `accept4`, `__system_property_get`, `abort`…). Firmas de un **oracio vacío**, no
+  de un `.so` roto.
+
+**Causa.** El gate construía el set Bionic con `nm -D --defined-only` sobre las stubs del NDK. En una
+stub linker los símbolos de la API pública están en `.dynsym` con `st_shndx = UND`; `--defined-only`
+los descarta todos ⇒ `BIONIC` vacío ⇒ `comm -23` reporta cada símbolo indefinido como ausente. El
+mismo `.so`, cargado en el teléfono, da dlopen OK (H2.0(b-vi)).
+
+**Fix** (commit `131fa12`, solo workflow + test; no altera ninguna cache key porque el paso es
+post-build). El oracio se construye con `readelf --dyn-syms -W` tomando todo `GLOBAL/WEAK` de tipo
+`FUNC/OBJECT` **sin filtrar por sección**, que vale tanto para stub (Ndx=UND) como para lib real. Se
+añade canary positivo (`grep -qx close "$BIONIC"`) y un `test -s` sobre ambos lados, para que un
+oracio roto falle explícito y no con una "missing" engañosa. `test-renderer-invariants.sh` fija la
+forma del oracio y prohíbe reintroducir `nm -D --defined-only`.
+
+**Validación local del oracio corregido**, contra el `.so` del probe y libs Android reales:
+`undef=179`, `bionic=4275`, `comm -23` **vacío**; YAML parsea (29 pasos) y las invariantes pasan.
+
+**Lo que NO se afirma aquí:** que la corrida de confirmación (`37489824791`) esté verde todavía — eso
+se lee al cerrar. Que el `.so` de CI sea byte-idéntico al del probe. Seguir en H2.3/H2.6 la
+integración real de la TUI; este hito cierra CP-B (compila + enlaza + carga como Bionic), no el TUI v2.
+
+## H2.0(b-viii) CI verde: CP-B confirmado a nivel de artefacto, tras corregir tres falsos negativos del gate
+
+La sustancia de CP-B se confirmó en la **primera** corrida (`37488100178`): los pasos
+`Build libopentui.so` y `Verify libopentui.so` fueron verdes con NDK r28b + Zig `0.16.0`, es decir
+el `.so` compila y enlaza como `aarch64-linux-android.24` (ELF AArch64, `NEEDED libc.so`). El único
+fallo era el paso nuevo de verificación de símbolos, que bloqueaba la subida del artefacto. Ese paso
+dio **tres falsos negativos**, cada uno reproducido en local antes de tocar nada:
+
+1. `nm -D --defined-only` sobre stubs del NDK devuelve un oracio vacío: los símbolos públicos de una
+   stub linker viven con `Ndx=UND`, y `--defined-only` los descarta todos ⇒ marcaba como "missing"
+   toda la libc. Corregido leyendo `.dynsym` con `readelf` y tomando todo `GLOBAL/WEAK` sin filtrar
+   por sección (commit `131fa12`).
+2. Faltaban **IFUNC** y **cobertura**: Bionic exporta `strcmp/strcpy/strchr/memchr` como IFUNC (no
+   FUNC), y el glob de un solo nivel se dejaba fuera las stubs por API y `libm`/`libdl` (`socket`,
+   `pthread_create`, `dlopen`, `atan2`). Corregido aceptando `FUNC/OBJECT/IFUNC` y recorriendo
+   `find "$STUB_DIR" -name '*.so'` de todo el triple (commit `c936223`). Prueba local: sin el arreglo
+   de string-func quedaban 6 IFUNC "missing".
+3. `find` barre también entradas `.so` que en el sysroot son **scripts de enlazado ASCII** (no ELF);
+   `readelf` falla sobre ellas y bajo `pipefail` abortaba el paso entero en ~20 ms sin diagnóstico.
+   Corregido envolviendo el `readelf` del recorrido con `{ ... || true; }`, dejando estricta la
+   lectura del `.so` real (commit `d8fdcad`). Reproducido en local: loop estricto ⇒ rc=1 sin salida;
+   con `|| true` ⇒ rc=0 y oracio lleno.
+
+**Corrida verde de cierre — `37491176567` (HEAD `d8fdcad`): `completed / success`.**
+
+- Gate: `diagnostico: stubs=328 bionic=6624 undef=170` y `OK: 170 simbolos indefinidos resuelven`.
+  `Build libopentui.so`, `Verify libopentui.so`, `Write build info`, `Save libopentui.so a cache` y
+  `Upload libopentui.so artifact` todos success.
+- Artefacto publicado por CI: `opentui-android-aarch64-31a93fbe66992298d6d0f27481fa781f43d0c1e2`,
+  6 247 603 bytes, `expired=false`.
+
+**Nota de inventario.** El `.so` de CI reporta 170 símbolos indefinidos frente a 179 del probe del
+teléfono: la diferencia se debe a modo de optimización (`ReleaseSafe`) y `crt_dir` distintos, no a
+una divergencia de ABI. El invariante que importa es que **todos** resuelvan contra la API pública de
+Bionic, y así es (missing vacío), igual que el dlopen real en dispositivo.
+
+**Veredicto CP-B: no se dispara, confirmado a nivel de artefacto.** OpenTUI `0.5.14` compila, enlaza,
+**carga** y ahora CI lo valida y lo publica como `aarch64-linux-android.24` con Zig `0.16.0`, sin
+`patchelf`. El gate queda como contrato anti-regresión: ya no se puede publicar un `.so` con un
+símbolo fuera de Bionic.
+
+**Lo que NO se afirma:** que el `.so` de CI sea byte-idéntico al del probe; que esto valide el TUI de
+OpenCode v2 con la lib (eso es H2.3/H2.6); nada sobre `models-snapshot` ni migraciones (H2.0(d)); ni
+que la emulación de `tryjoin` esté probada bajo carga real de portapapeles (no hay display server).
+
+## H2.0(c) y H2.0(d) — corte de riesgo v2 restante (2026-10-07)
+
+Corrida de evidencia: workflow de sondeo desechable `V2 Probe (H2.0c / CP-C)` sobre el upstream
+público `anomalyco/opencode` en `e7a34f09…`, Bun `1.4.2`, runner efímero (`37567822938`: todos los
+pasos success). Tres corridas previas (`37567333898`, `37567583229`, `37567822938`) afinaron el
+*harness* (no el port): el workflow inyecta `bash -e`, así que `bun build … ; rc=$?` abortaba antes
+de capturar; y los `find | head | tee` bajo `pipefail` daban SIGPIPE. Ambos ya corregidos.
+
+**H2.0(c) / CP-C: NO se dispara, confirmado.**
+
+- `bun install` del workspace v2 completo **resuelve** con Bun 1.4.2 (postinstall: `bun run --cwd
+  packages/core fix-node-pty` — apuntar para la pty de Android en B4).
+- **Test B** (`Bun.build({compile})` con plugin `@opentui/solid` + un proveedor del módulo virtual
+  `virtual:opencode-app-assets`): emite un standalone ELF real de **135 308 768 bytes** con el trailer
+  `\n---- Bun! ----\n` **presente** (`success=true`). Ese trailer es la entrada que
+  `ci/scripts/module-graph-patch.ts` y `opencode/scripts/build-opencode-android.ts` necesitan para
+  extraer el grafo de módulos y montarlo sobre el binario Bun de Android. Luego el pipeline de
+  intercambio de grafo tiene input válido desde el árbol v2.
+- **Test A** (bare, sin plugins): falla **solo** en `Could not resolve: "virtual:opencode-app-assets"`
+  (`packages/cli/src/app-assets.ts:11`). Es un asunto de plugin de build, no incapacidad de Bun: el
+  upstream lo provee con `packages/cli/script/app-assets.ts` (hornea assets web brotli); en B4 se
+  registra el equivalente. `load()` además tiene fallback por runtime si `OPENCODE_LOCAL`.
+
+**H2.0(d) — tabla de acoplamiento ruta-1.18 → ruta-v2 (existencia verificada en el árbol):**
+
+| Punto | 1.18.x (nuestro pipeline) | v2.0.24 (verificado) | Acción |
+|---|---|---|---|
+| Paquete de entrada | `packages/opencode/src/index.ts` | `packages/cli/src/index.ts` (dev entry; `bin/opencode.cjs` se genera en build) | `build-opencode.sh:36` OPENCODE_PKG → `packages/cli` |
+| Migraciones | `packages/opencode/migration/<ts>/migration.sql` (inline como define `OPENCODE_MIGRATIONS`) | `packages/core/src/database/migration/*.ts` + `migration.gen.ts` (imports estáticos; aplicadas vía drizzle-orm + Effect **en runtime**) | Eliminar el paso 2 de SQL-inline; las migraciones viajan en el grafo; riesgo → B6 (SQLite sobre Bionic) |
+| models-snapshot | fetch `models.dev/api.json` → `src/provider/models-snapshot.js` en build | generado y versionado por `packages/core/script/update-models-snapshot.ts`; providers en `packages/ai/src/providers/*` | No hace falta fetch en build; verificar snapshot versionado presente tras re-vendor |
+| worker TUI | `./src/cli/tui/worker.ts` + `@opentui/core/parser.worker.js` | `@opencode/tui` (`packages/tui/src`) + `packages/cli/src/server-process.ts`; parser worker de `@opentui/core` sigue presente | Reubicar `workerPath`/`entrypoints`; confirmar worker en B4 |
+| Fix rutas Termux | `packages/core/src/global.ts` (tmp → `$PREFIX/tmp` cuando TMPDIR no definido) | `packages/util/src/global-roots.ts` (`os.tmpdir()`; XDG por `os.homedir()`) | **Portar el fallback de tmp** a `global-roots.ts` (no suponer, verificar en B1) |
+| tsconfig | `./tsconfig.json` en `packages/opencode` | `packages/cli/tsconfig.json` | Apuntar entrypoint/tsconfig al paquete cli |
+
+**Gate Fase A: A1 y A2 verdes** ⇒ se autoriza el re-port atómico (Fase B). Se elimina el workflow de
+sondeo (su pregunta está respondida).
+
+**Lo que NO se afirma:** que el standalone host (ELF x86-64/glibc) sea el binario Bionic — eso se
+re-confirma con `build-bun.yml` y en el teléfono. Que el plugin virtual del Test B (default vacío)
+sustituya al de assets real (eso es B4). Nada sobre migraciones ejecutándose en Bionic (B6); ni sobre
+paridad de providers/MCP/pty (más allá del smoke).
+
+### B1 · H2.1 — re-vendor v2.0.24 (2026-10-07)
+
+Commit `6550ea3`. `opencode/src` sustituido íntegro por el snapshot `e7a34f09` (tarball codeload,
+sin `.git` anidado; `node_modules` queda fuera por el `.gitignore` del propio árbol). 8067 ficheros
+cambiados; el único binario grande versionado es `packages/core/src/models-dev/snapshot.txt` (5,3 MB)
+— confirma H2.0(d): en v2 el catálogo de modelos ya viene **versionado**, no se hace `fetch` en build.
+
+Adaptación propia porteadada (la única verificada en el árbol 1.18): el fallback de `TMPDIR` al
+prefijo Termux pasa de `packages/core/src/global.ts` a su equivalente v2
+`packages/util/src/global-roots.ts` (`os.tmpdir()` ⇒ `TMPDIR ?? $PREFIX/tmp ?? os.tmpdir()`).
+`ci/source-manifest.json`: `opencode` → `e7a34f09`.
+
+**Cierre:** `validate-source-tree.py` OK (7 árboles, sin `.git` anidado); `test-build-state.py`,
+`test-workflow-cache-contracts.py`, `test-module-graph-patch.py`, `test-changed-products.py` en verde.
+
+**Rojo por diseño (queda para B4):** `test-downstream-bundle-contracts.py` falla en
+`assert OPENCODE_WORKER.is_file()` porque `build-opencode.sh`/`build-opencode-android.ts` siguen
+punterando a `packages/opencode/src/cli/tui/worker.ts` (inexistente en v2). Es exactamente el trabajo
+de B4 (entrada → `packages/cli`, worker → `server-process.ts`/`@opencode/tui`, migraciones en el
+grafo, plugin de assets virtual); no se despacha `build-android.yml` hasta tener B4+B5 verdes.
+
+### B2 · H2.2 — hallazgo estructural y sonda same-version (2026-10-07)
+
+Comparación directa de las dos implementaciones del grafo standalone:
+
+- 1.2.13 vendida (`bun/src/src/StandaloneModuleGraph.zig`, commit `d7b539a5`): entrada de tabla
+  `{ name, contents, sourcemap, bytecode, encoding, loader, module_format }`; `Offsets` =
+  `{ byte_count: usize, modules_ptr: StringPointer, entry_point_id: u32, compile_exec_argv_ptr,
+  flags: packed u32 }`; trailer `"\n---- Bun! ----\n"`.
+- 1.4.2 upstream (`src/standalone_graph/StandaloneModuleGraph.rs`, tag `bun-v1.4.2`): entrada
+  reordenada con `module_info` y `bytecode_origin_path` nuevos; `Offsets` conserva los cinco
+  campos al inicio pero `Flags` gana 7 bits nuevos (`HAS_SOURCE_HASHES`, `HAS_BUILTIN_BYTECODE`,
+  `HAS_STARTUP_MODULE_COUNT`, …). ⇒ **un grafo emitido por 1.4.2 no es legible por un runtime
+  1.2.13**: la entrada de tabla tiene otro layout y los flags desconocidos se descartan.**
+
+Consecuencia operativa (estrategia elegida "Probe 1.2.13 primero"): la sonda buena es
+**same-version** — compilar el árbol v2 con bun **host 1.2.13**, extraer el grafo (preserve-bytes,
+como hace `build-opencode-android.ts`) y anexarlo a **nuestro bun Android 1.2.13** del artefacto
+`bun-android-aarch64-1.2.13`. Workflow desechable `v2-probe-bun1213.yml` (no publica nada):
+
+1. S2: `bun install` del workspace v2 con 1.2.13 (el `bun.lock` está escrito por 1.4.2; se prueba
+   `--frozen-lockfile` y, si falla, install suave).
+2. S3: grafo trivial aislado (control puro de wire-format, sin tocar el workspace).
+3. S4: `Bun.build({compile})` de `packages/cli` con plugin de assets virtual + solid.
+4. S5: anexión de ambos grafos al bun Android y validación ELF AArch64 + trailer.
+
+**Interpretación del veredicto:** si `probe-trivial-android` arranca en el teléfono ⇒ wire-format
+compatible; B2 queda reducido a "¿1.2.13 construye v2?" (S2/S4). Si el trivial falla ⇒ CP-D:
+re-port Bun 1.4.2 (Zig→Rust) obligatorio. Sin `build-android.yml`, sin release.
+
+## B2 · H2.2 — matriz de emisores: 1.3.2 construye v2 y su grafo CARGA en el runtime canary (2026-10-07)
+
+Sonda `v2-probe-bun1213.yml` en modo matriz (emisores host 1.2.13/1.3.2/1.4.2 sobre
+nuestro bun Android 1.2.13-canary, fuente `d7b539a5`, artefacto verde de main
+`37412517206`). Corridas: `37571698205` (n4), `37572115762` (n5), `37572396191` (n6).
+
+Hallazgos con evidencia:
+
+1. **Grafo trivial 1.3.2 anexado corre en el teléfono**: `probe-trivial-1.3.2-android`
+   imprimió `PROBE_BUN_1.3.2_OK` (rc correcto) en tmux. Confirma la aritmética del pie
+   (`total_byte_count = filesize`, no longitud de grafo — el bug de la primera anexion
+   hacia que el runtime ignorara el grafo y mostrara help).
+2. **El árbol v2 se instala con los tres emisores** tras decatalog (`v2-decatalog.py`)
+   + lock propio + `bin/bun` en PATH para el postinstall `fix-node-pty` (rc=127 sin eso).
+3. **Compilación del CLI v2 (`packages/cli/src/index.ts`, `target:"bun"`, solid +
+   virtual-assets)**: 1.2.13 NO (bundler antiguo), **1.3.2 SÍ**, **1.4.2 SÍ**.
+4. **Layout del grafo por emisor** (volcado de los últimos 64 bytes en `50_assemble.txt`):
+   1.3.2 coincide con el parser del producto; 1.2.13 pone bits de flags donde 1.3.2 pone
+   `byte_count`; 1.4.2 (Rust) mueve el trailer fuera de `file_size-24..-8` — coherente con
+   el hallazgo estructural: el runtime 1.2.13 no leerá grafos 1.4.2 sin más.
+5. **El grafo v2 de 1.3.2 CARGA en el runtime canary**: `probe-v2-1.3.2-android` ejecutó
+   módulos desde `/$bunfs/root/index.js` y murió en `ReferenceError: undici is not
+   defined` (`__reExport(exports_Undici, undici)`) — exactamente el caso que
+   `patchAndroidModuleGraph` (pipeline 1.18) resuelve. La sonda no lo estaba aplicando.
+
+**Decisión**: la re-sonda (`8905f8a`, corrida n7) anexa con el código del producto
+(`patchAndroidModuleGraph` + `validateAndroidStandalone`). Si `probe-v2-1.3.2-android`
+levanta `--version`/TUI ⇒ **B2 colapsa a "emisor 1.3.2 + runtime actual" y el re-port
+Bun 1.4.2 (CP-D) NO es necesario**. Si el undici de v2 no cae del parche ⇒ se amplía
+`module-graph-patch.ts` (rama B2) o CP-D como fallback.
+
+## B3 · H2.3 — CERRADO (2026-10-07, `f4a38f5`)
+
+El guard no-string que el parche 0.4.5 inyectaba **ya lo publica upstream en 0.5.14**
+(literal en `chunk-bun-sjw2d9bq.js`/`chunk-node-80p7e6t6.js`). `patch-opentui-core-runtime.py`
+se reescribió como verificador: `verified` si el guard está, `patched` si reaparece el
+layout 0.4.5, **rc=1 ante cualquier tercer layout** (fuerza revisión, no nave ciegas).
+La llamada restante sin guard vive en `loadBundledFilePath` (ruta node) envuelta en
+try/catch upstream ⇒ degrada al fallback, no es objetivo. Evidencia: 10/10 unitarios +
+ejecución real contra el tarball 0.5.14 (`verified=2 patched=0 irrelevant=2`, rc=0) +
+`test-workflow-cache-contracts.py` verde. Pines `opentui-opencode`/`opentui_ref` =
+`31a93fbe` (0.5.14) ya correctos; sin cambios.
+
+### B2 · corrida n7 (`37572826830`) — veredicto ejecutado en dispositivo (2026-10-07)
+
+`patchAndroidModuleGraph`: trivial patchCount=0, v2 patchCount=1; `validateAndroidStandalone`
+OK. En el teléfono, `probe-v2-1.3.2-android --version` ⇒ **`opencode v2.0.24` rc=0**;
+ejecución interactiva (tmux) ⇒ el CLI levanta y lanza el server de fondo, fallando en
+`Cannot find module '@opencode-ai/pty-linux-x64-musl/package.json' from '/$bunfs/root/index.js'`
+— artefacto opcional de plataforma del host embebido por el bundler; corresponde al swap de
+B4, no al wire-format. **B2 cerrado sin re-port Bun** (CP-D descartado): pin Android 1.2.13,
+emisor 1.3.2.
+
+## B4 · H2.4 — CERRADO (2026-10-07)
+
+**Commit:** `cf2cf3e` (adaptación) + `367b48e`/`407ff47` (sonda). **Sonda verde:** `37575020163`.
+
+- El grafo v2 viaja sin defines 1.18: la snapshot de models y las migraciones SQLite son
+  fuentes versionadas importadas por `packages/core`; el parser-worker de OpenTUI 0.5.14 se
+  resuelve como file asset dentro del bundle. Entrada única: `packages/cli/src/index.ts`.
+- Plugins espejo de `packages/cli/script/build.ts` (upstream): web-ui con assets `{}`
+  (canal `latest` ⇒ rutas de navegador responden 404; API/TUI intactas), `pty-binding` →
+  `export default undefined` (mata el crash Bionic de `@opencode-ai/pty` visto en B2; queda
+  fallback por PATH `opencode-pty`), watcher → require estático glibc (dlopen falla en
+  Bionic y `watcher.ts` degrada por su try/catch perezoso).
+- `build-opencode.sh`: `OPENCODE_PKG` → `packages/cli`; `bun install --os="*" --cpu="*"`
+  de `@opentui/core@catalog`/`@opencode-ai/pty` (resolución literal del catálogo); swap del
+  `libopentui.so` Android dentro de **`@opentui/core-linux-arm64`** — la rama que el
+  dispositivo selecciona por `process.platform/arch` con `OPENTUI_LIBC=glibc`.
+- Contratos: `test-downstream-bundle-contracts.py` reescrito para el layout v2 (prohíbe
+  `OPENCODE_WORKER_PATH`/`OTUI_TREE_SITTER_WORKER_PATH`/`OPENCODE_MIGRATIONS`/models-snapshot
+  y exige el stub pty + swap arm64). Verdes: bundle-contracts, changed-products, build-state,
+  source-tree, workflow-cache-contracts, module-graph-patch, `bash -n`, parseo del `.ts`.
+- Por qué la sonda: una corrida stand-alone de `build-opencode.yml` en rama NO puede
+  materializar Bun (el artifact vive en la corrida del DAG; la cache está scopeada por
+  rama) — `37574527406` falló en "Materialize and verify Bun artifact" sin tocar el código.
+  `v2-probe-assembly.yml` replica Receive/Materialize con `gh run download` de las corridas
+  verdes de main (bun `37412517206`, opentui `37491176567`) y corre el script de producto.
+- Evidencia de la corrida: install `4833` + `832` paquetes; guard OpenTUI
+  `verified=24 patched=0 irrelevant=24`; swap aplicado en
+  `node_modules/.bun/@opentui+core-linux-arm64@0.5.14/.../libopentui.so`; grafo 58.95 MB,
+  undici repairs=1; standalone AArch64 con `total_byte_count=file_size=156,552,762` y
+  `validate-standalone` OK. **En el teléfono, el artifact de la sonda: `opencode v2.0.24`
+  rc=0** (limpieza del scratch local tras la prueba).
+- Límites: sigue siendo "runs --version en Bionic", no TUI completa (eso es B6). Degradados
+  conocidos a revalidar: file watcher, fff, pty nativo (stub) y web-ui ausente.
+
+## B5 · H2.5 — CERRADO (2026-10-07)
+
+**Commit:** `0761fe6`. Pines movidos a la línea v2: `env.sh` (`OPENCODE_VERSION=2.0.24`,
+`OPENCODE_SOURCE_COMMIT=e7a34f09` — coherente con `ci/source-manifest.json` desde B1),
+defaults de `build-android.yml` (input `release` incluido ⇒ `stack-v2.0.24`),
+`build-opencode.yml` y `build-opencode-docker.yml`; `AGENTS.md`/`CLAUDE.md`/`README.md` y
+`releases/manifest.example.json` reflejan 2.0.24 y el emisor 1.3.2; fixture
+`test-installer.py` sobre `v2.0.24` (regex `v?\d+\.\d+\.\d+` ya lo aceptaba). Criterio de
+cierre: suites estáticas verdes + grep `1.18.34` sin residuos en rutas de producto.
+**Tag** `opencode-v2.0.24-android`: se crea con la publicación B6 (no publicar tags de
+producto antes de verificar en dispositivo). Consecuencia conocida: editar `env.sh`
+invalida las keys `ci-cache-v2-bun-core/bun` también en `main` la próxima vez — no
+contamina a `main` (caches scopeadas por rama) pero B6 en rama reconstruirá Bun desde
+bun-core (WebKit incluido): corrida de varias horas, dentro del diseño del DAG.
+
+## B6 · H2.6 — EN CURSO (2026-10-07): fix del swap y verificación en dispositivo
+
+**Hallazgo en dispositivo (bloqueante).** La primera release `stack-v2.0.24` (corrida
+37576120255, commit `2739d3e`) instalaba y respondía `opencode v2.0.24` rc=0, pero la TUI
+moría en `resolveRenderLib`: "Failed to open library". Diagnóstico sobre el binario: el
+grafo embebía **solo** `@opentui/core-linux-x64/libopentui.so` (2 referencias, cero arm64).
+El bundler resuelve el paquete nativo contra el **host del runner** (linux x64), no contra
+el teléfono: el swap a `core-linux-arm64` introducido en B4 dejaba dentro del grafo la
+`.so` glibc-x86_64 real. Precedente 1.18 confirmaba el swap sobre x64 como el contrato
+correcto.
+
+**Fix:** `5abfad6` — `build-opencode.sh` vuelve al swap `@opentui/core-linux-x64` y
+`test-downstream-bundle-contracts.py` fija el assert en x64 (contrato verde en local).
+
+**Re-ensamblado (sonda).** `v2-probe-assembly.yml` corrida 37587769635 (push-trigger,
+commit `5abfad6`): job `assembly` **success**; log verifica el swap aplicado sobre
+`core-linux-x64@0.5.14`; standalone AArch64 172,487,178 bytes.
+
+**Dispositivo (evidencia fechada, 2026-10-07, artefacto de la sonda):**
+- `opencode --version` ⇒ `opencode v2.0.24` rc=0.
+- TUI modo `--standalone` en tmux (tui-smoke, 120x32, wait 45): banner ASCII, prompt
+  "Ask anything…", agente Build, versión 2.0.24 en estado — **renderiza**.
+- TUI modo por defecto (background service, wait 135): mismo frame completo — **renderiza**.
+- Migraciones SQLite v2 sobre Bionic: `~/.local/share/opencode/opencode.db` tabla
+  `migration` con **48 filas** aplicadas y WAL actualizado en la corrida; tablas v2
+  presentes (`session_v2`, `event_sequence`, `instruction_*`).
+- Sesión real de extremo a extremo: `opencode run -m ollama-cloud/nemotron-3-nano:30b`
+  ⇒ respuesta **TERMUXOK** rc=0 desde el teléfono (auth, red, server y TUI funcionando).
+  Canales con credenciales agotadas probados antes del éxito: apmix (key inválida),
+  ollama-cloud retire/plan (errores de política del proveedor, no del port). El provider
+  "Console" del usuario devuelve "Endpoint is unavailable" (estado del endpoint, no del port).
+- Degradados observados en TUI: aviso "1 plugin failed /plugins" (plugin de usuario
+  `herdr-opencode`, ajeno al port); watcher/fff/pty siguen degradados por diseño (stub B4).
+
+**Pendiente de cierre:** re-publicar la release (dispatch `build-android.yml`
+37602945465 sobre `5abfad6`, inputs release=2.0.24) para regenerar
+`opencode-2.0.24-android-aarch64.tar.gz` con el swap correcto; reinstalar asset
+publicado en el teléfono y repetir `--version` + TUI; tag `opencode-v2.0.24-android`;
+merge a `main` solo con esta evidencia verde.
+
+### B6 · cierre (2026-10-07)
+
+Corrida `build-android.yml` **37602945465** (dispatch sobre `5abfad6`): todos los jobs
+`success` incluido `publish` (kilо/core y kilo/bun `skipped` por diseño). Asset regenerado
+`opencode-2.0.24-android-aarch64.tar.gz` = 53,618,276 B (vs 49,385,606 B del asset
+incorrecto). En el teléfono, **con el asset publicado**: `install.sh 2.0.24 --just opencode
+--prefix ~/.local --yes --smoke-test` rc=0; `opencode --version` ⇒ `opencode v2.0.24`;
+strings del binario confirman swap sobre `core-linux-x64` (2 refs, cero arm64); TUI tmux
+renderiza (banner + "Ask anything…" + 2.0.24); sesión real `opencode run -m
+ollama-cloud/nemotron-3-nano:30b` ⇒ **RELEASEOK** rc=0. Migraciones: 48 filas drizzle v2
+en `opencode.db` ejecutadas en Bionic (evidencia previa con los mismos bytes de build).
+Cleanup pre-merge: retiradas las sondas desechables (`v2-probe-bun1213.yml`,
+`v2-probe-assembly.yml`, `v2-probe-build.sh`, `v2-decatalog.py`); 8 suites estáticas
+verdes tras el retiro. Tag `opencode-v2.0.24-android` sobre `5abfad6` (commit del que se
+publicó el asset). Merge a `main` ejecutado con B6 verde.

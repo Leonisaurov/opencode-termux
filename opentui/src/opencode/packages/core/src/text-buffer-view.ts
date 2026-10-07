@@ -7,12 +7,16 @@ import {
   type TextBufferViewHandle,
 } from "./zig.js"
 import type { TextBuffer } from "./text-buffer.js"
+import type { SelectionBehavior, SelectionOccupancy } from "./types.js"
 
 export class TextBufferView {
   private lib: RenderLib
   private viewPtr: TextBufferViewHandle
   private textBuffer: TextBuffer
   private _destroyed: boolean = false
+  // Only this wrapper sets the native view's selection, and a reset clears all of it, so while this
+  // is true the view has no selection and a reset can skip the native call.
+  private selectionClear: boolean = true
 
   constructor(lib: RenderLib, ptr: TextBufferViewHandle, textBuffer: TextBuffer) {
     this.lib = lib
@@ -38,17 +42,21 @@ export class TextBufferView {
 
   public setSelection(start: number, end: number, bgColor?: RGBA, fgColor?: RGBA): void {
     this.guard()
+    this.selectionClear = false
     this.lib.textBufferViewSetSelection(this.viewPtr, start, end, bgColor || null, fgColor || null)
   }
 
   public updateSelection(end: number, bgColor?: RGBA, fgColor?: RGBA): void {
     this.guard()
+    this.selectionClear = false
     this.lib.textBufferViewUpdateSelection(this.viewPtr, end, bgColor || null, fgColor || null)
   }
 
   public resetSelection(): void {
     this.guard()
+    if (this.selectionClear) return
     this.lib.textBufferViewResetSelection(this.viewPtr)
+    this.selectionClear = true
   }
 
   public getSelection(): { start: number; end: number } | null {
@@ -68,8 +76,10 @@ export class TextBufferView {
     focusY: number,
     bgColor?: RGBA,
     fgColor?: RGBA,
+    behavior: SelectionBehavior = "cell",
   ): boolean {
     this.guard()
+    this.selectionClear = false
     return this.lib.textBufferViewSetLocalSelection(
       this.viewPtr,
       anchorX,
@@ -78,6 +88,7 @@ export class TextBufferView {
       focusY,
       bgColor || null,
       fgColor || null,
+      behavior,
     )
   }
 
@@ -88,8 +99,10 @@ export class TextBufferView {
     focusY: number,
     bgColor?: RGBA,
     fgColor?: RGBA,
+    behavior: SelectionBehavior = "cell",
   ): boolean {
     this.guard()
+    this.selectionClear = false
     return this.lib.textBufferViewUpdateLocalSelection(
       this.viewPtr,
       anchorX,
@@ -98,12 +111,25 @@ export class TextBufferView {
       focusY,
       bgColor || null,
       fgColor || null,
+      behavior,
     )
   }
 
   public resetLocalSelection(): void {
     this.guard()
+    if (this.selectionClear) return
     this.lib.textBufferViewResetLocalSelection(this.viewPtr)
+    this.selectionClear = true
+  }
+
+  public setSelectionOccupancy(occupancy: SelectionOccupancy): void {
+    this.guard()
+    this.lib.textBufferViewSetSelectionOccupancy(this.viewPtr, occupancy)
+  }
+
+  public getSelectionOccupancy(): SelectionOccupancy {
+    this.guard()
+    return this.lib.textBufferViewGetSelectionOccupancy(this.viewPtr)
   }
 
   public setWrapWidth(width: number | null): void {
@@ -114,6 +140,11 @@ export class TextBufferView {
   public setWrapMode(mode: "none" | "char" | "word"): void {
     this.guard()
     this.lib.textBufferViewSetWrapMode(this.viewPtr, mode)
+  }
+
+  public setTextAlign(alignment: "left" | "center" | "right"): void {
+    this.guard()
+    this.lib.textBufferViewSetTextAlign(this.viewPtr, alignment)
   }
 
   public setFirstLineOffset(offset: number): void {
@@ -139,6 +170,11 @@ export class TextBufferView {
   public get logicalLineInfo(): LineInfo {
     this.guard()
     return this.lib.textBufferViewGetLogicalLineInfo(this.viewPtr)
+  }
+
+  public getLineSources(startLine: number, lineCount: number): number[] {
+    this.guard()
+    return this.lib.textBufferViewGetLineSources(this.viewPtr, startLine, lineCount)
   }
 
   public getSelectedText(): string {

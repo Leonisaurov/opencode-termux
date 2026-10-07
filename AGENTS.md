@@ -50,7 +50,8 @@ commits in the product cache contract; do not rely on a dirty checkout.
 ## Version pins and patch compatibility
 
 Las versiones de Bun y OpenCode están fijadas deliberadamente por los parches
-Android existentes. Actualmente son Bun `1.2.13` y OpenCode `1.18.34`.
+Android existentes. Actualmente son Bun Android `1.2.13` (con el grafo standalone
+emitido por el host Bun `1.3.2`) y OpenCode `2.0.24`.
 
 - No subir, reemplazar ni "alinear" estas versiones por inferencia, aunque haya
   versiones más nuevas en otros workflows, manifiestos o upstream.
