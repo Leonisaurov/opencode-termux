@@ -45,8 +45,8 @@ Hechos de upstream (tag `v2.0.24`): commit re-vendor `e7a34f09bfd9134dfade5a8ddb
       **Ojo:** Kilo comparte Bun ⇒ congelar su pin o garantizarle el viejo.
       Cierre alternativo (CP-D): `build-bun.yml` verde artefacto Bionic + `test-workflow-cache-contracts.py`.
 
-- [ ] **B3 · H2.3** — OpenTUI 0.5.14: parche de runtime JS. Extraer cadenas reales de los chunks 0.5.14 (`chunk-node-*.js`, `index.node.js`, `node-assets.js`, `runtime-plugin*.node.js`); reescribir `ci/scripts/patch-opentui-core-runtime.py` + su test para el layout nuevo. Pin `env.sh` / `opentui_ref` a 0.5.14.
-      **Cierre:** `test-patch-opentui-core-runtime.py` verde contra el artefacto 0.5.14 real.
+- [x] **B3 · H2.3** — OpenTUI 0.5.14: el parche 0.4.5 se convirtió en **verificador del guard**. **CERRADO 2026-10-07 (`f4a38f5`).** Hallazgo: upstream 0.5.14 publica la ruta bun YA protegida (`const loaded = …` + `typeof loaded !== "string"`, literal en `chunk-bun-sjw2d9bq.js:965-970`); el bloque sin proteccion del 0.4.5 ya no existe. La llamada restante sin guard vive en `loadBundledFilePath` (ruta node) envuelta en try/catch ⇒ degrada al fallback, no es objetivo de parche. El script verifica el texto real, parchea si reaparece el layout 0.4.5 y falla ante cualquier tercer layout. Pines: `opentui-opencode` = `31a93fbe` (0.5.14) ya correcto en manifest/workflows.
+      **Evidencia:** 10/10 unitarios + corrida real contra el tarball 0.5.14 (`verified=2 patched=0 irrelevant=2`, rc=0) + `test-workflow-cache-contracts.py` verde.
 
 - [ ] **B4 · H2.4** — adaptación de build. `build-opentui.sh` y `build-opencode.sh`: entrada → `packages/cli`, reubicar swap de `libopentui.so` (`packages/native/lib`) y su glob de fallback; actualizar en el mismo commit `test-downstream-bundle-contracts.py` y `test-changed-products.py`.
       **Cierre:** los dos contratos + `bash -n` + `build-opencode.yml` cache-contract paridad.

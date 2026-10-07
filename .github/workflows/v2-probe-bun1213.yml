@@ -141,8 +141,11 @@ jobs:
           const out = process.env.PROBE_DIR + "/out"
           const TRAILER = Buffer.from("\n---- Bun! ----\n")
           const OFFSETS = 32
-          // Preserva los bytes del grafo tal cual los emitio el host (authority
-          // = ese bun); el pie anexado debe declarar el tamano TOTAL del archivo.
+          // Preserva los bytes del grafo tal cual los emitio el host; el pie
+          // anexado debe declarar el tamano TOTAL del archivo. Ojo: el u64
+          // final del host standalone no siempre es filesize (1.3.2 trivial:
+          // 105182181 vs 105181669), por eso NO usamos aqui
+          // extractAndroidModuleGraph, que si lo exige.
           function extractGraph(file) {
             const b = fs.readFileSync(file)
             const limit = b.length - 8
@@ -159,22 +162,55 @@ jobs:
           }
           const android = fs.readFileSync(path.join(out, "bun-android"))
           const emitted = fs.readdirSync(out).filter((f) => f.includes("-host-"))
+          const pending = []
           for (const src of emitted) {
             const v = src.split("host-")[1]
             const kind = src.startsWith("trivial") ? "trivial" : "v2"
             const dst = `probe-${kind}-${v}-android`
             let g
             try { g = extractGraph(path.join(out, src)) } catch (e) { console.log(`SKIP ${src}: ${e.message}`); continue }
-            const total = android.length + g.length + 8
-            const tail = Buffer.alloc(8)
-            tail.writeBigUInt64LE(BigInt(total))
-            fs.writeFileSync(path.join(out, dst), Buffer.concat([android, g, tail]))
-            fs.chmodSync(path.join(out, dst), 0o755)
-            console.log(`${dst}: grafo ${g.length} bytes, file_size=${total}`)
+            // El grafo pasa por el parche undici del producto cuando hay
+            // re-exports vulnerables (es el mismo codigo de la pipeline 1.18).
+            fs.writeFileSync(path.join(out, `graph-${kind}-${v}.bin`), g)
+            pending.push({ src, dst, kind, v, size: g.length })
           }
+          fs.writeFileSync(path.join(out, "pending.json"), JSON.stringify(pending, null, 2))
+          for (const p of pending) console.log(`extracted ${p.src} -> ${p.dst} (${p.size} bytes de grafo)`)
           NODE
           } >> "$L" 2>&1 || true
           cat "$L"
+          grep -q '"dst"' "$PROBE_DIR/out/pending.json" 2>/dev/null || { echo "ERROR: ningun grafo extraido"; exit 1; }
+          {
+          cat > "$PROBE_DIR/assemble-probe.ts" <<'TS'
+          // Anexion con el parche/validacion del producto: patchAndroidModuleGraph
+          // (undici) + validateAndroidStandalone sobre el binario final.
+          const out = process.env.PROBE_DIR + "/out"
+          const mg = await import(process.env.GITHUB_WORKSPACE + "/ci/scripts/module-graph-patch.ts")
+          const fs = await import("node:fs")
+          const path = await import("node:path")
+          const android = new Uint8Array(await fs.promises.readFile(path.join(out, "bun-android")))
+          const pending = JSON.parse(await fs.promises.readFile(path.join(out, "pending.json"), "utf8"))
+          for (const p of pending) {
+            let graph = new Uint8Array(await fs.promises.readFile(path.join(out, `graph-${p.kind}-${p.v}.bin`)))
+            const res = mg.patchAndroidModuleGraph(graph, "opencode")
+            console.log(`${p.dst}: patchCount=${res.patchCount}`)
+            graph = res.graph
+            const total = android.length + graph.length + 8
+            const buf = Buffer.alloc(total)
+            buf.set(android, 0)
+            buf.set(graph, android.length)
+            buf.writeBigUInt64LE(BigInt(total), total - 8)
+            await fs.promises.writeFile(path.join(out, p.dst), buf)
+            await fs.promises.chmod(path.join(out, p.dst), 0o755)
+            if (p.kind === "v2") {
+              mg.validateAndroidStandalone(new Uint8Array(await fs.promises.readFile(path.join(out, p.dst))), "opencode")
+              console.log(`${p.dst}: validateAndroidStandalone OK`)
+            }
+          }
+          TS
+          "$PROBE_DIR/hosts/bun-1.3.2" "$PROBE_DIR/assemble-probe.ts"
+          } >> "$L" 2>&1 || true
+          tail -20 "$L"
           n=0
           for f in "$PROBE_DIR"/out/probe-*-android; do
             [ -e "$f" ] || continue
