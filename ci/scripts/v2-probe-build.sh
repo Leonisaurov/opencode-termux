@@ -13,6 +13,11 @@ OUT_STANDALONE="$4"  # where to write the emitted standalone
 P="$PROBE_DIR/$LABEL"
 rm -rf "$P"
 mkdir -p "$P"
+
+# Los postinstall del arbol (fix-node-pty) invocan `bun` pelado: el host bajo
+# prueba debe estar primero en PATH para que install/compile usen el mismo bun.
+export PATH="$(dirname "$HOST_BUN"):$PATH"
+
 cp -a "$TREE_SRC" "$P/src"
 cd "$P/src"
 

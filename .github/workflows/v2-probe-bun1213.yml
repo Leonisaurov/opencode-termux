@@ -127,6 +127,14 @@ jobs:
           set -uo pipefail
           L="$PROBE_DIR/logs/50_assemble.txt"; : > "$L"
           {
+          # Diagnostico de layout por emisor: ultimos 64 bytes de cada standalone
+          # host (explica rechazos de extractGraph entre 1.2.13/1.3.2/1.4.2).
+          for f in "$PROBE_DIR"/out/*-host-*; do
+            [ -e "$f" ] || continue
+            sz=$(stat -c %s "$f")
+            echo "== $(basename "$f"): size=$sz; pie(64B):"
+            od -An -tx1 -j $((sz > 64 ? sz - 64 : 0)) "$f"
+          done
           node <<'NODE'
           const fs = require("fs")
           const path = require("path")
