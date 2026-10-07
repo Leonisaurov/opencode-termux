@@ -1134,3 +1134,19 @@ commit `5abfad6`): job `assembly` **success**; log verifica el swap aplicado sob
 `opencode-2.0.24-android-aarch64.tar.gz` con el swap correcto; reinstalar asset
 publicado en el teléfono y repetir `--version` + TUI; tag `opencode-v2.0.24-android`;
 merge a `main` solo con esta evidencia verde.
+
+### B6 · cierre (2026-10-07)
+
+Corrida `build-android.yml` **37602945465** (dispatch sobre `5abfad6`): todos los jobs
+`success` incluido `publish` (kilо/core y kilo/bun `skipped` por diseño). Asset regenerado
+`opencode-2.0.24-android-aarch64.tar.gz` = 53,618,276 B (vs 49,385,606 B del asset
+incorrecto). En el teléfono, **con el asset publicado**: `install.sh 2.0.24 --just opencode
+--prefix ~/.local --yes --smoke-test` rc=0; `opencode --version` ⇒ `opencode v2.0.24`;
+strings del binario confirman swap sobre `core-linux-x64` (2 refs, cero arm64); TUI tmux
+renderiza (banner + "Ask anything…" + 2.0.24); sesión real `opencode run -m
+ollama-cloud/nemotron-3-nano:30b` ⇒ **RELEASEOK** rc=0. Migraciones: 48 filas drizzle v2
+en `opencode.db` ejecutadas en Bionic (evidencia previa con los mismos bytes de build).
+Cleanup pre-merge: retiradas las sondas desechables (`v2-probe-bun1213.yml`,
+`v2-probe-assembly.yml`, `v2-probe-build.sh`, `v2-decatalog.py`); 8 suites estáticas
+verdes tras el retiro. Tag `opencode-v2.0.24-android` sobre `5abfad6` (commit del que se
+publicó el asset). Merge a `main` ejecutado con B6 verde.
