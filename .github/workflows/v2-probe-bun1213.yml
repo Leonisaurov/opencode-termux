@@ -25,13 +25,7 @@ env:
   BUN_VERSION: "1.2.13"
 
 jobs:
-  bun-android:
-    uses: ./.github/workflows/build-bun.yml
-    with:
-      bun_version: "1.2.13"
-
   probe:
-    needs: bun-android
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -45,11 +39,16 @@ jobs:
           mkdir -p "$D/logs" "$D/out"
           echo "PROBE_DIR=$D" >> "$GITHUB_ENV"
 
-      - name: Recibir Bun Android 1.2.13 del job bun-android
-        uses: actions/download-artifact@v4
-        with:
-          name: bun-android-aarch64-1.2.13
-          path: ${{ env.RUNNER_TEMP }}/android-bun
+      - name: 'Recibir Bun Android 1.2.13 (artefacto verde de main, mismo pin d7b539a5)'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: "37412517206"
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/android-bun"
+          cd "$RUNNER_TEMP/android-bun"
+          gh run download "$SOURCE_RUN" -R "$GITHUB_REPOSITORY" -n bun-android-aarch64-1.2.13
+          find . -type f | head
 
       - name: 'S0: verificar Bun Android (AArch64, 1.2.13)'
         run: |
