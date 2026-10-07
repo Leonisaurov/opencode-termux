@@ -31,19 +31,8 @@ Hechos de upstream (tag `v2.0.24`): commit re-vendor `e7a34f09bfd9134dfade5a8ddb
 - [x] **B1 · H2.1** — re-vendor v2.0.24. **CERRADO 2026-10-07 (`6550ea3`).** `opencode/src` sustituido por `e7a34f09` (8067 ficheros; sin `.git` anidado; `node_modules` ignorado). Fix Termux porteado de `packages/core/src/global.ts` → `packages/util/src/global-roots.ts`. `ci/source-manifest.json`: opencode → `e7a34f09`. `validate-source-tree.py` OK (7 árboles). *Conocido pendiente:* `test-downstream-bundle-contracts.py` está rojo en `OPENCODE_WORKER` (ruta 1.18 inexistente) por diseño — lo cubre B4.
       **Cierre:** `validate-source-tree.py` + árbol limpio + grep sin residuos de 1.18.x.
 
-- [~] **B2 · H2.2** — estrategia "Probe 1.2.13 primero" (decidida 2026-10-06): antes de re-portear
-      Bun, la sonda desechable `v2-probe-bun1213.yml` comprueba si **bun host 1.2.13** instala y
-      compila el árbol v2 y si el grafo resultante (same-version, preserve-bytes) corre sobre
-      **nuestro bun Android 1.2.13** en el teléfono. Hallazgo estructural: el grafo 1.4.2 (Rust)
-      **no** es legible por el runtime 1.2.13 (tabla reordenada + flags nuevos) ⇒ solo la vía
-      same-version puede colapsar B2.
-      **Cierre:** veredicto de la sonda en `PROGRESS.md` + corrida en dispositivo de
-      `probe-trivial-android` (y `probe-v2-android` si S4 emite). Si falla ⇒ CP-D: re-port Bun
-      1.4.2 (Zig→Rust): re-vendor `bun/src` (tag 1.4.2) + **todos** los pines (`env.sh`,
-      `setup-runner.sh`, `build-bun.yml`, `build-bun-target.yml`, `build-android.yml`,
-      `build-opencode*.yml`, `build-kilo.yml`) + revalidar overlay WebKit/TinyCC/heap tagging.
-      **Ojo:** Kilo comparte Bun ⇒ congelar su pin o garantizarle el viejo.
-      Cierre alternativo (CP-D): `build-bun.yml` verde artefacto Bionic + `test-workflow-cache-contracts.py`.
+- [x] **B2 · H2.2** — estrategia "Probe 1.2.13 primero". **CERRADO 2026-10-07 (corridas n4–n7, `8905f8a`): veredicto — NO hace re-port de Bun.** El emisor host **1.3.2** construye el CLI v2 (`target:"bun"`, decatalog, lock propio) y su grafo, tras `patchAndroidModuleGraph` (undici, patchCount=1) + `validateAndroidStandalone`, **corre sobre nuestro bun Android 1.2.13-canary**: `--version` ⇒ `opencode v2.0.24` rc=0 en el teléfono. Fallo restante = artefacto de plataforma (`@opencode-ai/pty-linux-x64-musl` referenciado; swap nativo → B4), no wire-format. Hallazgos de layout: grafo 1.4.2 (Rust) no legible por el runtime (trailer movido); emisor 1.2.13 no construye v2. Consecuencia: **CP-D descartado**; pin Bun Android queda 1.2.13, `HOST_BUN_VERSION` 1.3.2 sigue siendo el emisor; los pines de `build-bun.yml`/Kilo NO se tocan.
+      **Evidencia:** `probe-trivial-1.3.2-android` ⇒ `PROBE_BUN_1.3.2_OK`; `probe-v2-1.3.2-android` ⇒ `opencode v2.0.24` + arranque de server con error acotado al paquete pty host (captura tmux 2026-10-07); veredictos en `PROGRESS.md`.
 
 - [x] **B3 · H2.3** — OpenTUI 0.5.14: el parche 0.4.5 se convirtió en **verificador del guard**. **CERRADO 2026-10-07 (`f4a38f5`).** Hallazgo: upstream 0.5.14 publica la ruta bun YA protegida (`const loaded = …` + `typeof loaded !== "string"`, literal en `chunk-bun-sjw2d9bq.js:965-970`); el bloque sin proteccion del 0.4.5 ya no existe. La llamada restante sin guard vive en `loadBundledFilePath` (ruta node) envuelta en try/catch ⇒ degrada al fallback, no es objetivo de parche. El script verifica el texto real, parchea si reaparece el layout 0.4.5 y falla ante cualquier tercer layout. Pines: `opentui-opencode` = `31a93fbe` (0.5.14) ya correcto en manifest/workflows.
       **Evidencia:** 10/10 unitarios + corrida real contra el tarball 0.5.14 (`verified=2 patched=0 irrelevant=2`, rc=0) + `test-workflow-cache-contracts.py` verde.

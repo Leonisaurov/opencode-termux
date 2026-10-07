@@ -1035,3 +1035,13 @@ try/catch upstream ⇒ degrada al fallback, no es objetivo. Evidencia: 10/10 uni
 ejecución real contra el tarball 0.5.14 (`verified=2 patched=0 irrelevant=2`, rc=0) +
 `test-workflow-cache-contracts.py` verde. Pines `opentui-opencode`/`opentui_ref` =
 `31a93fbe` (0.5.14) ya correctos; sin cambios.
+
+### B2 · corrida n7 (`37572826830`) — veredicto ejecutado en dispositivo (2026-10-07)
+
+`patchAndroidModuleGraph`: trivial patchCount=0, v2 patchCount=1; `validateAndroidStandalone`
+OK. En el teléfono, `probe-v2-1.3.2-android --version` ⇒ **`opencode v2.0.24` rc=0**;
+ejecución interactiva (tmux) ⇒ el CLI levanta y lanza el server de fondo, fallando en
+`Cannot find module '@opencode-ai/pty-linux-x64-musl/package.json' from '/$bunfs/root/index.js'`
+— artefacto opcional de plataforma del host embebido por el bundler; corresponde al swap de
+B4, no al wire-format. **B2 cerrado sin re-port Bun** (CP-D descartado): pin Android 1.2.13,
+emisor 1.3.2.
