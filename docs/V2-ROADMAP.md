@@ -28,7 +28,7 @@ Hechos de upstream (tag `v2.0.24`): commit re-vendor `e7a34f09bfd9134dfade5a8ddb
 
 ## Fase B — re-port atómico (solo si A verde). Cada paso = commit + validación
 
-- [ ] **B1 · H2.1** — re-vendor v2.0.24. Sustituir **todo** `opencode/src` por snapshot `e7a34f09` (sin `.git` anidado; `bun.lock`/patches juntos). Re-portear el fix de rutas de Termux a su **ubicación v2 verificada en A2**. Actualizar `ci/source-manifest.json` (`opencode` → `e7a34f09`). Un commit.
+- [x] **B1 · H2.1** — re-vendor v2.0.24. **CERRADO 2026-10-07 (`6550ea3`).** `opencode/src` sustituido por `e7a34f09` (8067 ficheros; sin `.git` anidado; `node_modules` ignorado). Fix Termux porteado de `packages/core/src/global.ts` → `packages/util/src/global-roots.ts`. `ci/source-manifest.json`: opencode → `e7a34f09`. `validate-source-tree.py` OK (7 árboles). *Conocido pendiente:* `test-downstream-bundle-contracts.py` está rojo en `OPENCODE_WORKER` (ruta 1.18 inexistente) por diseño — lo cubre B4.
       **Cierre:** `validate-source-tree.py` + árbol limpio + grep sin residuos de 1.18.x.
 
 - [ ] **B2 · H2.2** — Bun 1.2.13 → 1.4.2. Re-vendor `bun/src` (tag 1.4.2) + **todos** los pines (`env.sh`, `setup-runner.sh`, `build-bun.yml`, `build-bun-target.yml`, `build-android.yml`, `build-opencode*.yml`, `build-kilo.yml`) + revalidar overlay WebKit/TinyCC/heap tagging. Bun 1.4.x es Rust ⇒ confirmar toolchain. **Ojo:** Kilo comparte Bun ⇒ congelar su pin o garantizarle el viejo.

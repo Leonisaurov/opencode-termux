@@ -942,3 +942,24 @@ sondeo (su pregunta está respondida).
 re-confirma con `build-bun.yml` y en el teléfono. Que el plugin virtual del Test B (default vacío)
 sustituya al de assets real (eso es B4). Nada sobre migraciones ejecutándose en Bionic (B6); ni sobre
 paridad de providers/MCP/pty (más allá del smoke).
+
+### B1 · H2.1 — re-vendor v2.0.24 (2026-10-07)
+
+Commit `6550ea3`. `opencode/src` sustituido íntegro por el snapshot `e7a34f09` (tarball codeload,
+sin `.git` anidado; `node_modules` queda fuera por el `.gitignore` del propio árbol). 8067 ficheros
+cambiados; el único binario grande versionado es `packages/core/src/models-dev/snapshot.txt` (5,3 MB)
+— confirma H2.0(d): en v2 el catálogo de modelos ya viene **versionado**, no se hace `fetch` en build.
+
+Adaptación propia porteadada (la única verificada en el árbol 1.18): el fallback de `TMPDIR` al
+prefijo Termux pasa de `packages/core/src/global.ts` a su equivalente v2
+`packages/util/src/global-roots.ts` (`os.tmpdir()` ⇒ `TMPDIR ?? $PREFIX/tmp ?? os.tmpdir()`).
+`ci/source-manifest.json`: `opencode` → `e7a34f09`.
+
+**Cierre:** `validate-source-tree.py` OK (7 árboles, sin `.git` anidado); `test-build-state.py`,
+`test-workflow-cache-contracts.py`, `test-module-graph-patch.py`, `test-changed-products.py` en verde.
+
+**Rojo por diseño (queda para B4):** `test-downstream-bundle-contracts.py` falla en
+`assert OPENCODE_WORKER.is_file()` porque `build-opencode.sh`/`build-opencode-android.ts` siguen
+punterando a `packages/opencode/src/cli/tui/worker.ts` (inexistente en v2). Es exactamente el trabajo
+de B4 (entrada → `packages/cli`, worker → `server-process.ts`/`@opencode/tui`, migraciones en el
+grafo, plugin de assets virtual); no se despacha `build-android.yml` hasta tener B4+B5 verdes.
