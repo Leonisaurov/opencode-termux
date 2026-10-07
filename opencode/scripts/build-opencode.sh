@@ -80,15 +80,15 @@ if [ ! -f "$ARM64_LIBOPENTUI" ]; then
     exit 1
 fi
 
-# Swap the Android libopentui.so into the package the device will resolve.
-# OpenTUI 0.5.x picks @opentui/core-<platform>-<arch> from process.platform/
-# arch (OPENTUI_LIBC is defined to glibc, so not the -musl package); on the
-# phone that branch is @opentui/core-linux-arm64.
+# Swap the Android libopentui.so into the package the bundler embeds. The
+# published @opentui/core resolves @opentui/core-<platform>-<arch> against the
+# BUILD host (linux x64 on the runner), so the module graph carries only the
+# core-linux-x64 asset; the phone loads those bytes. Same contract as 1.18.
 OPENTUI_NODE_MODULE=""
 for candidate in \
-    "$OPENCODE_SRC/node_modules/@opentui/core-linux-arm64/libopentui.so" \
-    "$OPENCODE_PKG/node_modules/@opentui/core-linux-arm64/libopentui.so" \
-    "$OPENCODE_SRC/node_modules/.bun/@opentui+core-linux-arm64@*/node_modules/@opentui/core-linux-arm64/libopentui.so"
+    "$OPENCODE_SRC/node_modules/@opentui/core-linux-x64/libopentui.so" \
+    "$OPENCODE_PKG/node_modules/@opentui/core-linux-x64/libopentui.so" \
+    "$OPENCODE_SRC/node_modules/.bun/@opentui+core-linux-x64@*/node_modules/@opentui/core-linux-x64/libopentui.so"
 do
     # Handle glob
     for f in $candidate; do
@@ -120,13 +120,13 @@ restore_opentui_swap() {
 trap restore_opentui_swap EXIT
 
 if [ -n "$OPENTUI_NODE_MODULE" ]; then
-    echo ">>> Swapping @opentui/core-linux-arm64 libopentui.so with the Android build..."
+    echo ">>> Swapping @opentui/core-linux-x64 libopentui.so with the Android build..."
     BACKUP_FILE="${OPENTUI_NODE_MODULE}.host.bak"
     cp "$OPENTUI_NODE_MODULE" "$BACKUP_FILE"
     cp "$ARM64_LIBOPENTUI" "$OPENTUI_NODE_MODULE"
     echo "    Backed up to $BACKUP_FILE"
 else
-    echo "WARNING: Could not find @opentui/core-linux-arm64 libopentui.so in node_modules"
+    echo "WARNING: Could not find @opentui/core-linux-x64 libopentui.so in node_modules"
     echo "         The build may embed the wrong architecture"
 fi
 

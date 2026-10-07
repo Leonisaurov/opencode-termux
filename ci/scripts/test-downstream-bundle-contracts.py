@@ -64,7 +64,7 @@ def main() -> None:
     assert 'ci/scripts/module-graph-patch.ts' in kilo_build
     assert 'OPENCODE_PKG="$OPENCODE_SRC/packages/cli"' in opencode_build
     assert '--os="*" --cpu="*"' in opencode_build
-    assert "@opentui/core-linux-arm64/libopentui.so" in opencode_build
+    assert "@opentui/core-linux-x64/libopentui.so" in opencode_build
     assert 'module graph still contains' in module_graph_patch
     assert 'total_byte_count does not match file size' in module_graph_patch
     assert 'module graph contains vulnerable' in bundle_validator
