@@ -992,3 +992,46 @@ como hace `build-opencode-android.ts`) y anexarlo a **nuestro bun Android 1.2.13
 **Interpretación del veredicto:** si `probe-trivial-android` arranca en el teléfono ⇒ wire-format
 compatible; B2 queda reducido a "¿1.2.13 construye v2?" (S2/S4). Si el trivial falla ⇒ CP-D:
 re-port Bun 1.4.2 (Zig→Rust) obligatorio. Sin `build-android.yml`, sin release.
+
+## B2 · H2.2 — matriz de emisores: 1.3.2 construye v2 y su grafo CARGA en el runtime canary (2026-10-07)
+
+Sonda `v2-probe-bun1213.yml` en modo matriz (emisores host 1.2.13/1.3.2/1.4.2 sobre
+nuestro bun Android 1.2.13-canary, fuente `d7b539a5`, artefacto verde de main
+`37412517206`). Corridas: `37571698205` (n4), `37572115762` (n5), `37572396191` (n6).
+
+Hallazgos con evidencia:
+
+1. **Grafo trivial 1.3.2 anexado corre en el teléfono**: `probe-trivial-1.3.2-android`
+   imprimió `PROBE_BUN_1.3.2_OK` (rc correcto) en tmux. Confirma la aritmética del pie
+   (`total_byte_count = filesize`, no longitud de grafo — el bug de la primera anexion
+   hacia que el runtime ignorara el grafo y mostrara help).
+2. **El árbol v2 se instala con los tres emisores** tras decatalog (`v2-decatalog.py`)
+   + lock propio + `bin/bun` en PATH para el postinstall `fix-node-pty` (rc=127 sin eso).
+3. **Compilación del CLI v2 (`packages/cli/src/index.ts`, `target:"bun"`, solid +
+   virtual-assets)**: 1.2.13 NO (bundler antiguo), **1.3.2 SÍ**, **1.4.2 SÍ**.
+4. **Layout del grafo por emisor** (volcado de los últimos 64 bytes en `50_assemble.txt`):
+   1.3.2 coincide con el parser del producto; 1.2.13 pone bits de flags donde 1.3.2 pone
+   `byte_count`; 1.4.2 (Rust) mueve el trailer fuera de `file_size-24..-8` — coherente con
+   el hallazgo estructural: el runtime 1.2.13 no leerá grafos 1.4.2 sin más.
+5. **El grafo v2 de 1.3.2 CARGA en el runtime canary**: `probe-v2-1.3.2-android` ejecutó
+   módulos desde `/$bunfs/root/index.js` y murió en `ReferenceError: undici is not
+   defined` (`__reExport(exports_Undici, undici)`) — exactamente el caso que
+   `patchAndroidModuleGraph` (pipeline 1.18) resuelve. La sonda no lo estaba aplicando.
+
+**Decisión**: la re-sonda (`8905f8a`, corrida n7) anexa con el código del producto
+(`patchAndroidModuleGraph` + `validateAndroidStandalone`). Si `probe-v2-1.3.2-android`
+levanta `--version`/TUI ⇒ **B2 colapsa a "emisor 1.3.2 + runtime actual" y el re-port
+Bun 1.4.2 (CP-D) NO es necesario**. Si el undici de v2 no cae del parche ⇒ se amplía
+`module-graph-patch.ts` (rama B2) o CP-D como fallback.
+
+## B3 · H2.3 — CERRADO (2026-10-07, `f4a38f5`)
+
+El guard no-string que el parche 0.4.5 inyectaba **ya lo publica upstream en 0.5.14**
+(literal en `chunk-bun-sjw2d9bq.js`/`chunk-node-80p7e6t6.js`). `patch-opentui-core-runtime.py`
+se reescribió como verificador: `verified` si el guard está, `patched` si reaparece el
+layout 0.4.5, **rc=1 ante cualquier tercer layout** (fuerza revisión, no nave ciegas).
+La llamada restante sin guard vive en `loadBundledFilePath` (ruta node) envuelta en
+try/catch upstream ⇒ degrada al fallback, no es objetivo. Evidencia: 10/10 unitarios +
+ejecución real contra el tarball 0.5.14 (`verified=2 patched=0 irrelevant=2`, rc=0) +
+`test-workflow-cache-contracts.py` verde. Pines `opentui-opencode`/`opentui_ref` =
+`31a93fbe` (0.5.14) ya correctos; sin cambios.
