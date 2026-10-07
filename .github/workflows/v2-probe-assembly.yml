@@ -47,6 +47,7 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/.probe-bin"
           install -m 0755 "$RUNNER_TEMP/hostsdk/bun-linux-x64/bun" "$GITHUB_WORKSPACE/.probe-bin/bun"
           echo "$GITHUB_WORKSPACE/.probe-bin" >> "$GITHUB_PATH"
+          export PATH="$GITHUB_WORKSPACE/.probe-bin:$PATH"
           test "$(bun --version)" = "$HOST_BUN_VERSION"
 
       - name: 'S1: recibir artefactos verdes de main (bun + opentui)'
