@@ -18,6 +18,13 @@
 name: V2 Probe (H2.0c / CP-C)
 
 on:
+  # Se dispara al pushear este propio archivo a la feature branch: GitHub lee el
+  # workflow desde el arbol del SHA empujado, asi que no requiere estar registrado
+  # en la rama por defecto. workflow_dispatch queda para re-ejecuciones manuales.
+  push:
+    branches: [feat/opencode-v2]
+    paths:
+      - .github/workflows/v2-probe.yml
   workflow_dispatch:
     inputs:
       upstream_commit:
