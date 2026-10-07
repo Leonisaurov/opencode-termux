@@ -109,10 +109,20 @@ jobs:
             echo "INSTALL_RESULT=fail" | tee -a "$L"
           fi
           tail -30 "$L"
-          echo "--- @opentui/core instalado? ---" | tee -a "$L"
-          find node_modules/@opentui -maxdepth 2 -name package.json 2>/dev/null | head | tee -a "$L"
-          find . -path '*/@opentui/core/parser.worker.js' 2>/dev/null | head -3 | tee -a "$L"
-          test -f node_modules/@opentui/core/package.json && grep '"version"' node_modules/@opentui/core/package.json | tee -a "$L" || echo "no node_modules/@opentui/core raiz (puede estar en packages/*)" | tee -a "$L"
+          # Reporting no-fatal: find|head puede SIGPIPE bajo pipefail y no debe
+          # abortar el paso antes de que corran los tests de compilacion.
+          {
+            echo "--- @opentui/core instalado? ---"
+            find node_modules/@opentui -maxdepth 2 -name package.json 2>/dev/null | head || true
+            find . -path '*/@opentui/core/parser.worker.js' 2>/dev/null | head -3 || true
+            if [ -f node_modules/@opentui/core/package.json ]; then
+              grep '"version"' node_modules/@opentui/core/package.json || true
+            else
+              echo "no node_modules/@opentui/core raiz (puede estar en packages/*)"
+            fi
+          } >>"$L" 2>&1
+          tail -15 "$L" || true
+          exit 0
 
       - name: 'CP-C test A: bun build --compile (bare) sobre el CLI v2'
         run: |
@@ -137,6 +147,7 @@ jobs:
           else
             echo "sin standalone" | tee -a "$L"
           fi
+          exit 0
 
       - name: 'CP-C test B: Bun.build({compile}) con solid plugin (shape de pipeline)'
         run: |
@@ -171,6 +182,7 @@ jobs:
           else
             echo "sin standalone-shape" | tee -a "$L"
           fi
+          exit 0
 
       - name: Volcar veredicto
         run: |
