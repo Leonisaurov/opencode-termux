@@ -1079,3 +1079,18 @@ emisor 1.3.2.
   rc=0** (limpieza del scratch local tras la prueba).
 - Límites: sigue siendo "runs --version en Bionic", no TUI completa (eso es B6). Degradados
   conocidos a revalidar: file watcher, fff, pty nativo (stub) y web-ui ausente.
+
+## B5 · H2.5 — CERRADO (2026-10-07)
+
+**Commit:** `0761fe6`. Pines movidos a la línea v2: `env.sh` (`OPENCODE_VERSION=2.0.24`,
+`OPENCODE_SOURCE_COMMIT=e7a34f09` — coherente con `ci/source-manifest.json` desde B1),
+defaults de `build-android.yml` (input `release` incluido ⇒ `stack-v2.0.24`),
+`build-opencode.yml` y `build-opencode-docker.yml`; `AGENTS.md`/`CLAUDE.md`/`README.md` y
+`releases/manifest.example.json` reflejan 2.0.24 y el emisor 1.3.2; fixture
+`test-installer.py` sobre `v2.0.24` (regex `v?\d+\.\d+\.\d+` ya lo aceptaba). Criterio de
+cierre: suites estáticas verdes + grep `1.18.34` sin residuos en rutas de producto.
+**Tag** `opencode-v2.0.24-android`: se crea con la publicación B6 (no publicar tags de
+producto antes de verificar en dispositivo). Consecuencia conocida: editar `env.sh`
+invalida las keys `ci-cache-v2-bun-core/bun` también en `main` la próxima vez — no
+contamina a `main` (caches scopeadas por rama) pero B6 en rama reconstruirá Bun desde
+bun-core (WebKit incluido): corrida de varias horas, dentro del diseño del DAG.
