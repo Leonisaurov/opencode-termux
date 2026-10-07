@@ -31,8 +31,19 @@ Hechos de upstream (tag `v2.0.24`): commit re-vendor `e7a34f09bfd9134dfade5a8ddb
 - [x] **B1 · H2.1** — re-vendor v2.0.24. **CERRADO 2026-10-07 (`6550ea3`).** `opencode/src` sustituido por `e7a34f09` (8067 ficheros; sin `.git` anidado; `node_modules` ignorado). Fix Termux porteado de `packages/core/src/global.ts` → `packages/util/src/global-roots.ts`. `ci/source-manifest.json`: opencode → `e7a34f09`. `validate-source-tree.py` OK (7 árboles). *Conocido pendiente:* `test-downstream-bundle-contracts.py` está rojo en `OPENCODE_WORKER` (ruta 1.18 inexistente) por diseño — lo cubre B4.
       **Cierre:** `validate-source-tree.py` + árbol limpio + grep sin residuos de 1.18.x.
 
-- [ ] **B2 · H2.2** — Bun 1.2.13 → 1.4.2. Re-vendor `bun/src` (tag 1.4.2) + **todos** los pines (`env.sh`, `setup-runner.sh`, `build-bun.yml`, `build-bun-target.yml`, `build-android.yml`, `build-opencode*.yml`, `build-kilo.yml`) + revalidar overlay WebKit/TinyCC/heap tagging. Bun 1.4.x es Rust ⇒ confirmar toolchain. **Ojo:** Kilo comparte Bun ⇒ congelar su pin o garantizarle el viejo.
-      **Cierre:** `build-bun.yml` verde artefacto Bionic + `test-workflow-cache-contracts.py`.
+- [~] **B2 · H2.2** — estrategia "Probe 1.2.13 primero" (decidida 2026-10-06): antes de re-portear
+      Bun, la sonda desechable `v2-probe-bun1213.yml` comprueba si **bun host 1.2.13** instala y
+      compila el árbol v2 y si el grafo resultante (same-version, preserve-bytes) corre sobre
+      **nuestro bun Android 1.2.13** en el teléfono. Hallazgo estructural: el grafo 1.4.2 (Rust)
+      **no** es legible por el runtime 1.2.13 (tabla reordenada + flags nuevos) ⇒ solo la vía
+      same-version puede colapsar B2.
+      **Cierre:** veredicto de la sonda en `PROGRESS.md` + corrida en dispositivo de
+      `probe-trivial-android` (y `probe-v2-android` si S4 emite). Si falla ⇒ CP-D: re-port Bun
+      1.4.2 (Zig→Rust): re-vendor `bun/src` (tag 1.4.2) + **todos** los pines (`env.sh`,
+      `setup-runner.sh`, `build-bun.yml`, `build-bun-target.yml`, `build-android.yml`,
+      `build-opencode*.yml`, `build-kilo.yml`) + revalidar overlay WebKit/TinyCC/heap tagging.
+      **Ojo:** Kilo comparte Bun ⇒ congelar su pin o garantizarle el viejo.
+      Cierre alternativo (CP-D): `build-bun.yml` verde artefacto Bionic + `test-workflow-cache-contracts.py`.
 
 - [ ] **B3 · H2.3** — OpenTUI 0.5.14: parche de runtime JS. Extraer cadenas reales de los chunks 0.5.14 (`chunk-node-*.js`, `index.node.js`, `node-assets.js`, `runtime-plugin*.node.js`); reescribir `ci/scripts/patch-opentui-core-runtime.py` + su test para el layout nuevo. Pin `env.sh` / `opentui_ref` a 0.5.14.
       **Cierre:** `test-patch-opentui-core-runtime.py` verde contra el artefacto 0.5.14 real.

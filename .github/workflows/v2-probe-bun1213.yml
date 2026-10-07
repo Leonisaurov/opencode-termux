@@ -1,0 +1,242 @@
+name: V2 Probe (B2 · grafo 1.2.13 sobre Bun Android 1.2.13)
+
+# Sonda desechable para B2 (estrategia "Probe 1.2.13 primero").
+# Pregunta: puede NUESTRO bun Android 1.2.13 (Zig) ejecutar un grafo de
+# modulo compilado por bun host 1.2.13 sobre el arbol v2.0.24?
+# Si si => B2 colapsa a un bump de pin de OpenCode y el re-port Bun
+# (Zig->Rust 1.4.2) NO es necesario. Si no => CP-D: re-port completo.
+# No publica nada: sube artefactos para ejecutar en el telefono.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/opencode-v2]
+    paths: [".github/workflows/v2-probe-bun1213.yml"]
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: v2-probe-bun1213-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  BUN_VERSION: "1.2.13"
+
+jobs:
+  bun-android:
+    uses: ./.github/workflows/build-bun.yml
+    with:
+      bun_version: "1.2.13"
+
+  probe:
+    needs: bun-android
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout del repo (fuente v2 vendida)
+        uses: actions/checkout@v4
+
+      - name: Preparar directorio de registro
+        run: |
+          set -euo pipefail
+          D="${RUNNER_TEMP}/v2-bun1213-probe"
+          mkdir -p "$D/logs" "$D/out"
+          echo "PROBE_DIR=$D" >> "$GITHUB_ENV"
+
+      - name: Recibir Bun Android 1.2.13 del job bun-android
+        uses: actions/download-artifact@v4
+        with:
+          name: bun-android-aarch64-1.2.13
+          path: ${{ env.RUNNER_TEMP }}/android-bun
+
+      - name: 'S0: verificar Bun Android (AArch64, 1.2.13)'
+        run: |
+          set -uo pipefail
+          L="$PROBE_DIR/logs/10_android_bun.txt"; : > "$L"
+          {
+            BUN_ANDROID="$(find "$RUNNER_TEMP/android-bun" -type f -name bun -print -quit)"
+            echo "bun-android: $BUN_ANDROID"
+            file "$BUN_ANDROID" || true
+            readelf -h "$BUN_ANDROID" | sed -n 's/^ *Class: *//p;s/^ *Machine: *//p'
+            cp "$BUN_ANDROID" "$PROBE_DIR/out/bun-android"
+            chmod +x "$PROBE_DIR/out/bun-android"
+            echo "ANDROID_BUN_OK"
+          } >> "$L" 2>&1 || true
+          cat "$L"
+          grep -q ANDROID_BUN_OK "$L" || exit 1
+          exit 0
+
+      - name: 'S1: instalar bun host 1.2.13 (Zig, glibc x64)'
+        run: |
+          set -uo pipefail
+          L="$PROBE_DIR/logs/20_host_bun.txt"; : > "$L"
+          {
+            curl -fsSL https://bun.sh/install | bash -s -- "bun-v1.2.13"
+            export PATH="$HOME/.bun/bin:$PATH"
+            echo "host bun: $(bun --version)"
+            test "$(bun --version)" = "1.2.13" && echo "HOST_BUN_OK"
+          } >> "$L" 2>&1 || true
+          cat "$L"
+          grep -q HOST_BUN_OK "$L" || exit 1
+          exit 0
+
+      - name: 'S2: bun install del workspace v2 CON 1.2.13'
+        run: |
+          set -uo pipefail
+          L="$PROBE_DIR/logs/30_install.txt"; : > "$L"
+          export PATH="$HOME/.bun/bin:$PATH"
+          cd "$GITHUB_WORKSPACE/opencode/src"
+          rc=0; timeout 25m bun install --frozen-lockfile >>"$L" 2>&1 || rc=$?
+          echo "frozen rc=$rc" >> "$L"
+          if [ "$rc" -ne 0 ]; then
+            rc=0; timeout 25m bun install >>"$L" 2>&1 || rc=$?
+            echo "suave rc=$rc" >> "$L"
+          fi
+          if [ "$rc" -eq 0 ]; then echo "INSTALL_RESULT=ok" >> "$L"; else echo "INSTALL_RESULT=fallo" >> "$L"; fi
+          tail -30 "$L"
+          grep -q 'INSTALL_RESULT=ok' "$L" || exit 1
+          exit 0
+
+      - name: 'S3: grafo trivial con 1.2.13 (control de wire-format, aislado del workspace)'
+        run: |
+          set -uo pipefail
+          L="$PROBE_DIR/logs/40_trivial.txt"; : > "$L"
+          export PATH="$HOME/.bun/bin:$PATH"
+          T="$PROBE_DIR/trivial"; mkdir -p "$T"
+          printf 'console.log("PROBE_BUN1213_OK")\n' > "$T/hello.ts"
+          cd "$T"
+          rc=0; timeout 5m bun build hello.ts --compile --outfile "$PROBE_DIR/out/probe-trivial-host" >>"$L" 2>&1 || rc=$?
+          echo "rc=$rc" >> "$L"
+          tail -20 "$L"
+          [ -f "$PROBE_DIR/out/probe-trivial-host" ] && echo "TRAILER=$(grep -qa -- '---- Bun! ----' "$PROBE_DIR/out/probe-trivial-host" && echo presente || echo ausente)" >> "$L"
+          grep -q 'TRAILER=presente' "$L" || exit 1
+          exit 0
+
+      - name: 'S4: grafo del CLI v2 (packages/cli) con bun 1.2.13'
+        run: |
+          set -uo pipefail
+          L="$PROBE_DIR/logs/50_v2compile.txt"; : > "$L"
+          export PATH="$HOME/.bun/bin:$PATH"
+          cd "$GITHUB_WORKSPACE/opencode/src"
+          cat > "$PROBE_DIR/build-probe.ts" <<'TS'
+          import { createSolidTransformPlugin } from "@opentui/solid/bun-plugin"
+          const virtualAssets = {
+            name: "opencode-virtual-assets",
+            setup(build: any) {
+              build.onResolve({ filter: /^virtual:opencode-app-assets$/ }, () => ({
+                path: "virtual:opencode-app-assets",
+                namespace: "opencode-virtual",
+              }))
+              build.onLoad({ filter: /.*/, namespace: "opencode-virtual" }, () => ({
+                contents: "export default {}",
+                loader: "js",
+              }))
+            },
+          }
+          const res = await Bun.build({
+            conditions: ["bun", "node"],
+            plugins: [virtualAssets, createSolidTransformPlugin()],
+            compile: {
+              autoloadBunfig: false,
+              autoloadDotenv: false,
+              autoloadTsconfig: true,
+              autoloadPackageJson: true,
+              outfile: process.env.PROBE_DIR + "/out/opencode-v2-shape",
+            },
+            entrypoints: ["./packages/cli/src/index.ts"],
+            define: {
+              OPENCODE_VERSION: "'2.0.24'",
+              OPENCODE_CHANNEL: "'latest'",
+              OPENCODE_LOCAL: "true",
+            },
+          })
+          console.log("success=" + res.success)
+          if (!res.success) for (const l of res.logs) console.error(l.message ?? l)
+          TS
+          rc=0; timeout 30m bun run "$PROBE_DIR/build-probe.ts" >>"$L" 2>&1 || rc=$?
+          echo "rc=$rc" >> "$L"
+          tail -40 "$L"
+          if [ -f "$PROBE_DIR/out/opencode-v2-shape" ]; then
+            echo "standalone: $(stat -c %s "$PROBE_DIR/out/opencode-v2-shape") bytes" >> "$L"
+            grep -qa -- '---- Bun! ----' "$PROBE_DIR/out/opencode-v2-shape" \
+              && echo "TRAILER=presente" >> "$L" || echo "TRAILER=ausente" >> "$L"
+          else
+            echo "sin standalone (1.2.13 no pudo construir el arbol v2)" >> "$L"
+          fi
+          exit 0
+
+      - name: 'S5: anexar grafos al Bun Android 1.2.13 (preserve-bytes, same-version)'
+        run: |
+          set -uo pipefail
+          L="$PROBE_DIR/logs/60_assemble.txt"; : > "$L"
+          {
+          node <<'NODE'
+          const fs = require("fs")
+          const path = require("path")
+          const out = process.env.PROBE_DIR + "/out"
+          const TRAILER = Buffer.from("\n---- Bun! ----\n")
+          const OFFSETS = 32
+          function extractGraph(file) {
+            const b = fs.readFileSync(file)
+            const trailerEnd = b.length - 8
+            if (!b.subarray(trailerEnd - TRAILER.length, trailerEnd).equals(TRAILER))
+              throw new Error("trailer ausente en " + file)
+            const oStart = trailerEnd - TRAILER.length - OFFSETS
+            const graphSize = Number(b.readBigUInt64LE(oStart)) + OFFSETS + TRAILER.length
+            return b.subarray(b.length - 8 - graphSize, b.length - 8)
+          }
+          const android = fs.readFileSync(path.join(out, "bun-android"))
+          const targets = [
+            ["probe-trivial-host", "probe-trivial-android"],
+            ["opencode-v2-shape", "probe-v2-android"],
+          ]
+          for (const [src, dst] of targets) {
+            const srcPath = path.join(out, src)
+            if (!fs.existsSync(srcPath)) { console.log(`SKIP ${src}: no emitido`); continue }
+            const g = extractGraph(srcPath)
+            const tail = Buffer.alloc(8)
+            tail.writeBigUInt64LE(BigInt(g.length))
+            fs.writeFileSync(path.join(out, dst), Buffer.concat([android, g, tail]))
+            fs.chmodSync(path.join(out, dst), 0o755)
+            console.log(`${dst}: +${g.length} bytes de grafo`)
+          }
+          NODE
+          } >> "$L" 2>&1 || true
+          cat "$L"
+          for f in probe-trivial-android; do
+            test -s "$PROBE_DIR/out/$f" || { echo "ERROR: $f ausente (la sonda trivial es obligatoria)"; exit 1; }
+          done
+          for f in "$PROBE_DIR"/out/probe-*-android; do
+            file "$f" | tee -a "$L"
+            readelf -h "$f" | sed -n 's/^ *Machine: *//p' | grep -q AArch64 || { echo "ERROR: $f no es AArch64"; exit 1; }
+            grep -qa -- '---- Bun! ----' "$f" || { echo "ERROR: $f sin trailer"; exit 1; }
+          done
+          exit 0
+
+      - name: Volcar veredicto
+        run: |
+          set -uo pipefail
+          V="$PROBE_DIR/logs/99_verdict.txt"; : > "$V"
+          {
+            echo "install-1.2.13-sobre-v2: $(grep -h 'INSTALL_RESULT=' "$PROBE_DIR/logs/30_install.txt" | head -1)"
+            echo "v2-compile-1.2.13: $(ls "$PROBE_DIR/out/opencode-v2-shape" >/dev/null 2>&1 && echo emitio-standalone || echo NO-emitio)"
+            echo "bun-android con grafos: $(ls "$PROBE_DIR"/out/probe-*-android 2>/dev/null | tr '\n' ' ')"
+            echo "CP-D: probe-trivial-android arranca en el telefono => wire-format 1.2.13 OK; entonces B2 depende solo de que 1.2.13 construya v2 (linea 'v2-compile')."
+            echo "Si probe-trivial-android falla en dispositivo => grafo incompatible => re-port Bun 1.4.2 (Zig->Rust) obligatorio."
+          } | tee "$V"
+
+      - name: Subir sondas y logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2-bun1213-probe-${{ github.run_number }}
+          path: ${{ env.PROBE_DIR }}/out/
+
+      - name: Subir logs del probe
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2-bun1213-probe-logs-${{ github.run_number }}
+          path: ${{ env.PROBE_DIR }}/logs/

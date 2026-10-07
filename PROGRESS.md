@@ -963,3 +963,32 @@ prefijo Termux pasa de `packages/core/src/global.ts` a su equivalente v2
 punterando a `packages/opencode/src/cli/tui/worker.ts` (inexistente en v2). Es exactamente el trabajo
 de B4 (entrada → `packages/cli`, worker → `server-process.ts`/`@opencode/tui`, migraciones en el
 grafo, plugin de assets virtual); no se despacha `build-android.yml` hasta tener B4+B5 verdes.
+
+### B2 · H2.2 — hallazgo estructural y sonda same-version (2026-10-07)
+
+Comparación directa de las dos implementaciones del grafo standalone:
+
+- 1.2.13 vendida (`bun/src/src/StandaloneModuleGraph.zig`, commit `d7b539a5`): entrada de tabla
+  `{ name, contents, sourcemap, bytecode, encoding, loader, module_format }`; `Offsets` =
+  `{ byte_count: usize, modules_ptr: StringPointer, entry_point_id: u32, compile_exec_argv_ptr,
+  flags: packed u32 }`; trailer `"\n---- Bun! ----\n"`.
+- 1.4.2 upstream (`src/standalone_graph/StandaloneModuleGraph.rs`, tag `bun-v1.4.2`): entrada
+  reordenada con `module_info` y `bytecode_origin_path` nuevos; `Offsets` conserva los cinco
+  campos al inicio pero `Flags` gana 7 bits nuevos (`HAS_SOURCE_HASHES`, `HAS_BUILTIN_BYTECODE`,
+  `HAS_STARTUP_MODULE_COUNT`, …). ⇒ **un grafo emitido por 1.4.2 no es legible por un runtime
+  1.2.13**: la entrada de tabla tiene otro layout y los flags desconocidos se descartan.**
+
+Consecuencia operativa (estrategia elegida "Probe 1.2.13 primero"): la sonda buena es
+**same-version** — compilar el árbol v2 con bun **host 1.2.13**, extraer el grafo (preserve-bytes,
+como hace `build-opencode-android.ts`) y anexarlo a **nuestro bun Android 1.2.13** del artefacto
+`bun-android-aarch64-1.2.13`. Workflow desechable `v2-probe-bun1213.yml` (no publica nada):
+
+1. S2: `bun install` del workspace v2 con 1.2.13 (el `bun.lock` está escrito por 1.4.2; se prueba
+   `--frozen-lockfile` y, si falla, install suave).
+2. S3: grafo trivial aislado (control puro de wire-format, sin tocar el workspace).
+3. S4: `Bun.build({compile})` de `packages/cli` con plugin de assets virtual + solid.
+4. S5: anexión de ambos grafos al bun Android y validación ELF AArch64 + trailer.
+
+**Interpretación del veredicto:** si `probe-trivial-android` arranca en el teléfono ⇒ wire-format
+compatible; B2 queda reducido a "¿1.2.13 construye v2?" (S2/S4). Si el trivial falla ⇒ CP-D:
+re-port Bun 1.4.2 (Zig→Rust) obligatorio. Sin `build-android.yml`, sin release.
