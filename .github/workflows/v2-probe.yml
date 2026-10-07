@@ -130,35 +130,51 @@ jobs:
           L="$PROBE_DIR/logs/30_compile_bare.txt"; : > "$L"
           cd upstream
           mkdir -p "$PROBE_DIR/out"
-          echo "cmd: bun build packages/cli/src/index.ts --compile --outfile $PROBE_DIR/out/opencode-bare" | tee -a "$L"
-          timeout 15m bun build packages/cli/src/index.ts --compile --outfile "$PROBE_DIR/out/opencode-bare" >>"$L" 2>&1
-          rc=$?
+          echo "cmd: bun build packages/cli/src/index.ts --compile (sin plugins)" | tee -a "$L"
+          # bash -e abortaria antes de rc=$?; capturar con || rc.
+          rc=0; timeout 15m bun build packages/cli/src/index.ts --compile --outfile "$PROBE_DIR/out/opencode-bare" >>"$L" 2>&1 || rc=$?
           echo "rc=$rc" | tee -a "$L"
           tail -40 "$L"
           if [ -f "$PROBE_DIR/out/opencode-bare" ]; then
             echo "standalone emitido: $(stat -c %s "$PROBE_DIR/out/opencode-bare") bytes" | tee -a "$L"
-            file "$PROBE_DIR/out/opencode-bare" | tee -a "$L"
-            # Verificar trailer del modulo grafo (la senal que consume module-graph-patch.ts)
+            file "$PROBE_DIR/out/opencode-bare" | tee -a "$L" || true
             if grep -qa -- '---- Bun! ----' "$PROBE_DIR/out/opencode-bare"; then
               echo "TRAILER=presente" | tee -a "$L"
             else
               echo "TRAILER=ausente" | tee -a "$L"
             fi
           else
-            echo "sin standalone" | tee -a "$L"
+            echo "sin standalone (esperado: virtual:opencode-app-assets sin plugin)" | tee -a "$L"
           fi
           exit 0
 
-      - name: 'CP-C test B: Bun.build({compile}) con solid plugin (shape de pipeline)'
+      - name: 'CP-C test B: Bun.build({compile}) con solid + virtual plugin (shape de pipeline)'
         run: |
           set -uo pipefail
           L="$PROBE_DIR/logs/40_compile_pipeline_shape.txt"; : > "$L"
           cd upstream
           cat > "$PROBE_DIR/build-probe.ts" <<'TS'
           import { createSolidTransformPlugin } from "@opentui/solid/bun-plugin"
+          // Provee el virtual que upstream hornea via packages/cli/script/app-assets.ts.
+          // Para el probe basta un default vacio: la pregunta es si bun emite un
+          // standalone con grafo extraible desde packages/cli, no el contenido del
+          // archivo web. El plugin real de assets entra en B4.
+          const virtualAssets = {
+            name: "opencode-virtual-assets",
+            setup(build: any) {
+              build.onResolve({ filter: /^virtual:opencode-app-assets$/ }, () => ({
+                path: "virtual:opencode-app-assets",
+                namespace: "opencode-virtual",
+              }))
+              build.onLoad({ filter: /.*/, namespace: "opencode-virtual" }, () => ({
+                contents: "export default {}",
+                loader: "js",
+              }))
+            },
+          }
           const res = await Bun.build({
             conditions: ["bun", "node"],
-            plugins: [createSolidTransformPlugin()],
+            plugins: [virtualAssets, createSolidTransformPlugin()],
             compile: {
               autoloadBunfig: false,
               autoloadDotenv: false,
@@ -167,18 +183,26 @@ jobs:
               outfile: process.env.PROBE_DIR + "/out/opencode-shape",
             },
             entrypoints: ["./packages/cli/src/index.ts"],
-            define: { OPENCODE_VERSION: "'2.0.24'", OPENCODE_CHANNEL: "'latest'" },
+            define: {
+              OPENCODE_VERSION: "'2.0.24'",
+              OPENCODE_CHANNEL: "'latest'",
+              OPENCODE_LOCAL: "true",
+            },
           })
           console.log("success=" + res.success)
           if (!res.success) for (const l of res.logs) console.error(l.message ?? l)
           TS
-          timeout 15m bun run "$PROBE_DIR/build-probe.ts" >>"$L" 2>&1
-          rc=$?
+          rc=0; timeout 15m bun run "$PROBE_DIR/build-probe.ts" >>"$L" 2>&1 || rc=$?
           echo "rc=$rc" | tee -a "$L"
           tail -40 "$L"
           if [ -f "$PROBE_DIR/out/opencode-shape" ]; then
             echo "standalone-shape: $(stat -c %s "$PROBE_DIR/out/opencode-shape") bytes" | tee -a "$L"
-            grep -qa -- '---- Bun! ----' "$PROBE_DIR/out/opencode-shape" && echo "TRAILER=presente" | tee -a "$L" || echo "TRAILER=ausente" | tee -a "$L"
+            file "$PROBE_DIR/out/opencode-shape" | tee -a "$L" || true
+            if grep -qa -- '---- Bun! ----' "$PROBE_DIR/out/opencode-shape"; then
+              echo "TRAILER=presente" | tee -a "$L"
+            else
+              echo "TRAILER=ausente" | tee -a "$L"
+            fi
           else
             echo "sin standalone-shape" | tee -a "$L"
           fi
