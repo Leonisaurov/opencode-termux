@@ -1,4 +1,3 @@
-import { statModel } from "@opencode-ai/stats-core/domain/model-normalization"
 import { query } from "@solidjs/router"
 
 export const modelCatalogSourceUrl = "https://models.opencode.ai/catalog.json"
@@ -25,8 +24,8 @@ export type ModelCatalogEntry = {
   limit?: { context?: number; output?: number }
   modalities: { input: string[]; output: string[] }
   openWeights: boolean
-  reasoning?: boolean
-  toolCall?: boolean
+  reasoning: boolean
+  toolCall: boolean
   attachment: boolean
   temperature: boolean
   cost?: ModelCatalogCost
@@ -54,7 +53,6 @@ export type ModelCatalogLab = {
 
 export type ModelCatalog = {
   models: ModelCatalogEntry[]
-  aliases?: ModelCatalogEntry[]
   labs: ModelCatalogLab[]
 }
 
@@ -73,16 +71,12 @@ export const getModelCatalog = query(async () => {
 }, "getModelCatalog")
 
 export function findModelCatalogEntry(catalog: ModelCatalog, model: string, lab?: string) {
-  const canonicalModel = statModel(model, undefined)
-  const normalizedId = lab
-    ? `${catalogLabSlug(lab)}/${catalogSlug(canonicalModel)}`
-    : canonicalModel.trim().toLowerCase()
-  const leaf = catalogSlug(canonicalModel)
+  const normalizedId = lab ? `${catalogLabSlug(lab)}/${catalogSlug(model)}` : model.trim().toLowerCase()
+  const leaf = catalogSlug(model)
   return (
     catalog.models.find((entry) => entry.id.toLowerCase() === normalizedId) ??
     catalog.models.find((entry) => (lab ? entry.lab === catalogLabSlug(lab) : true) && entry.slug === leaf) ??
-    catalog.models.find((entry) => entry.slug === leaf) ??
-    catalog.aliases?.find((entry) => (lab ? entry.lab === catalogLabSlug(lab) : true) && entry.slug === leaf)
+    catalog.models.find((entry) => entry.slug === leaf)
   )
 }
 
@@ -116,16 +110,6 @@ export function formatCatalogLabName(lab: string) {
   return known[catalogSlug(lab)] ?? lab.replace(/[-_]/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
-export function isProviderlessLab(lab: string | undefined) {
-  return !lab || catalogSlug(lab) === "unknown"
-}
-
-export function isKnownCatalogLab(lab: string | undefined, catalogLabs: readonly string[]) {
-  if (!lab || isProviderlessLab(lab)) return false
-  const key = catalogSlug(formatCatalogLabName(lab))
-  return catalogLabs.some((candidate) => catalogSlug(formatCatalogLabName(candidate)) === key)
-}
-
 export function catalogSlug(value: string) {
   return value
     .trim()
@@ -145,31 +129,13 @@ export function buildModelCatalog(payload: unknown, pricingPayload?: unknown, la
       cost:
         costs.get(catalogIdKey(model.id)) ??
         costs.get(`${model.lab}/${model.slug}`) ??
+        costs.get(`opencode-go/${model.slug}`) ??
         costs.get(model.slug) ??
         model.cost,
     }))
     .toSorted((a, b) => a.lab.localeCompare(b.lab) || displayDateTime(b.releaseDate) - displayDateTime(a.releaseDate))
   return {
     models,
-    // Contributor is a serving tier of these Muse models, with its own pricing.
-    // Keep aliases out of the model population used to normalize benchmark scores.
-    aliases: ["meta/muse-spark-1.2", "meta/muse-spark-1.3"].flatMap((id) => {
-      const model = models.find((entry) => entry.id === id)
-      if (!model) return []
-      const alias = `${id}-contributor`
-      return [
-        {
-          ...model,
-          id: alias,
-          slug: `${model.slug}-contributor`,
-          name: `${model.name} Contributor`,
-          cost:
-            costs.get(catalogIdKey(alias)) ??
-            costs.get(`${model.lab}/${model.slug}-contributor`) ??
-            costs.get(`${model.slug}-contributor`),
-        },
-      ]
-    }),
     labs: Object.values(
       models.reduce<Record<string, ModelCatalogLab>>((result, model) => {
         result[model.lab] = {
@@ -205,8 +171,8 @@ function readModelCatalogEntry(value: unknown): ModelCatalogEntry[] {
       limit: readCatalogLimit(value.limit),
       modalities: readCatalogModalities(value.modalities),
       openWeights: booleanValue(value.open_weights),
-      reasoning: typeof value.reasoning === "boolean" ? value.reasoning : undefined,
-      toolCall: typeof value.tool_call === "boolean" ? value.tool_call : undefined,
+      reasoning: booleanValue(value.reasoning),
+      toolCall: booleanValue(value.tool_call),
       attachment: booleanValue(value.attachment),
       temperature: booleanValue(value.temperature),
       cost: readCatalogCost(value.cost),

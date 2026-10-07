@@ -1,6 +1,6 @@
 import type { JSX } from "solid-js"
 import type { RGBA } from "@opentui/core"
-import { openUrl } from "@opencode-ai/core/open"
+import { openUrl } from "@opencode/util/open"
 
 export interface LinkProps {
   href: string
@@ -28,7 +28,7 @@ export function Link(props: LinkProps) {
         openUrl(props.href).catch(() => {})
       }}
     >
-      {displayText}
+      <a href={props.href}>{displayText}</a>
     </text>
   )
 }
