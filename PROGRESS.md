@@ -1045,3 +1045,37 @@ ejecución interactiva (tmux) ⇒ el CLI levanta y lanza el server de fondo, fal
 — artefacto opcional de plataforma del host embebido por el bundler; corresponde al swap de
 B4, no al wire-format. **B2 cerrado sin re-port Bun** (CP-D descartado): pin Android 1.2.13,
 emisor 1.3.2.
+
+## B4 · H2.4 — CERRADO (2026-10-07)
+
+**Commit:** `cf2cf3e` (adaptación) + `367b48e`/`407ff47` (sonda). **Sonda verde:** `37575020163`.
+
+- El grafo v2 viaja sin defines 1.18: la snapshot de models y las migraciones SQLite son
+  fuentes versionadas importadas por `packages/core`; el parser-worker de OpenTUI 0.5.14 se
+  resuelve como file asset dentro del bundle. Entrada única: `packages/cli/src/index.ts`.
+- Plugins espejo de `packages/cli/script/build.ts` (upstream): web-ui con assets `{}`
+  (canal `latest` ⇒ rutas de navegador responden 404; API/TUI intactas), `pty-binding` →
+  `export default undefined` (mata el crash Bionic de `@opencode-ai/pty` visto en B2; queda
+  fallback por PATH `opencode-pty`), watcher → require estático glibc (dlopen falla en
+  Bionic y `watcher.ts` degrada por su try/catch perezoso).
+- `build-opencode.sh`: `OPENCODE_PKG` → `packages/cli`; `bun install --os="*" --cpu="*"`
+  de `@opentui/core@catalog`/`@opencode-ai/pty` (resolución literal del catálogo); swap del
+  `libopentui.so` Android dentro de **`@opentui/core-linux-arm64`** — la rama que el
+  dispositivo selecciona por `process.platform/arch` con `OPENTUI_LIBC=glibc`.
+- Contratos: `test-downstream-bundle-contracts.py` reescrito para el layout v2 (prohíbe
+  `OPENCODE_WORKER_PATH`/`OTUI_TREE_SITTER_WORKER_PATH`/`OPENCODE_MIGRATIONS`/models-snapshot
+  y exige el stub pty + swap arm64). Verdes: bundle-contracts, changed-products, build-state,
+  source-tree, workflow-cache-contracts, module-graph-patch, `bash -n`, parseo del `.ts`.
+- Por qué la sonda: una corrida stand-alone de `build-opencode.yml` en rama NO puede
+  materializar Bun (el artifact vive en la corrida del DAG; la cache está scopeada por
+  rama) — `37574527406` falló en "Materialize and verify Bun artifact" sin tocar el código.
+  `v2-probe-assembly.yml` replica Receive/Materialize con `gh run download` de las corridas
+  verdes de main (bun `37412517206`, opentui `37491176567`) y corre el script de producto.
+- Evidencia de la corrida: install `4833` + `832` paquetes; guard OpenTUI
+  `verified=24 patched=0 irrelevant=24`; swap aplicado en
+  `node_modules/.bun/@opentui+core-linux-arm64@0.5.14/.../libopentui.so`; grafo 58.95 MB,
+  undici repairs=1; standalone AArch64 con `total_byte_count=file_size=156,552,762` y
+  `validate-standalone` OK. **En el teléfono, el artifact de la sonda: `opencode v2.0.24`
+  rc=0** (limpieza del scratch local tras la prueba).
+- Límites: sigue siendo "runs --version en Bionic", no TUI completa (eso es B6). Degradados
+  conocidos a revalidar: file watcher, fff, pty nativo (stub) y web-ui ausente.
