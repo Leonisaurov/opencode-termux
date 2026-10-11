@@ -107,7 +107,7 @@ def main() -> None:
     assert "ci/scripts/validate-android-bundle-142.py" in opcode_paths
     assert "ci/scripts/module-graph-patch.ts" not in opcode_paths
     assert "BUN_ANDROID_SHA256" in opcode_values
-    assert "HOST_BUN_VERSION" in opcode_values
+    assert "BUN_EMITTER_VERSION" in opcode_values
     assert "BUN_VERSION" not in opcode_values
     assert "OPENCODE_SOURCE_COMMIT" in opcode_values
     # ci/source-manifest.json aggregates every product commit. Including it in a

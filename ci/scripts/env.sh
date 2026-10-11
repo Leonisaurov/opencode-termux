@@ -52,11 +52,14 @@ export BUN_ANDROID_REVISION_MARKER="$(external_source_pin bun-android-release re
 export BUN_ANDROID_MIN_API="$(external_source_pin bun-android-release min_android_api)"
 export BUN_BASE_CACHE_NAME="$(external_source_pin bun-android-release fetch_cache_name)"
 export BUN_ANDROID_URL="https://github.com/Leonisaurov/bun-android/releases/download/${BUN_ANDROID_RELEASE}/${BUN_ANDROID_ASSET}"
-export HOST_BUN_VERSION="$(external_source_pin bun-host-emitter version)"
-export HOST_BUN_SHA256="$(external_source_pin bun-host-emitter sha256)"
-export HOST_BUN_URL="$(external_source_pin bun-host-emitter url)"
-test "$HOST_BUN_VERSION" = "$BUN_ANDROID_VERSION" || {
-  echo "ERROR: emitter ${HOST_BUN_VERSION} y base ${BUN_ANDROID_VERSION} divergen en el lock" >&2
+# HOST_BUN_VERSION is deliberately NOT set here: it is the era-Zig host 1.3.2
+# consumed by bun/ and Kilo (their workflows/setup-runner pin it). Sourcing
+# env.sh must not clobber the emitter each lane chose for itself.
+export OPENCODE_BUN_EMITTER_VERSION="$(external_source_pin bun-host-emitter version)"
+export OPENCODE_BUN_EMITTER_SHA256="$(external_source_pin bun-host-emitter sha256)"
+export OPENCODE_BUN_EMITTER_URL="$(external_source_pin bun-host-emitter url)"
+test "$OPENCODE_BUN_EMITTER_VERSION" = "$BUN_ANDROID_VERSION" || {
+  echo "ERROR: emitter ${OPENCODE_BUN_EMITTER_VERSION} y base ${BUN_ANDROID_VERSION} divergen en el lock" >&2
   exit 1
 }
 
@@ -139,7 +142,7 @@ echo "Bun version:   ${BUN_VERSION}"
 echo "Bun 142 base:  ${BUN_ANDROID_RELEASE} (${BUN_ANDROID_ASSET}, api>=${BUN_ANDROID_MIN_API})"
 echo "Bun 142 pin:   ${BUN_ANDROID_SHA256}"
 echo "Bun 142 base at: ${OPENCODE_BUN_BASE}"
-echo "Bun emitter:   ${HOST_BUN_VERSION}"
+echo "Bun emitter:   ${OPENCODE_BUN_EMITTER_VERSION}"
 echo "WebKit source: ${WEBKIT_COMMIT} + monorepo overlay"
 echo "OpenCode ver:  ${OPENCODE_VERSION}"
 echo "Cache schema:  ci-cache-v2"

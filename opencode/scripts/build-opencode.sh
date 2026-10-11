@@ -35,11 +35,22 @@ incremental_exec opencode \
     --input "$OPENCODE_BUN_BASE" \
     --input "$OPENTUI_SRC/packages/native/lib/aarch64-linux-android.24/libopentui.so" \
     --value "OPENCODE_VERSION=$OPENCODE_VERSION" \
-    --value "HOST_BUN_VERSION=$HOST_BUN_VERSION" \
+    --value "BUN_EMITTER_VERSION=$OPENCODE_BUN_EMITTER_VERSION" \
     --value "BUN_ANDROID_PIN=$BUN_ANDROID_SHA256" \
     --output "$DIST_DIR/opencode"
 
 HOST_BUN="${HOST_BUN:-bun}"
+
+# El emisor tiene que ser el 1.4.2 fijado en el lock: `--target=...-android` no
+# existe antes de 1.4.x y un host era-Zig 1.3.2 (el de bun/ y Kilo) muere con
+# "Unknown compile target" recién dentro de Bun.build. Fallar acá, temprano y con
+# el binario nombrado, evita ese fallo silencioso a mitad del bundling.
+HOST_BUN_ACTUAL="$("$HOST_BUN" --version 2>/dev/null || true)"
+if [ "$HOST_BUN_ACTUAL" != "$OPENCODE_BUN_EMITTER_VERSION" ]; then
+    echo "ERROR: emisor $HOST_BUN_ACTUAL != $OPENCODE_BUN_EMITTER_VERSION fijado ($HOST_BUN)" >&2
+    echo "       Este lane cross-compila con el Bun 1.4.2 del lock, no con el host era-Zig." >&2
+    exit 1
+fi
 
 echo "=== Building OpenCode v${OPENCODE_VERSION} for Android aarch64 ==="
 

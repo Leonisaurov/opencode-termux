@@ -40,7 +40,8 @@ env:
   PRODUCT: opencode
   # Bun is not a product of this lane anymore: the emitter and the Android base
   # are pinned by ci/external-sources.lock and read from it by ci/scripts/env.sh
-  # (BUN_ANDROID_*/HOST_BUN_*). The era-Zig 1.2.13 build stays for Kilo.
+  # (BUN_ANDROID_*/OPENCODE_BUN_EMITTER_*). The era-Zig 1.2.13 build stays for
+  # Kilo, whose lane keeps HOST_BUN_VERSION = 1.3.2.
   OPENTUI_REF: "${{ inputs.opentui_ref || '31a93fbe66992298d6d0f27481fa781f43d0c1e2' }}"
   OPENCODE_VERSION: "${{ inputs.opencode_version || '2.0.24' }}"
   ANDROID_API: "24"
@@ -99,7 +100,7 @@ jobs:
             --path opencode/scripts/make-packages.sh
             --path ci/scripts/env.sh --path .github/workflows/build-opencode.yml
             --value "OPENCODE_VERSION=$OPENCODE_VERSION"
-            --value "HOST_BUN_VERSION=$HOST_BUN_VERSION"
+            --value "BUN_EMITTER_VERSION=$OPENCODE_BUN_EMITTER_VERSION"
             --value "BUN_ANDROID_SHA256=$BUN_ANDROID_SHA256"
             --value "OPENTUI_REF=$OPENTUI_REF"
             --value "OPENCODE_SOURCE_COMMIT=$opencode_source_commit"
@@ -202,9 +203,9 @@ jobs:
           set -euo pipefail
           source ci/scripts/env.sh > /dev/null
           if [ ! -x "$HOME/.bun/bin/bun" ] \
-             || [ "$("$HOME/.bun/bin/bun" --version 2>/dev/null || true)" != "$HOST_BUN_VERSION" ]; then
-            curl -fsSL --retry 3 -o "$RUNNER_TEMP/bun-host.zip" "$HOST_BUN_URL"
-            echo "$HOST_BUN_SHA256  $RUNNER_TEMP/bun-host.zip" | sha256sum -c -
+             || [ "$("$HOME/.bun/bin/bun" --version 2>/dev/null || true)" != "$OPENCODE_BUN_EMITTER_VERSION" ]; then
+            curl -fsSL --retry 3 -o "$RUNNER_TEMP/bun-host.zip" "$OPENCODE_BUN_EMITTER_URL"
+            echo "$OPENCODE_BUN_EMITTER_SHA256  $RUNNER_TEMP/bun-host.zip" | sha256sum -c -
             unzip -q -o "$RUNNER_TEMP/bun-host.zip" -d "$RUNNER_TEMP/bun-host"
             mkdir -p "$HOME/.bun/bin"
             install -m 0755 "$RUNNER_TEMP/bun-host/bun-linux-x64/bun" "$HOME/.bun/bin/bun"
@@ -212,7 +213,7 @@ jobs:
           echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
           echo "BUN_INSTALL=$HOME/.bun" >> "$GITHUB_ENV"
           export PATH="$HOME/.bun/bin:$PATH"
-          test "$(bun --version)" = "$HOST_BUN_VERSION"
+          test "$(bun --version)" = "$OPENCODE_BUN_EMITTER_VERSION"
           echo ready=true >> "$GITHUB_OUTPUT"
 
       - name: Receive OpenTUI artifact
@@ -269,7 +270,13 @@ jobs:
       # Restore all remaining tools before paying for runner setup.
       - name: Install build dependencies
         if: steps.validate-opencode.outputs.ready != 'true'
-        run: source ci/scripts/setup-runner.sh
+        run: |
+          # setup-runner installs the era-Zig host (1.3.2) by default; this lane
+          # already pinned the 1.4.2 emitter, so hand it that version so it does
+          # not download and overwrite the emitter with the wrong Bun.
+          source ci/scripts/env.sh > /dev/null
+          export HOST_BUN_VERSION="$OPENCODE_BUN_EMITTER_VERSION"
+          source ci/scripts/setup-runner.sh
 
       # ── Build libopentui.so ───────────────────────────────────
       - name: Build libopentui.so
