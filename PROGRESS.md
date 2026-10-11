@@ -1150,3 +1150,38 @@ Cleanup pre-merge: retiradas las sondas desechables (`v2-probe-bun1213.yml`,
 `v2-probe-assembly.yml`, `v2-probe-build.sh`, `v2-decatalog.py`); 8 suites estáticas
 verdes tras el retiro. Tag `opencode-v2.0.24-android` sobre `5abfad6` (commit del que se
 publicó el asset). Merge a `main` ejecutado con B6 verde.
+
+### B7 · OpenCode compila con el Bun de `../bun` (1.4.2) por cross-compile nativo (2026-10-10, abierto)
+
+**Motivo.** `../bun` (`Leonisaurov/bun-android`) publicó `v1.4.2-android.1`: Bun 1.4.2
+(rewrite Rust), API 28, batería `a8-full` de 157 casos (148 PASS / 0 FAIL / 9 KNOWN) y
+`bun build --compile` medido rc=0 en el teléfono. Con Bun ya capaz de emitir targets
+android, el trasplante de grafo al EOF deja de ser necesario — es exactamente la salida
+que `README.md:364` anticipaba. El usuario autoriza mover el pin **consumido por OpenCode**
+(sin tocar la receta de build de bun) y desconectar el job `bun` del lane de OpenCode.
+
+**Hechos medidos antes de tocar nada.**
+- En 1.4.2 el grafo **no va al EOF**: se enlaza en la sección `.bun` dentro del `PT_LOAD`
+  RW (`../bun/docs/STANDALONE.md:19-39`). El lector era-Zig es "estructuralmente
+  insuficiente" sobre ese binario ⇒ esto no es un cambio de pin, es cambiar de mecanismo.
+- Assets de la release verificados en vivo con `gh release view`: `bun-aarch64-android`
+  289.397.512 B sha256 `3c61913c9420c578…`, `bun-linux-aarch64-android.tar.gz`
+  sha256 `404c41d38900af50…`. El teléfono reporta `ro.build.version.sdk=35`, así que el
+  piso API 28 del port no applications (hoy OpenCode baja a API 24).
+- El host del port trae ~190 MB de DWARF ⇒ hace falta `strip` antes de embutir
+  (`../bun/docs/STANDALONE.md:41-47`).
+- Bloqueador duro resuelto por diseño: OpenTUI lanza en `platform=android`
+  (`node-asset-target.ts:20-22` rechaza el nombre de plataforma **antes** del seam
+  `OTUI_ASSET_ROOT` y antes de cualquier `import`), así que un paquete alias
+  `@opentui/core-android-arm64` **por sí solo no alcanza**. Se resuelve en el bundler con
+  un plugin `onLoad` (precedente: `opencodePtyPlugin`/`parcelWatcherPlugin`), sin parchear
+  el checkout de OpenTUI.
+
+**Anclajes.** Tag `era-zig-opencode-pipeline-2026-10-10` sobre `7fe23dd` (rollback del
+pipeline era-Zig) y rama `feat/bun-142-native`, donde viven las sondas. `main` no recibe
+probes. Plan aprobado en `.qoder/plans/` (B7).
+
+**Pendiente.** Sonda de mecanismo `spike-bun142-native.yml` (A superficie del host 1.4.2,
+B target oficial, C inyección de la base parcheada por env/caché/registry/qemu, D plegado
+de OpenTUI, E scan undici) y sus puertas G1/G2. Nada se afirma hasta tener evidencia
+fechada en el teléfono.
