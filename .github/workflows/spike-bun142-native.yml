@@ -11,6 +11,11 @@ name: B7 spike · Bun 1.4.2 cross-compile nativo
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feat/bun-142-native
+    paths:
+      - .github/workflows/spike-bun142-native.yml
 
 concurrency:
   group: spike-bun142-${{ github.ref }}
