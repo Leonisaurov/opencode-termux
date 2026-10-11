@@ -1167,7 +1167,7 @@ que `README.md:364` anticipaba. El usuario autoriza mover el pin **consumido por
 - Assets de la release verificados en vivo con `gh release view`: `bun-aarch64-android`
   289.397.512 B sha256 `3c61913c9420c578…`, `bun-linux-aarch64-android.tar.gz`
   sha256 `404c41d38900af50…`. El teléfono reporta `ro.build.version.sdk=35`, así que el
-  piso API 28 del port no applications (hoy OpenCode baja a API 24).
+  piso API 28 del port no aplica (hoy OpenCode baja a API 24).
 - El host del port trae ~190 MB de DWARF ⇒ hace falta `strip` antes de embutir
   (`../bun/docs/STANDALONE.md:41-47`).
 - Bloqueador duro resuelto por diseño: OpenTUI lanza en `platform=android`
@@ -1181,7 +1181,59 @@ que `README.md:364` anticipaba. El usuario autoriza mover el pin **consumido por
 pipeline era-Zig) y rama `feat/bun-142-native`, donde viven las sondas. `main` no recibe
 probes. Plan aprobado en `.qoder/plans/` (B7).
 
-**Pendiente.** Sonda de mecanismo `spike-bun142-native.yml` (A superficie del host 1.4.2,
-B target oficial, C inyección de la base parcheada por env/caché/registry/qemu, D plegado
-de OpenTUI, E scan undici) y sus puertas G1/G2. Nada se afirma hasta tener evidencia
-fechada en el teléfono.
+**Sonda de mecanismo, primera iteración (2026-10-11, run `38112875770`, rama
+`feat/bun-142-native`).** El run previo `38112535656` murió en A por un rango inválido
+del `grep -E` (`@oven[bun/-a-z0-9]*` ⇒ rc=2 con `pipefail`), que hambreado B–E. Datos:
+
+- **Mecanismo confirmado (U1).** `bun build --compile --target=bun-linux-arm64-android`
+  con el host **oficial** 1.4.2 en runner linux-x64 da rc=0 y emite AArch64: ELF64
+  `DYN (PIE)`, `.bun` en `0x5450000`, `NEEDED libc.so/libm.so/libdl.so`, 2 `PT_LOAD`,
+  88.536.832 B. Las tres grafías (`…arm64-android`, `…aarch64-android`,
+  `bun-android-arm64`) son aceptadas y convergen a la misma base.
+- **El emisor y la base son del mismo commit upstream (cierra R3).** Host oficial
+  `bun-linux-x64.zip` sha256 `36368faef7527875…`, revisión `1.4.2+744846f84` — el mismo
+  `744846f8…` que `../bun` parchea.
+- **Strip de la base medido (R4 acotado).** `base-elf.raw` 289.397.512 B (sha
+  `3c61913c…` OK) → `aarch64-linux-gnu-strip --strip-debug` 102.294.896 B, con
+  `.bun`/`.dynsym`/`.dynamic` vivas, **0** secciones `.debug_*` y el marcador
+  `1.4.2-canary.1+0c087fdb9` presente (×2).
+- **G1 NO alcanzada: la base embutida sigue siendo la oficial.** `hello-c1` (env),
+  `hello-c2` (caché) y `hello-c3` (registry falso) pesan los mismos 88.536.832 B que el
+  probe oficial y llevan `1.4.2+744846f84=1` / `canary=0`. Causa medida, no suposición:
+  la huella real de B es **un archivo** en
+  `$HOME/.bun/install/cache/bun-linux-aarch64-android-v1.4.2` (nótese `aarch64`, no
+  `arm64`) y C2 sembró nombres equivocados; además B ya había llenado esa caché antes de
+  C1/C3, así que el *cache hit* corto-circuitó el env y ningún servidor local recibió
+  una sola petición (`c1-server.log` y `c3-server.log` vacíos). `BUN_COMPILE_TARGET_TARBALL_URL`
+  **sí sobrevivió** en el binario Rust (aparece en `strings`) junto a
+  `bun-linux-arm64-android` ⇒ el punto de inyección existe; hay que probarlo con `HOME`
+  aislado y el nombre exacto de caché.
+- **Hallazgo de diseño para OpenTUI (acota U4/R2).** Bajo `--target=…android` el
+  plegado **no embute ningún paquete nativo**: `@opentui/core-linux*`=0,
+  `core-linux-x64`=0, `OTUI_LIBC`=0 en el fold android, frente a `core-linux-x64`=4 en el
+  control sin target. La explicación es que el target especializa `process.platform` y el
+  bundler poda por DCE las ramas `linux`/`darwin`/`win32` de
+  `runtime-assets.bun.ts:46-78`; `OTUI_ASSET_ROOT` sigue en el grafo (7 apariciones) pero
+  es **inalcanzable** porque el guard de `node-asset-target.ts:20-22` lanza antes. ⇒ La
+  reescritura del bundler (P3.1) es necesaria y además debe producir una rama **inmune a
+  DCE** (import incondicional del paquete cuyo slot se intercambia, o rama android propia
+  con paquete alias). Hoy el `.so` Bionic llega por un accidente del host de build; con
+  target android eso desaparece y hay que decidirlo a propósito.
+- **R5 bajado a "verificar en dispositivo".** El patrón `__reExport(…)` que el parche de
+  bytes era-Zig reparaba da **0 coincidencias** en los 8 binarios producidos (grafos
+  1.4.2 enlazados, sin trailer al EOF) ⇒ no hay nada que parchear en el grafo; la
+  comprobación pendiente es de comportamiento en el teléfono.
+- **qemu-user (fallback C3 autorizado) aún no demuestra nada.** Sin sysroot android el
+  ELF no arranca (`qemu-aarch64-static: Could not open '/system/bin/linker64'`) y el paso
+  C4 no resolvió sysroot (`sysroot=<ninguno>`) ⇒ hay que armar un sysroot con el
+  `linker64` del NDK antes de dar por muerta o viva esa vía.
+
+**Iteración siguiente de la sonda (v2, escrita y disparada por push en esta rama).** C1′
+con `HOME` aislado + env; C2′ sembrando el nombre exacto `bun-linux-aarch64-android-v<versión>`
+en la caché y C2b dejándolo en el cwd (la ruta que `exePath()` reutiliza sin red); C3′ con
+el nombre real del paquete `@oven/bun-linux-aarch64-android` y su variante URL-encoded; C4′
+armado un sysroot ISO con el `linker64` que exista en el runner; D2 importando el slot
+`@opentui/core-linux-arm64` y midiendo si un `.so` dummy con canario queda embutido byte a
+byte (esto decide a qué ruta se aplica el swap Bionic en P3.6); F como control del DCE con
+stubs de 40 bytes. Puertas: G1 solo con `canary` en el standalone **y** tamaño 90–120 MB;
+G2 con el veredicto de D2 y F.

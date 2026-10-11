@@ -5,8 +5,15 @@ name: B7 spike · Bun 1.4.2 cross-compile nativo
 #      override de la base (BUN_COMPILE_TARGET_TARBALL_URL / override de registry)?
 #   B  ¿qué URL y qué ruta de caché usa para bajar la base del target?
 #   C  ¿se puede inyectar el ELF parcheado de Leonisaurov/bun-android como base?
+#      C1 env · C2/C2b caché y cwd · C3 registry · C4 qemu-user como emisor.
 #   D  ¿cómo pliega OpenTUI la resolución de su librería nativa bajo platform=android?
+#      D2: si el slot arm64 se embute de verdad (decide el swap del .so Bionic).
+#   F  control del DCE: qué forma de import sobrevive al --target.
 #   E  ¿queda el re-export roto de undici en un grafo 1.4.2 (sin parche de bytes)?
+# Iteración 2: la 1 (run 38112875770) dejó G1 sin cumplir — las tres vías de
+# inyección cayeron en la base oficial porque la caché del runner ya estaba
+# poblada y los nombres sembrados estaban mal escritos. Aquí todo corre con
+# HOME aislado y el nombre que B leyó de su propio log.
 # No publica nada ni toca el pipeline de main.
 
 on:
@@ -142,114 +149,177 @@ jobs:
           } > "$REPORT/c0-strip.txt" || true
           cat "$REPORT/c0-strip.txt"
 
-      - name: 'C1: base parcheada via BUN_COMPILE_TARGET_TARBALL_URL'
+      - name: 'C1: BUN_COMPILE_TARGET_TARBALL_URL con HOME aislado (sin cache hit)'
         continue-on-error: true
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP"
-          # Layout que espera bun: tarball npm con package/bin/bun
-          mkdir -p npm/package/bin
+          # Iteración 2: B ya había poblado la caché real, así que el env nunca se
+          # consultó. Se corre con HOME virgen y el nombre que reporta el compile.
+          rm -rf npm && mkdir -p npm/package/bin
           install -m 0755 base-elf npm/package/bin/bun
-          printf '{"name":"@oven/bun-linux-arm64-android","version":"%s","bin":{"bun":"bin/bun"}}\n' \
+          printf '{"name":"@oven/bun-linux-aarch64-android","version":"%s","bin":{"bun":"bin/bun"}}\n' \
             "${HOST_BUN_VERSION}" > npm/package/package.json
           tar -czf npm/package.tgz -C npm package
-          cd "$RUNNER_TEMP/spike"
+          HOME_ISO="$RUNNER_TEMP/home-c1"; rm -rf "$HOME_ISO"; mkdir -p "$HOME_ISO/.bun/install/cache"
           python3 -m http.server 8021 --directory "$RUNNER_TEMP/npm" > "$REPORT/c1-server.log" 2>&1 &
-          echo $! > "$REPORT/c1-server.pid"
-          sleep 1
-          BUN_COMPILE_TARGET_TARBALL_URL="http://127.0.0.1:8021/package.tgz" \
+          SRV=$!; sleep 1
+          cd "$RUNNER_TEMP/spike"
+          set +e
+          HOME="$HOME_ISO" BUN_COMPILE_TARGET_TARBALL_URL="http://127.0.0.1:8021/package.tgz" \
             "$RUNNER_TEMP/bun" build --compile --target=bun-linux-arm64-android hello.ts \
             --outfile hello-c1 > "$REPORT/c1-build.log" 2>&1
-          kill "$(cat "$REPORT/c1-server.pid")" || true
-          ls -l hello-c1 | tee -a "$REPORT/c1-build.log"
-          # Discriminadores de que la base embutida es la parcheada
+          echo "rc=$?" >> "$REPORT/c1-build.log"
+          kill "$SRV" 2>/dev/null || true
+          set -e
           {
-            echo '--- marcador de revision canary en el standalone ---'
-            grep -ac "$BUN_ANDROID_REVISION" hello-c1
-            echo '--- delta de tamano vs base oficial ---'
-            for f in hello-bun-linux-arm64-android hello-c1; do
-              [ -f "$f" ] && echo "$f $(stat -c%s "$f")"
-            done
+            echo '--- que dejo la corrida en el HOME aislado ---'
+            find "$HOME_ISO" -type f -printf '%p\t%s\n' | head -20
+            echo '--- peticiones recibidas por el servidor local ---'
+            cat "$REPORT/c1-server.log"
+            echo '--- tamano y linaje del standalone ---'
+            ls -l hello-c1 2>/dev/null || echo 'sin hello-c1'
+            echo "canary=$(grep -ac "$BUN_ANDROID_REVISION" hello-c1 2>/dev/null || true)"
+            echo "oficial=$(grep -ac '1.4.2+744846f84' hello-c1 2>/dev/null || true)"
           } >> "$REPORT/c1-build.log"
           cat "$REPORT/c1-build.log"
 
-      - name: 'C2: base parcheada pre-sembrada en el fetch cache de bun'
+      - name: 'C2: base parcheada sembrada en el fetch cache (nombre exacto de B)'
         continue-on-error: true
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP/spike"
-          # Reconstruye la ruta que B aprendio: <fetch cache>/<target-version-str>
-          CACHEDIR="$HOME/.bun/install/cache"
-          test -d "$CACHEDIR" || CACHEDIR="$HOME/.cache/bun"
-          STR="$(strings -a "$RUNNER_TEMP/bun" | grep -aoE 'bun-linux-arm64-android[^ ]{0,24}' | sort -u | head -1 || true)"
-          echo "candidate name from strings: ${STR:-<none>}" > "$REPORT/c2-seed.log"
-          mkdir -p "$CACHEDIR"
-          for NAME in "bun-linux-arm64-android-v${HOST_BUN_VERSION}" "bun-v${HOST_BUN_VERSION}-linux-arm64-android" "${STR:-noop}"; do
-            [ -n "$NAME" ] || continue
-            install -m 0755 "$RUNNER_TEMP/base-elf" "$CACHEDIR/$NAME"
-            echo "seeded $CACHEDIR/$NAME" >> "$REPORT/c2-seed.log"
+          # Iteración 2: B probó que la base vive en UN archivo de la caché de bun
+          # con el nombre que el propio log del compile imprime
+          # ("... compile hello-X bun-linux-aarch64-android-v1.4.2"). En la
+          # iteración 1 se sembraron nombres mal escritos (arm64 en vez de
+          # aarch64) y encima con la caché real ya poblada => bun nunca miró el
+          # seed. Aquí: HOME aislado + los nombres candidatos correctos.
+          HOME_ISO="$RUNNER_TEMP/home-c2"; rm -rf "$HOME_ISO"
+          CACHE="$HOME_ISO/.bun/install/cache"; mkdir -p "$CACHE"
+          : > "$REPORT/c2-seed.log"
+          for NAME in "bun-linux-aarch64-android-v${HOST_BUN_VERSION}" \
+                      "bun-linux-aarch64-android-${HOST_BUN_VERSION}" \
+                      "bun-linux-arm64-android-v${HOST_BUN_VERSION}"; do
+            install -m 0755 "$RUNNER_TEMP/base-elf" "$CACHE/$NAME"
+            echo "seeded $CACHE/$NAME $(stat -c%s "$CACHE/$NAME")" >> "$REPORT/c2-seed.log"
           done
-          sync; touch .marker2
-          "$RUNNER_TEMP/bun" build --compile --target=bun-linux-arm64-android hello.ts \
-            --outfile hello-c2 >> "$REPORT/c2-seed.log" 2>&1
-          echo '--- descargas nuevas durante esta corrida (debe ser 0) ---' >> "$REPORT/c2-seed.log"
-          find "$HOME/.bun" "$HOME/.cache" /tmp -xdev -newer .marker2 -type f 2>/dev/null \
-            | grep -av "$PWD" | head -20 >> "$REPORT/c2-seed.log" || true
-          grep -ac "$BUN_ANDROID_REVISION" hello-c2 >> "$REPORT/c2-seed.log" || true
-          ls -l hello-c2 >> "$REPORT/c2-seed.log" || true
+          set +e
+          HOME="$HOME_ISO" "$RUNNER_TEMP/bun" build --compile \
+            --target=bun-linux-arm64-android hello.ts --outfile hello-c2 \
+            >> "$REPORT/c2-seed.log" 2>&1
+          echo "rc=$?" >> "$REPORT/c2-seed.log"
+          set -e
+          {
+            echo '--- que dejo el HOME aislado (debe ser solo lo sembrado) ---'
+            find "$HOME_ISO" -type f -printf '%p\t%s\n' | head -20
+            echo '--- tamano y linaje del standalone ---'
+            ls -l hello-c2 2>/dev/null || echo 'sin hello-c2'
+            echo "canary=$(grep -ac "$BUN_ANDROID_REVISION" hello-c2 2>/dev/null || true)"
+            echo "oficial=$(grep -ac '1.4.2+744846f84' hello-c2 2>/dev/null || true)"
+          } >> "$REPORT/c2-seed.log"
           cat "$REPORT/c2-seed.log"
 
-      - name: 'C3: base parcheada via registry npm falso'
+      - name: 'C2b: base parcheada en el cwd (exePath sin descargar)'
         continue-on-error: true
         run: |
           set -euo pipefail
+          # El fuente era-Zig reutiliza un archivo YA presente en el directorio de
+          # trabajo antes de tocar la red. Si esto funciona, la base se inyecta sin
+          # env ni caché: el bundler prepara el cwd y bun compila sobre él.
+          cd "$RUNNER_TEMP/spike"
+          HOME_ISO="$RUNNER_TEMP/home-c2b"; rm -rf "$HOME_ISO"
+          mkdir -p "$HOME_ISO/.bun/install/cache"
+          install -m 0755 "$RUNNER_TEMP/base-elf" ./bun-linux-aarch64-android-v"${HOST_BUN_VERSION}"
+          set +e
+          HOME="$HOME_ISO" "$RUNNER_TEMP/bun" build --compile \
+            --target=bun-linux-arm64-android hello.ts --outfile hello-c2b \
+            > "$REPORT/c2b-seed.log" 2>&1
+          echo "rc=$?" >> "$REPORT/c2b-seed.log"
+          set -e
+          {
+            echo '--- linaje ---'
+            ls -l hello-c2b 2>/dev/null || echo 'sin hello-c2b'
+            echo "canary=$(grep -ac "$BUN_ANDROID_REVISION" hello-c2b 2>/dev/null || true)"
+            echo "oficial=$(grep -ac '1.4.2+744846f84' hello-c2b 2>/dev/null || true)"
+          } >> "$REPORT/c2b-seed.log"
+          cat "$REPORT/c2b-seed.log"
+
+      - name: 'C3: base parcheada via registry npm falso (HOME aislado)'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          # Iteración 2: el log del servidor quedó vacío en la corrida 1 porque la
+          # caché real ya tenía la base => bun no preguntó al registry. Con HOME
+          # virgen la pregunta tiene que ocurrir; el nombre del paquete es el que
+          # B leyó en su propio log: @oven/bun-linux-aarch64-android.
           cd "$RUNNER_TEMP/npm"
-          # Servicio estilo registry: metadata + tarball en la ruta que arma bun.
-          mkdir -p reg/@oven/bun-linux-arm64-android/-
-          cp package.tgz "reg/@oven/bun-linux-arm64-android/-/bun-linux-arm64-android-${HOST_BUN_VERSION}.tgz"
-          python3 - "$HOST_BUN_VERSION" <<'PY' > reg/@oven/bun-linux-arm64-android/index.json
-          import json, sys
-          v = sys.argv[1]
-          name = "@oven/bun-linux-arm64-android"
-          print(json.dumps({
-            "name": name,
-            "dist-tags": {"latest": v},
-            "versions": {v: {"name": name, "version": v, "dist": {
-              "tarball": f"http://127.0.0.1:8022/@oven/bun-linux-arm64-android/-/bun-linux-arm64-android-{v}.tgz"}}},
-          }))
-          PY
+          PKG="@oven/bun-linux-aarch64-android"
+          ENC="@oven%2fbun-linux-aarch64-android"
+          TARBALL="bun-linux-aarch64-android-${HOST_BUN_VERSION}.tgz"
+          rm -rf reg; mkdir -p "reg/$PKG/-" "reg/$ENC/-"
+          cp package.tgz "reg/$PKG/-/$TARBALL"
+          cp package.tgz "reg/$ENC/-/$TARBALL"
+          META=$(python3 -c 'import json,sys;print(json.dumps({"name":sys.argv[1],"dist-tags":{"latest":sys.argv[2]},"versions":{sys.argv[2]:{"name":sys.argv[1],"version":sys.argv[2],"dist":{"tarball":f"http://127.0.0.1:8022/{sys.argv[3]}/-/{sys.argv[4]}"}}}}))' \
+            "$PKG" "$HOST_BUN_VERSION" "$ENC" "$TARBALL")
+          printf '%s' "$META" > "reg/$PKG/index.json"
+          printf '%s' "$META" > "reg/$ENC/index.json"
+          HOME_ISO="$RUNNER_TEMP/home-c3"; rm -rf "$HOME_ISO"; mkdir -p "$HOME_ISO/.bun/install/cache"
           cd "$RUNNER_TEMP/spike"
           python3 -m http.server 8022 --directory "$RUNNER_TEMP/npm/reg" > "$REPORT/c3-server.log" 2>&1 &
-          echo $! > "$REPORT/c3-server.pid"
-          sleep 1
-          # bun resuelve la metadata en /<pkg> y el tarball en /<pkg>/-/<tgz>; el
-          # servidor plano no sirve index.json en la ruta del paquete, asi que se
-          # prueba primero tal cual y luego con el path explicito de metadata.
-          BUN_CONFIG_REGISTRY="http://127.0.0.1:8022" \
+          SRV=$!; sleep 1
+          set +e
+          HOME="$HOME_ISO" BUN_CONFIG_REGISTRY="http://127.0.0.1:8022" \
             "$RUNNER_TEMP/bun" build --compile --target=bun-linux-arm64-android hello.ts \
-            --outfile hello-c3 > "$REPORT/c3-build.log" 2>&1 || true
-          kill "$(cat "$REPORT/c3-server.pid")" || true
+            --outfile hello-c3 > "$REPORT/c3-build.log" 2>&1
+          echo "rc=$?" >> "$REPORT/c3-build.log"
+          set -e
+          kill "$SRV" 2>/dev/null || true
           {
-            echo '--- salida del build con registry falso ---'
-            cat "$REPORT/c3-build.log"
+            echo '--- peticiones recibidas por el registry falso ---'
+            cat "$REPORT/c3-server.log"
+            echo '--- que dejo el HOME aislado ---'
+            find "$HOME_ISO" -type f -printf '%p\t%s\n' | head -20
+            echo '--- linaje ---'
             ls -l hello-c3 2>/dev/null || echo 'sin hello-c3'
-            grep -ac "$BUN_ANDROID_REVISION" hello-c3 2>/dev/null || true
-          } | tee "$REPORT/c3-final.txt"
+            echo "canary=$(grep -ac "$BUN_ANDROID_REVISION" hello-c3 2>/dev/null || true)"
+            echo "oficial=$(grep -ac '1.4.2+744846f84' hello-c3 2>/dev/null || true)"
+          } >> "$REPORT/c3-build.log"
+          cat "$REPORT/c3-build.log"
 
       - name: 'C4: qemu-user con linker bionic del NDK'
         continue-on-error: true
         run: |
           set -euo pipefail
-          sudo apt-get install -y -qq android-libc-dev android-liblog >/dev/null 2>&1 || true
           cd "$RUNNER_TEMP/spike"
+          : > "$REPORT/c4-qemu.txt"
+          # El ELF pide /system/bin/linker64. qemu -L resuelve ese camino dentro
+          # del sysroot, asi que se arma un sysroot ISO con la estructura que
+          # espera bionic y se prueban los linker64 candidatos del runner.
+          ls -d "$ANDROID_NDK_HOME" /usr/local/lib/android/sdk/ndk/* /opt/android-ndk* \
+            /usr/aarch64-linux-android 2>/dev/null >> "$REPORT/c4-qemu.txt" || true
+          find / -xdev -name 'linker64' -type f 2>/dev/null | head -10 >> "$REPORT/c4-qemu.txt" || true
+          CAND="$(find / -xdev -name 'linker64' -type f -size +1M 2>/dev/null | head -1 || true)"
           SYSROOT=""
-          for C in /usr/aarch64-linux-android /opt/android-ndk*/toolchains/llvm/prebuilt/linux-x86_64/sysroot; do
-            [ -d "$C" ] && SYSROOT="$C" && break
-          done
-          echo "sysroot=${SYSROOT:-<ninguno>}" > "$REPORT/c4-qemu.txt"
+          if [ -n "$CAND" ]; then
+            SYSROOT="$RUNNER_TEMP/sysroot-iso"
+            mkdir -p "$SYSROOT/system/bin" "$SYSROOT/system/lib64" "$SYSROOT/system/lib"
+            install -m 0755 "$CAND" "$SYSROOT/system/bin/linker64"
+            echo "linker_candidato=$CAND" >> "$REPORT/c4-qemu.txt"
+          fi
+          echo "sysroot=${SYSROOT:-<ninguno>}" >> "$REPORT/c4-qemu.txt"
           test -n "$SYSROOT"
-          find "$SYSROOT" -name 'linker64' 2>/dev/null | head -3 >> "$REPORT/c4-qemu.txt"
-          qemu-aarch64-static -L "$SYSROOT" "$RUNNER_TEMP/base-elf" --version >> "$REPORT/c4-qemu.txt" 2>&1
+          qemu-aarch64-static -L "$SYSROOT" "$RUNNER_TEMP/base-elf" --version \
+            >> "$REPORT/c4-qemu.txt" 2>&1 || echo "rc_qemu=$?" >> "$REPORT/c4-qemu.txt"
+          # Variante con el libc.so del NDK montado como sysroot completo
+          for S in "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/linux-x86_64/sysroot \
+                   /usr/local/lib/android/sdk/ndk/*/toolchains/llvm/prebuilt/linux-x86_64/sysroot \
+                   /usr/aarch64-linux-android; do
+            [ -d "$S" ] || continue
+            echo "=== intento con sysroot=$S ===" >> "$REPORT/c4-qemu.txt"
+            qemu-aarch64-static -L "$S" "$RUNNER_TEMP/base-elf" --version \
+              >> "$REPORT/c4-qemu.txt" 2>&1 || echo "rc_qemu=$?" >> "$REPORT/c4-qemu.txt"
+          done
           cat "$REPORT/c4-qemu.txt"
 
       # ── D: plegado de OpenTUI bajo target android ──────────────────
@@ -296,6 +366,89 @@ jobs:
             || { find node_modules/@opentui/core -name '*asset-target*' 2>/dev/null | head -5 >> "$REPORT/d-opentui.txt" || true; }
           cat "$REPORT/d-opentui.txt"
 
+      # ── D2/F: lo que necesita P3.1 para ser escribible ─────────────
+      - name: 'D2: swap de bytes del slot arm64 — se embute en el standalone?'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/opentui-spike"; cd "$WORK"
+          : > "$REPORT/d2-slot-swap.txt"
+          # Natives de todas las plataformas, como hace el lane real.
+          "$RUNNER_TEMP/bun" install --os='*' --cpu='*' >> "$REPORT/d2-slot-swap.txt" 2>&1 || true
+          ARM_DIR="$(find node_modules -type d -name 'core-linux-arm64' 2>/dev/null | head -1 || true)"
+          echo "arm_dir=${ARM_DIR:-<no instalado>}" >> "$REPORT/d2-slot-swap.txt"
+          test -n "$ARM_DIR"
+          SO="$(find "$ARM_DIR" -name 'libopentui.so' | head -1)"
+          echo "so=$SO $(stat -c%s "$SO")" >> "$REPORT/d2-slot-swap.txt"
+          ls -l "$ARM_DIR" >> "$REPORT/d2-slot-swap.txt"
+          # El entrypoint importa el slot SIN ramas de platform: si bun se niega a
+          # embutir un native de otra arquitectura bajo --target android, esto lo
+          # muestra (U8). Y si un dummy con canary queda en el binario, el swap del
+          # .so Bionic va en ESTA ruta (decide el punto 6 de P3).
+          printf 'import mod from "@opentui/core-linux-arm64";\nconsole.log(mod);\n' > slot.ts
+          "$RUNNER_TEMP/bun" build --compile --target=bun-linux-arm64-android slot.ts \
+            --outfile folded-slot >> "$REPORT/d2-slot-swap.txt" 2>&1 || echo "rc_real=$?" >> "$REPORT/d2-slot-swap.txt"
+          {
+            echo "=== folded-slot (so real) ==="
+            ls -l folded-slot 2>/dev/null || echo 'sin folded-slot'
+            echo "libopentui_hits=$(grep -ac 'libopentui' folded-slot 2>/dev/null || true)"
+          } >> "$REPORT/d2-slot-swap.txt"
+          CANARY="OPENTUI-SLOT-CANARY-${GITHUB_RUN_ID}"
+          cp "$SO" "${SO}.host.bak"
+          python3 -c 'import sys;open(sys.argv[1],"wb").write((sys.argv[2]+"\n").encode()*20000)' \
+            "$SO" "$CANARY"
+          echo "dummy_so=$(stat -c%s "$SO")" >> "$REPORT/d2-slot-swap.txt"
+          "$RUNNER_TEMP/bun" build --compile --target=bun-linux-arm64-android slot.ts \
+            --outfile folded-slot-dummy >> "$REPORT/d2-slot-swap.txt" 2>&1 || echo "rc_dummy=$?" >> "$REPORT/d2-slot-swap.txt"
+          {
+            echo "=== folded-slot-dummy (canary) ==="
+            ls -l folded-slot-dummy 2>/dev/null || echo 'sin folded-slot-dummy'
+            echo "canary=$(grep -ac "$CANARY" folded-slot-dummy 2>/dev/null || true)"
+            echo "delta_vs_real=$(( $(stat -c%s folded-slot-dummy 2>/dev/null || echo 0) - $(stat -c%s folded-slot 2>/dev/null || echo 0) ))"
+          } >> "$REPORT/d2-slot-swap.txt"
+          mv "${SO}.host.bak" "$SO"
+          cat "$REPORT/d2-slot-swap.txt"
+
+      - name: 'F: control del DCE del target (por que la reescritura debe ser inmune)'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/dce"; rm -rf "$WORK"; mkdir -p "$WORK/node_modules/ctlstub"
+          cd "$WORK"
+          # Aisla el mecanismo con stubs de 40 bytes en lugar de 90 MB de OpenTUI:
+          # una rama process.platform se poda, un import incondicional sobrevive.
+          printf '{"name":"ctlstub","version":"1.0.0","main":"i.js"}\n' > node_modules/ctlstub/package.json
+          printf 'export default "DCE-CANARY-STUB";\n' > node_modules/ctlstub/i.js
+          cat > branchy.ts <<'TS'
+          if (process.platform === "linux" && process.arch === "x64") {
+            const m = await import("ctlstub");
+            console.log(m.default);
+          }
+          console.log("fin");
+          TS
+          cat > direct.ts <<'TS'
+          const m = await import("ctlstub");
+          console.log(m.default);
+          TS
+          {
+            echo "# F: presencia del stub en el grafo (DCE-CANARY-STUB)"
+            for SRC in branchy direct; do
+              for TAG in android host; do
+                if [ "$TAG" = android ]; then
+                  "$RUNNER_TEMP/bun" build --compile --target=bun-linux-arm64-android "$SRC.ts" \
+                    --outfile "out-$SRC-$TAG" > /dev/null 2>&1 || echo "rc!=0 $SRC $TAG"
+                else
+                  "$RUNNER_TEMP/bun" build --compile "$SRC.ts" --outfile "out-$SRC-$TAG" \
+                    > /dev/null 2>&1 || echo "rc!=0 $SRC $TAG"
+                fi
+                printf '%s %-8s canario=%s tamano=%s\n' "$SRC" "$TAG" \
+                  "$(grep -ac 'DCE-CANARY-STUB' "out-$SRC-$TAG" 2>/dev/null || true)" \
+                  "$(stat -c%s "out-$SRC-$TAG" 2>/dev/null || echo 0)"
+              done
+            done
+          } > "$REPORT/F-dce.txt" 2>&1
+          cat "$REPORT/F-dce.txt"
+
       # ── E: re-export roto de undici en grafo 1.4.2 ─────────────────
       - name: 'E: scan advisory del patron de undici'
         continue-on-error: true
@@ -327,21 +480,21 @@ jobs:
             echo "- host bun: $(cat "$REPORT/a-host-revision.txt" 2>/dev/null || echo sin-dato)"
             echo "- sha256 bun-linux-x64.zip: $(awk '{print $1}' "$REPORT/a-host-sha.txt" 2>/dev/null || echo sin-dato)"
             echo
-            for F in b-attempts c1-build c2-seed c3-build d-opentui E-undici c0-strip; do
-              P="$REPORT/$F.txt"
-              if [ -s "$P" ]; then
-                echo "## $F"
-                head -40 "$P"
+            for F in b-attempts c1-build c2-seed c2b-seed c3-build c4-qemu d-opentui d2-slot-swap F-dce E-undici c0-strip; do
+              P="$(ls "$REPORT/$F.txt" "$REPORT/$F.log" 2>/dev/null | head -1 || true)"
+              if [ -n "$P" ] && [ -s "$P" ]; then
+                echo "## ${P##*/}"
+                head -60 "$P"
                 echo
               fi
             done
-            echo "## Binarios producidas"
+            echo "## Binarios producidos"
             find "$RUNNER_TEMP/spike" -maxdepth 1 -name 'hello-*' -printf '%f\t%s\n' 2>/dev/null || true
             find "$RUNNER_TEMP/opentui-spike" -maxdepth 1 -name 'folded-*' -printf '%f\t%s\n' 2>/dev/null || true
           } > "$RUNNER_TEMP/VERDICTS.md"
           cat "$RUNNER_TEMP/VERDICTS.md"
 
-      - name: Suber reporte
+      - name: Subir reporte
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -352,7 +505,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Suber probes ejecutables (para el telefono)
+      - name: Subir probes ejecutables (para el telefono)
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -360,8 +513,10 @@ jobs:
           path: |
             ${{ runner.temp }}/spike/hello-c1
             ${{ runner.temp }}/spike/hello-c2
+            ${{ runner.temp }}/spike/hello-c2b
             ${{ runner.temp }}/spike/hello-c3
             ${{ runner.temp }}/spike/hello-bun-linux-arm64-android
             ${{ runner.temp }}/opentui-spike/folded-app-min-android
+            ${{ runner.temp }}/opentui-spike/folded-slot-dummy
           if-no-files-found: ignore
           retention-days: 14
