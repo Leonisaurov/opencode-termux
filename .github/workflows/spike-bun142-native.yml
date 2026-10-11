@@ -54,6 +54,7 @@ jobs:
 
       # ── A: qué acepta el host 1.4.2 ────────────────────────────────
       - name: 'A: host Bun 1.4.2 oficial y su superficie de --target'
+        continue-on-error: true
         run: |
           set -euo pipefail
           curl -fsSL -o "$RUNNER_TEMP/bun-host.zip" \
@@ -69,13 +70,14 @@ jobs:
             grep -aiE 'target|compile|--use|conditions|registry' "$REPORT/a-build-help.txt" || true
             echo '--- strings: env overrides y URLs de base ---'
             strings -a "$RUNNER_TEMP/bun" | grep -aoiE \
-              '[A-Z_]*COMPILE[A-Z_]*|[A-Z_]*BUN_CONFIG_REGISTRY[A-Z_]*|[A-Z_]*TARGET_TARBALL[A-Z_]*|registry\.npmjs\.org[^"]{0,40}|github\.com/oven-sh/bun/releases[^"]{0,40}|@oven[bun/-a-z0-9]*|bun-linux-[a-z0-9-]*android[a-z0-9-]*' \
-              | sort -u
+              '[A-Z_]*COMPILE[A-Z_]*|[A-Z_]*BUN_CONFIG_REGISTRY[A-Z_]*|[A-Z_]*TARBALL[A-Z_]*|[A-Z_]*BUN_[A-Z_]*|[A-Z_]*_TARGET[A-Z_]*|registry\.npmjs\.org[^"]{0,40}|github\.com/oven-sh/bun/releases[^"]{0,40}|@oven/[-a-z0-9]*|bun-linux-[a-z0-9-]*android[a-z0-9-]*' \
+              | sort -u || true
           } > "$REPORT/a-surface.txt" 2>&1
           cat "$REPORT/a-surface.txt"
 
       # ── B: cross-compile con base oficial ──────────────────────────
       - name: 'B: --target android con base oficial (huella de red y caché)'
+        continue-on-error: true
         run: |
           set -euo pipefail
           WORK="$RUNNER_TEMP/spike"; mkdir -p "$WORK"; cd "$WORK"
@@ -96,12 +98,12 @@ jobs:
           if [ -n "$BIN" ]; then
             {
               echo "bin=$BIN"; ls -l "$BIN"; sha256sum "$BIN"
-              readelf -h "$BIN" | grep -E 'Class|Machine|Type|Entry'
+              readelf -h "$BIN" | grep -aE 'Class|Machine|Type|Entry' || true
               echo '--- secciones ---'
               readelf -S "$BIN" | grep -aE '\.bun|\.text|section headers' || echo 'sin .bun'
               readelf -d "$BIN" | grep -aE 'NEEDED|INTERP' || true
-              readelf -l "$BIN" | grep -acE 'LOAD' | sed 's/^/carga_LOAD=/'
-            } >> "$REPORT/b-footprint.txt"
+              readelf -l "$BIN" | grep -acE 'LOAD' | sed 's/^/carga_LOAD=/' || true
+            } >> "$REPORT/b-footprint.txt" || true
           fi
           cat "$REPORT/b-footprint.txt"
 
@@ -137,7 +139,7 @@ jobs:
             readelf -S base-elf | grep -ac '\.debug_' | sed 's/^/debug_secciones_restantes=/'
             echo '--- linaje ---'
             grep -ac "$BUN_ANDROID_REVISION" base-elf | sed 's/^/marcador_revision=/'
-          } > "$REPORT/c0-strip.txt"
+          } > "$REPORT/c0-strip.txt" || true
           cat "$REPORT/c0-strip.txt"
 
       - name: 'C1: base parcheada via BUN_COMPILE_TARGET_TARBALL_URL'
@@ -257,7 +259,9 @@ jobs:
           set -euo pipefail
           WORK="$RUNNER_TEMP/opentui-spike"; mkdir -p "$WORK"; cd "$WORK"
           "$RUNNER_TEMP/bun" init -y >/dev/null 2>&1 || true
-          "$RUNNER_TEMP/bun" add "@opentui/core@${OPENTUI_VERSION}" >/dev/null 2>&1
+          "$RUNNER_TEMP/bun" add "@opentui/core@${OPENTUI_VERSION}" > "$REPORT/d-opentui.txt" 2>&1 \
+            || echo "bun add rc!=0 (sin dep, el plegado no es concluyente)" >> "$REPORT/d-opentui.txt"
+          test -d node_modules/@opentui/core
           cat > app.ts <<'TS'
           import { resolveNativeLibraryPath } from "@opentui/core/platform/runtime-assets.bun"
           console.log(resolveNativeLibraryPath())
@@ -289,7 +293,7 @@ jobs:
           } >> "$REPORT/d-opentui.txt"
           echo '--- fuentes de node-asset-target instaladas (guard que rechaza android) ---' >> "$REPORT/d-opentui.txt"
           sed -n '15,45p' node_modules/@opentui/core/dist/node-asset-target.js >> "$REPORT/d-opentui.txt" 2>/dev/null \
-            || find node_modules/@opentui/core -name '*asset-target*' | head -5 >> "$REPORT/d-opentui.txt"
+            || { find node_modules/@opentui/core -name '*asset-target*' 2>/dev/null | head -5 >> "$REPORT/d-opentui.txt" || true; }
           cat "$REPORT/d-opentui.txt"
 
       # ── E: re-export roto de undici en grafo 1.4.2 ─────────────────
