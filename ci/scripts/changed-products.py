@@ -48,12 +48,13 @@ def affected_products(changed: set[str]) -> set[str]:
         # OpenCode always consumes an OpenTUI artifact from this run, even
         # when the OpenTUI source itself did not change. Selecting the
         # producer avoids a skipped `needs` edge; its exact cache normally
-        # makes this a no-op.
-        affected.update({"core", "bun", "opentui", "opencode", "kilo"})
+        # makes this a no-op. The era-Zig Bun build feeds Kilo only: OpenCode
+        # cross-compiles against the runtime pinned in the external lock.
+        affected.update({"core", "bun", "opentui", "kilo"})
     if "opentui" in changed:
         affected.update({"core", "bun", "opentui", "opencode", "kilo"})
     if "opencode" in changed:
-        affected.update({"core", "bun", "opentui", "opencode"})
+        affected.update({"opentui", "opencode"})
     if "kilo" in changed:
         affected.update({"core", "bun", "kilo"})
     return affected

@@ -22,7 +22,7 @@
       "version": "2.0.24", "tag": "opencode-v2.0.24-android",
       "asset": "opencode-v2.0.24-android-aarch64.tar.gz",
       "sha256": "<sha256 del artifact publicado>",
-      "size": 0, "archive": "zip", "depends": ["bun", "opentui"], "files": ["opencode"]
+      "size": 0, "archive": "zip", "depends": [], "files": ["opencode"]
     },
     "kilo": {
       "version": "0.1.0", "tag": "kilo-v0.1.0-android",

@@ -1150,3 +1150,208 @@ Cleanup pre-merge: retiradas las sondas desechables (`v2-probe-bun1213.yml`,
 `v2-probe-assembly.yml`, `v2-probe-build.sh`, `v2-decatalog.py`); 8 suites estáticas
 verdes tras el retiro. Tag `opencode-v2.0.24-android` sobre `5abfad6` (commit del que se
 publicó el asset). Merge a `main` ejecutado con B6 verde.
+
+### B7 · OpenCode compila con el Bun de `../bun` (1.4.2) por cross-compile nativo (2026-10-10 → 2026-10-11, cerrado)
+
+**Motivo.** `../bun` (`Leonisaurov/bun-android`) publicó `v1.4.2-android.1`: Bun 1.4.2
+(rewrite Rust), API 28, batería `a8-full` de 157 casos (148 PASS / 0 FAIL / 9 KNOWN) y
+`bun build --compile` medido rc=0 en el teléfono. Con Bun ya capaz de emitir targets
+android, el trasplante de grafo al EOF deja de ser necesario — es exactamente la salida
+que `README.md:364` anticipaba. El usuario autoriza mover el pin **consumido por OpenCode**
+(sin tocar la receta de build de bun) y desconectar el job `bun` del lane de OpenCode.
+
+**Hechos medidos antes de tocar nada.**
+- En 1.4.2 el grafo **no va al EOF**: se enlaza en la sección `.bun` dentro del `PT_LOAD`
+  RW (`../bun/docs/STANDALONE.md:19-39`). El lector era-Zig es "estructuralmente
+  insuficiente" sobre ese binario ⇒ esto no es un cambio de pin, es cambiar de mecanismo.
+- Assets de la release verificados en vivo con `gh release view`: `bun-aarch64-android`
+  289.397.512 B sha256 `3c61913c9420c578…`, `bun-linux-aarch64-android.tar.gz`
+  sha256 `404c41d38900af50…`. El teléfono reporta `ro.build.version.sdk=35`, así que el
+  piso API 28 del port no aplica (hoy OpenCode baja a API 24).
+- El host del port trae ~190 MB de DWARF ⇒ hace falta `strip` antes de embutir
+  (`../bun/docs/STANDALONE.md:41-47`).
+- Bloqueador duro resuelto por diseño: OpenTUI lanza en `platform=android`
+  (`node-asset-target.ts:20-22` rechaza el nombre de plataforma **antes** del seam
+  `OTUI_ASSET_ROOT` y antes de cualquier `import`), así que un paquete alias
+  `@opentui/core-android-arm64` **por sí solo no alcanza**. Se resuelve en el bundler con
+  un plugin `onLoad` (precedente: `opencodePtyPlugin`/`parcelWatcherPlugin`), sin parchear
+  el checkout de OpenTUI.
+
+**Anclajes.** Tag `era-zig-opencode-pipeline-2026-10-10` sobre `7fe23dd` (rollback del
+pipeline era-Zig) y rama `feat/bun-142-native`, donde viven las sondas. `main` no recibe
+probes. Plan aprobado en `.qoder/plans/` (B7).
+
+**Sonda de mecanismo, primera iteración (2026-10-11, run `38112875770`, rama
+`feat/bun-142-native`).** El run previo `38112535656` murió en A por un rango inválido
+del `grep -E` (`@oven[bun/-a-z0-9]*` ⇒ rc=2 con `pipefail`), que hambreado B–E. Datos:
+
+- **Mecanismo confirmado (U1).** `bun build --compile --target=bun-linux-arm64-android`
+  con el host **oficial** 1.4.2 en runner linux-x64 da rc=0 y emite AArch64: ELF64
+  `DYN (PIE)`, `.bun` en `0x5450000`, `NEEDED libc.so/libm.so/libdl.so`, 2 `PT_LOAD`,
+  88.536.832 B. Las tres grafías (`…arm64-android`, `…aarch64-android`,
+  `bun-android-arm64`) son aceptadas y convergen a la misma base.
+- **El emisor y la base son del mismo commit upstream (cierra R3).** Host oficial
+  `bun-linux-x64.zip` sha256 `36368faef7527875…`, revisión `1.4.2+744846f84` — el mismo
+  `744846f8…` que `../bun` parchea.
+- **Strip de la base medido (R4 acotado).** `base-elf.raw` 289.397.512 B (sha
+  `3c61913c…` OK) → `aarch64-linux-gnu-strip --strip-debug` 102.294.896 B, con
+  `.bun`/`.dynsym`/`.dynamic` vivas, **0** secciones `.debug_*` y el marcador
+  `1.4.2-canary.1+0c087fdb9` presente (×2).
+- **G1 NO alcanzada: la base embutida sigue siendo la oficial.** `hello-c1` (env),
+  `hello-c2` (caché) y `hello-c3` (registry falso) pesan los mismos 88.536.832 B que el
+  probe oficial y llevan `1.4.2+744846f84=1` / `canary=0`. Causa medida, no suposición:
+  la huella real de B es **un archivo** en
+  `$HOME/.bun/install/cache/bun-linux-aarch64-android-v1.4.2` (nótese `aarch64`, no
+  `arm64`) y C2 sembró nombres equivocados; además B ya había llenado esa caché antes de
+  C1/C3, así que el *cache hit* corto-circuitó el env y ningún servidor local recibió
+  una sola petición (`c1-server.log` y `c3-server.log` vacíos). `BUN_COMPILE_TARGET_TARBALL_URL`
+  **sí sobrevivió** en el binario Rust (aparece en `strings`) junto a
+  `bun-linux-arm64-android` ⇒ el punto de inyección existe; hay que probarlo con `HOME`
+  aislado y el nombre exacto de caché.
+- **Hallazgo de diseño para OpenTUI (acota U4/R2).** Bajo `--target=…android` el
+  plegado **no embute ningún paquete nativo**: `@opentui/core-linux*`=0,
+  `core-linux-x64`=0, `OTUI_LIBC`=0 en el fold android, frente a `core-linux-x64`=4 en el
+  control sin target. La explicación es que el target especializa `process.platform` y el
+  bundler poda por DCE las ramas `linux`/`darwin`/`win32` de
+  `runtime-assets.bun.ts:46-78`; `OTUI_ASSET_ROOT` sigue en el grafo (7 apariciones) pero
+  es **inalcanzable** porque el guard de `node-asset-target.ts:20-22` lanza antes. ⇒ La
+  reescritura del bundler (P3.1) es necesaria y además debe producir una rama **inmune a
+  DCE** (import incondicional del paquete cuyo slot se intercambia, o rama android propia
+  con paquete alias). Hoy el `.so` Bionic llega por un accidente del host de build; con
+  target android eso desaparece y hay que decidirlo a propósito.
+- **R5 bajado a "verificar en dispositivo".** El patrón `__reExport(…)` que el parche de
+  bytes era-Zig reparaba da **0 coincidencias** en los 8 binarios producidos (grafos
+  1.4.2 enlazados, sin trailer al EOF) ⇒ no hay nada que parchear en el grafo; la
+  comprobación pendiente es de comportamiento en el teléfono.
+- **qemu-user (fallback C3 autorizado) aún no demuestra nada.** Sin sysroot android el
+  ELF no arranca (`qemu-aarch64-static: Could not open '/system/bin/linker64'`) y el paso
+  C4 no resolvió sysroot (`sysroot=<ninguno>`) ⇒ hay que armar un sysroot con el
+  `linker64` del NDK antes de dar por muerta o viva esa vía.
+
+**Iteración 2 de la sonda (2026-10-11, run `38115779161`). G1 y G3 cumplidas.** Con
+`HOME` aislado y el nombre de caché que B leyó de su propio log, la base parcheada **sí**
+se inyecta y **sí** corre en el teléfono:
+
+- **C1 (env, vía canónica).** `BUN_COMPILE_TARGET_TARBALL_URL=http://127.0.0.1:8021/package.tgz`
+  con layout npm `package/bin/bun` sobre la base stripeada: el servidor local registró
+  `GET /package.tgz → 200`, el standalone pesa **104.227.488 B** (dentro del presupuesto
+  90–120 MB), `canary=2` y `oficial=0`. Bun dejó la base en
+  `$HOME/.bun/install/cache/bun-linux-aarch64-android-v1.4.2` (102.294.896 B).
+- **C2 (sembrar esa caché) y C2b (dejar el archivo en el cwd)** producen el mismo binario
+  **sin tocar la red** ⇒ son la vía hermética para CI: ni servidor ni env, solo escribir el
+  ELF en la caché. La grafía buena es `aarch64` con sufijo `-v<versión>`.
+- **Discriminador en dispositivo (G3).** `hello-c1`, `hello-c2`, `hello-c2b` y `hello-c3`
+  ejecutados en el teléfono imprimen
+  `{"p":"android","a":"arm64","v":"1.4.2","r":"0c087fdb9f371421195194a696b4363a8c6d1f7d"}`
+  rc=0 — el commit del port. El control con base oficial
+  (`hello-bun-linux-arm64-android`) imprime `r":"744846f84437…"` y también corre: ambas
+  bases levantan, lo que cambia es el linaje embutido. `bun --revision` del teléfono
+  (`~/.local/bin/bun`) reporta `1.4.2-canary.1+0c087fdb9`, el mismo linaje.
+- **D2: el slot arm64 se embute y ahí va el swap Bionic.** `bun install --os='*' --cpu='*'`
+  deja `node_modules/@opentui/core-linux-arm64/libopentui.so` (5.907.256 B). Un entrypoint
+  que importa el paquete **sin ramas de platform**, con `--target=…android`, produce
+  94.435.072 B con `libopentui_hits=7`; al sustituir ese `.so` por un dummy de 640 KB con
+  canario, el canario aparece **20.000 veces** y el tamaño baja 5.308.416 B ⇒ el grafo lleva
+  los bytes exactos de ese archivo y bun no valida la arquitectura del ELF (cierra U8). En
+  runtime el standalone lo expone como `/$bunfs/root/libopentui-ahxdf6ax.so` y el probe corrió
+  rc=0 aquí. ⇒ En P3 el swap se aplica a `@opentui/core-linux-arm64`, no a `core-linux-x64`.
+- **F: el DCE del target es literal (fija la forma de la reescritura P3.1).** Con stubs de
+  40 bytes: `if (process.platform === "linux" …) import("ctlstub")` bajo `--target=…android`
+  ⇒ canario **0**; el mismo import **incondicional** ⇒ canario **1**; sin target, 1 en ambos.
+  La reescritura del bundler no puede ser una rama `android`: tiene que ser un import
+  incondicional del slot.
+- **C3 inconcluso por contaminación propia:** el archivo que C2b dejó en el cwd seguía ahí y
+  bun lo reutilizó (el registry falso no recibió peticiones). No importa: C1/C2 cubren la
+  inyección.
+- **C4: la vía qemu-user está muerta en el runner** — no hay ningún `linker64` que encontrar
+  (`find / -xdev -name linker64` vacío, `sysroot=<ninguno>`). El ladder de R1 se resolvió en
+  el primer peldaño, así que no hace falta.
+- **E reafirmado:** `reExport_hits=0` en los 11 binarios de la corrida, incluidos los
+  embutidos con la base parcheada ⇒ R5 queda como verificación de comportamiento en
+  dispositivo, no como parche de grafo.
+
+**Consecuencia para P3.** Mecanismo fijado: host Bun 1.4.2 oficial + base = ELF de la release
+`v1.4.2-android.1` stripeado y sembrado en la caché de bun (sin red, sin env),
+`--target=bun-linux-arm64-android`, swap del `.so` Bionic sobre `@opentui/core-linux-arm64`
+y reescritura `onLoad` con import incondicional. El OpenTUI plegado mide 93.845.248–94.435.072 B,
+lo que deja margen para el grafo real de OpenCode dentro del presupuesto de P4 (130–170 MB).
+
+#### P3 · validación local del mecanismo, en el teléfono (2026-10-11)
+
+Sin CI: los archivos pinneados ya están en la máquina del porteo y `llvm-strip`/`readelf`
+existen en Termux, así que las partes deterministas se pueden medir aquí.
+
+- **El pin del lock es el binario que corre el teléfono**: `sha256sum ~/.local/bin/bun` =
+  `3c61913c9420c578536225e4f11a85ecf9619a26f6c0094d06b06bff30de31f9`, idéntico al
+  `bun-aarch64-android` pineado ⇒ `materialize-bun-base.sh` no está fijando una variante
+  distinta de la que ya se validó en G3.
+- **`materialize-bun-base.sh` corre de punta a punta con rc=0** (`--dir $TMPDIR/b7-base`,
+  con el crudo como enlace simbólico para no volver a descargar): strip → 102.294.152 B,
+  las siete puertas `readelf` en verde (ELF64/AArch64/ET_DYN/`libc.so`/`.bun`/`.dynsym`,
+  0 secciones `.debug_*`) y el marcador `1.4.2-canary.1+0c087fdb9` presente. Difiere en
+  744 B del stripeado de CI (102.294.896 B) porque Termux usa su propio `llvm-strip`:
+  el sha del crudo es el que se fija, el del stripped no puede pinnearse.
+- **El `--target` android lo acepta también el runtime android**, no solo el emisor linux-x64
+  (medición local, rc=0): `hello` compilado en el teléfono con la grafía elegida mide
+  291.330.104 B, lleva la sección `.bun` y **ejecuta** imprimiendo
+  `{"p":"android","a":"arm64","v":"1.4.2"}`. Un target inventado da rc=1 ⇒ el flag no se
+  ignora. No es la vía de producción: con host == target bun embute su propio ELF sin strip
+  (+187 MB); el emisor sigue siendo el host linux-x64 con la base sembrada.
+- **Las grafías `bun-aarch64-linux-android` y `bun-linux-aarch64-android` también dan rc=0
+  sobre el host android.** Aquí no se puede afirmar lo contrario de CI: en el runner oficial
+  solo se probó la grafía elegida, que es la que queda fijada.
+- **La reescritura de OpenTUI se probó contra los chunks publicados reales**
+  (`@opentui/core@0.5.14`: `chunk-bun-sjw2d9bq.js`, `chunk-node-80p7e6t6.js`,
+  `chunk-bun-j2z63cdy.js`) con el código extraído del bundler: el chunk *bun* se reescribe
+  (709.709 → 708.746 B, ramas de plataforma fuera, import incondicional del slot, objetivo
+  re-mapeado, helper `getOpenTUILib` intacto), los otros dos devuelven `null` y la operación
+  es idempotente. **Hallazgo que habría roto el build:** el chunk *node* también define
+  `resolveNativeLibraryPath` pero sin la rama ni el `throw` final; el filtro del plugin lo
+  cargaba y el rewrite lanzaba. Se discrimina por contenido (presencia del `throw` de
+  plataforma), no por nombre de archivo.
+- **La validación del standalone ya no toca el grafo.** `extractAndroidModuleGraph`
+  (trailer al EOF) es imposible sobre un binario 1.4.2, así que el bundler afirma ELF64 +
+  AArch64 + ET_DYN + linaje de la base + **una ventana de 4 KiB del `.so` Bionic
+  intercambiado presente byte a byte en el binario**. Esa última es la prueba de que el swap llegó al
+  grafo; sin ella un slot mal resuelto embarcaría la librería glibc del host.
+
+#### P4 · ensamble real y dispositivo — G4 y G5 (2026-10-11, run `38128420105`)
+
+El lane de OpenCode ya no depende del artifact de Bun, así que `build-opencode.yml`
+corre solo en la rama (con su fallback de OpenTUI) y **es** el ensamble real, no
+una sonda aparte.
+
+- **Primer intento en rojo, con causa exacta (run `38128025993`).** El mecanismo ya
+  estaba medido, pero el producto murió en
+  `Bun.build({ compile: { target: "bun-linux-arm64-android" } })` con
+  `TypeError: Unknown compile target` bajo `Bun v1.3.2`: `setup-runner.sh` instala
+  por defecto el host era-Zig `1.3.2`, y `env.sh` había bautizado el pin del lock
+  (1.4.2) con el **mismo** nombre `HOST_BUN_VERSION`, así que al sourcearlo el lane
+  perdía la variable y `setup-runner` bajaba 1.3.2 encima del emisor 1.4.2 del paso
+  anterior. Fix `18c3ad7`: el pin del lock pasa a `OPENCODE_BUN_EMITTER_*`,
+  `HOST_BUN_VERSION` queda como el host era-Zig de `bun/` y Kilo, y
+  `build-opencode.sh` **afirma el emisor** antes de instalar/bundlear (falla
+  temprano y nombrando el binario en vez de a mitad de `Bun.build`).
+- **G4 (run `38128420105`, verde).** `materialize-bun-base.sh` → base stripeada
+  102.294.152 B con el marcador `1.4.2-canary.1+0c087fdb9`; swap del `.so` sobre
+  `.bun/@opentui+core-linux-arm64@0.5.14/node_modules/@opentui/core-linux-arm64`;
+  `Bun.build` emite **168.189.880 B (160,4 MiB)**, dentro del presupuesto 130–170 MB;
+  el bundler imprime `Standalone validation: OK (base lineage 1.4.2-canary.1+0c087fdb9)`
+  y `readelf` da ELF64 `DYN (PIE)`, AArch64, `interpreter /system/bin/linker64`,
+  **for Android 28, built by NDK r27c**; `validate-android-bundle-142.py` verde
+  (marcador + sección `.bun` + ventana de 4 KiB del `.so` Bionic).
+- **G5 (teléfono, el mismo artifact del run, 168.189.880 B).** `opencode --version`
+  ⇒ `opencode v2.0.24` rc=0; el binario lleva el marcador `1.4.2-canary.1+0c087fdb9`
+  ×2; TUI completa renderizada en tmux 120x32 (logo OpenCode, prompt, modelo,
+  status bar, `2.0.24`); `opencode.db` con **48 migraciones**, `session_v2` y
+  `event_sequence` presentes; y sesión real
+  `opencode run -m opencode/mimo-v2.6-flash-free` ⇒ `TERMUXOK` rc=0. Que la TUI
+  cargue `libopentui.so` desde el slot arm64 es la prueba de que el swap llegó al
+  grafo: cierra R2/U4 de punta a punta, no solo en el mecanismo.
+
+**Cierre.** Sonda desechable `spike-bun142-native.yml` retirada antes del cutover
+(precedente B6, `51e4510`). El PR atómico a `main` lleva lock + scripts + workflows
++ guardias + docs; el tag `era-zig-opencode-pipeline-2026-10-10` sobre `7fe23dd` es
+el ancla de rollback y Kilo conserva vivo el trasplante.
+
+

@@ -8,6 +8,25 @@
     "tinycc": {
       "remote": "https://github.com/oven-sh/tinycc.git",
       "commit": "29985a3b59898861442fa3b43f663fc1af2591d7"
+    },
+    "bun-android-release": {
+      "remote": "https://github.com/Leonisaurov/bun-android",
+      "release": "v1.4.2-android.1",
+      "asset": "bun-aarch64-android",
+      "version": "1.4.2",
+      "sha256": "3c61913c9420c578536225e4f11a85ecf9619a26f6c0094d06b06bff30de31f9",
+      "port_commit": "0c087fdb9f371421195194a696b4363a8c6d1f7d",
+      "upstream_commit": "744846f844374847c902b5e7fd59b4342a51ef99",
+      "revision_marker": "1.4.2-canary.1+0c087fdb9",
+      "min_android_api": 28,
+      "fetch_cache_name": "bun-linux-aarch64-android-v1.4.2"
+    },
+    "bun-host-emitter": {
+      "remote": "https://github.com/oven-sh/bun",
+      "url": "https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-linux-x64.zip",
+      "version": "1.4.2",
+      "sha256": "36368faef7527875d5ffa52e53cd48021741f2a83eb6208a8dd64068d422a913",
+      "upstream_commit": "744846f844374847c902b5e7fd59b4342a51ef99"
     }
   }
 }

@@ -30,6 +30,39 @@ export ANDROID_API="${ANDROID_API:-24}"
 export ANDROID_NDK_VERSION="${ANDROID_NDK_VERSION:-28.1.13356709}"
 export WEBKIT_COMMIT="${WEBKIT_COMMIT:-017930ebf915121f8f593bef61cbbca82d78132d}"
 
+# Bun 1.4.2 para el lane nativo de OpenCode. These are external published
+# sources, so ci/external-sources.lock is their only home; nothing here may
+# restate them as a default or the workflow would be able to disagree with the
+# lock. BUN_VERSION above stays 1.2.13 for the vendored bun/ product and Kilo.
+EXTERNAL_SOURCES_LOCK="${EXTERNAL_SOURCES_LOCK:-$REPO_ROOT/ci/external-sources.lock}"
+external_source_pin() {
+  python3 - "$EXTERNAL_SOURCES_LOCK" "$1" "$2" <<'PY'
+import json, sys
+lock = json.load(open(sys.argv[1], encoding="utf-8"))
+print(lock["sources"][sys.argv[2]][sys.argv[3]])
+PY
+}
+export BUN_ANDROID_RELEASE="$(external_source_pin bun-android-release release)"
+export BUN_ANDROID_ASSET="$(external_source_pin bun-android-release asset)"
+export BUN_ANDROID_VERSION="$(external_source_pin bun-android-release version)"
+export BUN_ANDROID_SHA256="$(external_source_pin bun-android-release sha256)"
+export BUN_ANDROID_PORT_COMMIT="$(external_source_pin bun-android-release port_commit)"
+export BUN_ANDROID_UPSTREAM_COMMIT="$(external_source_pin bun-android-release upstream_commit)"
+export BUN_ANDROID_REVISION_MARKER="$(external_source_pin bun-android-release revision_marker)"
+export BUN_ANDROID_MIN_API="$(external_source_pin bun-android-release min_android_api)"
+export BUN_BASE_CACHE_NAME="$(external_source_pin bun-android-release fetch_cache_name)"
+export BUN_ANDROID_URL="https://github.com/Leonisaurov/bun-android/releases/download/${BUN_ANDROID_RELEASE}/${BUN_ANDROID_ASSET}"
+# HOST_BUN_VERSION is deliberately NOT set here: it is the era-Zig host 1.3.2
+# consumed by bun/ and Kilo (their workflows/setup-runner pin it). Sourcing
+# env.sh must not clobber the emitter each lane chose for itself.
+export OPENCODE_BUN_EMITTER_VERSION="$(external_source_pin bun-host-emitter version)"
+export OPENCODE_BUN_EMITTER_SHA256="$(external_source_pin bun-host-emitter sha256)"
+export OPENCODE_BUN_EMITTER_URL="$(external_source_pin bun-host-emitter url)"
+test "$OPENCODE_BUN_EMITTER_VERSION" = "$BUN_ANDROID_VERSION" || {
+  echo "ERROR: emitter ${OPENCODE_BUN_EMITTER_VERSION} y base ${BUN_ANDROID_VERSION} divergen en el lock" >&2
+  exit 1
+}
+
 # Android NDK
 export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-/opt/android-ndk}"
 export ANDROID_ABI=arm64-v8a
@@ -68,6 +101,12 @@ export OPENTUI_SRC="${OPENTUI_SRC:-${REPO_ROOT}/opentui/src/opencode}"
 export OPENCODE_SRC="${OPENCODE_SRC:-${REPO_ROOT}/opencode/src}"
 export ICU_SRC="${ICU_SRC:-${BUN_BUILD_ROOT}/icu-src}"
 
+# OpenCode's Android runtime is the published 1.4.2 base, stripped by
+# ci/scripts/materialize-bun-base.sh; the vendored bun/ build is not consumed
+# by this lane anymore.
+export OPENCODE_BUN_BASE_DIR="${OPENCODE_BUN_BASE_DIR:-${PRODUCT_ROOT}/build/bun-android-base}"
+export OPENCODE_BUN_BASE="${OPENCODE_BUN_BASE:-${OPENCODE_BUN_BASE_DIR}/${BUN_ANDROID_ASSET}-stripped}"
+
 # Each product receives an isolated generated area and state graph.
 export WORK_DIR="${WORK_DIR:-${PRODUCT_ROOT}/build}"
 
@@ -100,6 +139,10 @@ echo "NDK:           ${ANDROID_NDK_HOME}"
 echo "API Level:     ${ANDROID_API}"
 echo "Target:        ${ANDROID_TRIPLE}"
 echo "Bun version:   ${BUN_VERSION}"
+echo "Bun 142 base:  ${BUN_ANDROID_RELEASE} (${BUN_ANDROID_ASSET}, api>=${BUN_ANDROID_MIN_API})"
+echo "Bun 142 pin:   ${BUN_ANDROID_SHA256}"
+echo "Bun 142 base at: ${OPENCODE_BUN_BASE}"
+echo "Bun emitter:   ${OPENCODE_BUN_EMITTER_VERSION}"
 echo "WebKit source: ${WEBKIT_COMMIT} + monorepo overlay"
 echo "OpenCode ver:  ${OPENCODE_VERSION}"
 echo "Cache schema:  ci-cache-v2"

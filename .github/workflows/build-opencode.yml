@@ -3,10 +3,6 @@ name: Build OpenCode (final assembly)
 on:
   workflow_dispatch:
     inputs:
-      bun_version:
-        description: 'Bun Android version used by the standalone bundle'
-        required: false
-        default: '1.2.13'
       opentui_ref:
         description: 'Commit, tag o branch de OpenTUI'
         required: false
@@ -17,11 +13,6 @@ on:
         default: '2.0.24'
   workflow_call:
     inputs:
-      bun_version:
-        description: 'Versión de Bun Android que se incrusta'
-        required: false
-        type: string
-        default: '1.2.13'
       opentui_ref:
         description: 'Commit, tag o branch de OpenTUI'
         required: false
@@ -47,20 +38,18 @@ permissions:
 
 env:
   PRODUCT: opencode
-  BUN_VERSION: "${{ inputs.bun_version || '1.2.13' }}"
-  HOST_BUN_VERSION: "1.3.2"
+  # Bun is not a product of this lane anymore: the emitter and the Android base
+  # are pinned by ci/external-sources.lock and read from it by ci/scripts/env.sh
+  # (BUN_ANDROID_*/OPENCODE_BUN_EMITTER_*). The era-Zig 1.2.13 build stays for
+  # Kilo, whose lane keeps HOST_BUN_VERSION = 1.3.2.
   OPENTUI_REF: "${{ inputs.opentui_ref || '31a93fbe66992298d6d0f27481fa781f43d0c1e2' }}"
   OPENCODE_VERSION: "${{ inputs.opencode_version || '2.0.24' }}"
   ANDROID_API: "24"
   ANDROID_NDK_VERSION: "28.1.13356709"
-  ICU_VERSION: "75.1"
-  TINYCC_SOURCE: "current"
   # Zig is only used here by the OpenTUI rebuild fallback, so it tracks the
-  # version that build-opentui.yml pins. Bun and bun-core keep their own older
-  # Zig and are hashed with BUN_ZIG_VERSION to stay byte-identical to their
-  # producers.
+  # version that build-opentui.yml pins. ICU and tinycc belonged to the
+  # era-Zig core/bun jobs this lane no longer produces keys for.
   ZIG_VERSION: "0.16.0"
-  BUN_ZIG_VERSION: "0.15.2"
   WORK_DIR: "${{ github.workspace }}/opencode/build"
   ANDROID_NDK_HOME: "${{ github.workspace }}/.ci/android-ndk"
   ANDROID_NDK_ROOT: "${{ github.workspace }}/.ci/android-ndk"
@@ -88,32 +77,13 @@ jobs:
           OPENTUI_COMMIT: ${{ env.OPENTUI_REF }}
         run: |
           set -euo pipefail
-          bun_source_commit="$(git ls-tree HEAD bun/src | awk '{print $3}')"
+          # The Bun pins (emitter and Android base) come from the lock, not from
+          # this file, so the cache key follows ci/external-sources.lock.
+          source ci/scripts/env.sh > /dev/null
           opencode_source_commit="$(git ls-tree HEAD opencode/src | awk '{print $3}')"
           opentui_source_tree="$(git ls-tree HEAD opentui/src/opencode | awk '{print $3}')"
-          test -n "$bun_source_commit" && test -n "$opencode_source_commit" && test -n "$opentui_source_tree"
+          test -n "$opencode_source_commit" && test -n "$opentui_source_tree"
           export ANDROID_TRIPLE_API="aarch64-linux-android${ANDROID_API}"
-          core_args=(--root "$GITHUB_WORKSPACE" --product bun-core
-            --path bun/scripts/build-icu.sh --path bun/scripts/build-webkit.sh
-            --path bun/scripts/build-tinycc.sh --path ci/scripts/env.sh
-            --path .github/workflows/build-core.yml
-            --path ci/external-sources.lock
-            --path bun/webkit
-            --path bun/tinycc
-            --path bun/cmake/webkit-android-toolchain.cmake
-            --value "ICU_VERSION=$ICU_VERSION"
-            --value "TINYCC_SOURCE=$TINYCC_SOURCE")
-          core_key="$(env -u OPENTUI_COMMIT ZIG_VERSION="$BUN_ZIG_VERSION" python3 ci/scripts/cache-contract.py key "${core_args[@]}")"
-          bun_args=(--root "$GITHUB_WORKSPACE" --product bun
-            --path bun/scripts/build-bun.sh
-            --path ci/scripts/env.sh --path ci/scripts/test-android-heap-tagging.py
-            --path .github/workflows/build-bun.yml
-            --value "BUN_VERSION=$BUN_VERSION"
-            --value "ICU_VERSION=$ICU_VERSION"
-            --value "BUN_SOURCE_COMMIT=$bun_source_commit"
-            --value "CORE_CACHE_KEY=$core_key")
-          bun_key="$(env -u OPENTUI_COMMIT ZIG_VERSION="$BUN_ZIG_VERSION" python3 ci/scripts/cache-contract.py key "${bun_args[@]}")"
-          echo "bun=$bun_key" >> "$GITHUB_OUTPUT"
           opentui_args=(--root "$GITHUB_WORKSPACE" --product opentui
             --path opentui/scripts/build-opentui.sh --path ci/scripts/env.sh
             --path .github/workflows/build-opentui.yml
@@ -124,16 +94,17 @@ jobs:
           echo "opentui=$opentui_key" >> "$GITHUB_OUTPUT"
           args=(--root "$GITHUB_WORKSPACE" --product opencode
             --path opencode/scripts/build-opencode.sh --path opencode/scripts/build-opencode-android.ts
-            --path ci/scripts/module-graph-patch.ts --path ci/scripts/validate-android-bundle.py
+            --path ci/scripts/materialize-bun-base.sh --path ci/scripts/validate-android-bundle-142.py
             --path ci/scripts/patch-opentui-core-runtime.py
+            --path ci/external-sources.lock
             --path opencode/scripts/make-packages.sh
             --path ci/scripts/env.sh --path .github/workflows/build-opencode.yml
-            --value "OPENCODE_VERSION=$OPENCODE_VERSION" --value "BUN_VERSION=$BUN_VERSION"
-            --value "HOST_BUN_VERSION=$HOST_BUN_VERSION"
+            --value "OPENCODE_VERSION=$OPENCODE_VERSION"
+            --value "BUN_EMITTER_VERSION=$OPENCODE_BUN_EMITTER_VERSION"
+            --value "BUN_ANDROID_SHA256=$BUN_ANDROID_SHA256"
             --value "OPENTUI_REF=$OPENTUI_REF"
-            --value "ICU_VERSION=$ICU_VERSION"
             --value "OPENCODE_SOURCE_COMMIT=$opencode_source_commit"
-            --value "BUN_CACHE_KEY=$bun_key" --value "OPENTUI_CACHE_KEY=$opentui_key")
+            --value "OPENTUI_CACHE_KEY=$opentui_key")
           opencode_key="$(UPSTREAM_COMMIT="$OPENTUI_COMMIT" python3 ci/scripts/cache-contract.py key "${args[@]}")"
           echo "key=$opencode_key" >> "$GITHUB_OUTPUT"
 
@@ -151,10 +122,12 @@ jobs:
         id: validate-opencode
         run: |
           set -euo pipefail
+          LIBOPENTUI="$GITHUB_WORKSPACE/opentui/src/opencode/packages/native/lib/aarch64-linux-android.24/libopentui.so"
           if test -s "${WORK_DIR}/dist/opencode" \
              && test "$(readelf -h "${WORK_DIR}/dist/opencode" | sed -n 's/^ *Class: *//p')" = ELF64 \
              && test "$(readelf -h "${WORK_DIR}/dist/opencode" | sed -n 's/^ *Machine: *//p')" = AArch64 \
-             && python3 ci/scripts/validate-android-bundle.py opencode "${WORK_DIR}/dist/opencode" >/dev/null 2>&1 \
+             && python3 ci/scripts/validate-android-bundle-142.py "${WORK_DIR}/dist/opencode" \
+                  --lib "$LIBOPENTUI" >/dev/null 2>&1 \
              && python3 ci/scripts/build-state.py verify --root "$GITHUB_WORKSPACE" \
                   --state-dir "$WORK_DIR/state" --node opencode >/dev/null 2>&1; then
             echo ready=true >> "$GITHUB_OUTPUT"
@@ -201,7 +174,7 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: restore-checkpoint
-          checkpoint-prefix: ci-cache-v2-recovery-opencode-${{ runner.os }}-${{ runner.arch }}-version-${{ env.OPENCODE_VERSION }}-bun-${{ env.BUN_VERSION }}-opentui-${{ env.OPENTUI_REF }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-source-${{ hashFiles('ci/source-manifest.json', 'opencode/src/package.json', 'opencode/src/bun.lock') }}-
+          checkpoint-prefix: ci-cache-v2-recovery-opencode-${{ runner.os }}-${{ runner.arch }}-version-${{ env.OPENCODE_VERSION }}-bun142-${{ hashFiles('ci/external-sources.lock') }}-opentui-${{ env.OPENTUI_REF }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-source-${{ hashFiles('ci/source-manifest.json', 'opencode/src/package.json', 'opencode/src/bun.lock') }}-
           checkpoint-path: |
             ${{ github.workspace }}/opencode/src
             ${{ env.WORK_DIR }}
@@ -224,27 +197,24 @@ jobs:
           path: ${{ github.workspace }}/.ci/zig-${{ env.ZIG_VERSION }}
           key: ci-cache-v2-toolchain-${{ runner.os }}-${{ runner.arch }}-zig-${{ env.ZIG_VERSION }}-api-${{ env.ANDROID_API }}
 
-      - name: Ensure host Bun is available
+      - name: Ensure host Bun emitter is available
         id: host-bun
         run: |
           set -euo pipefail
+          source ci/scripts/env.sh > /dev/null
           if [ ! -x "$HOME/.bun/bin/bun" ] \
-             || [ "$("$HOME/.bun/bin/bun" --version 2>/dev/null || true)" != "$HOST_BUN_VERSION" ]; then
-            curl -fsSL https://bun.sh/install | bash -s -- "bun-v${HOST_BUN_VERSION}"
+             || [ "$("$HOME/.bun/bin/bun" --version 2>/dev/null || true)" != "$OPENCODE_BUN_EMITTER_VERSION" ]; then
+            curl -fsSL --retry 3 -o "$RUNNER_TEMP/bun-host.zip" "$OPENCODE_BUN_EMITTER_URL"
+            echo "$OPENCODE_BUN_EMITTER_SHA256  $RUNNER_TEMP/bun-host.zip" | sha256sum -c -
+            unzip -q -o "$RUNNER_TEMP/bun-host.zip" -d "$RUNNER_TEMP/bun-host"
+            mkdir -p "$HOME/.bun/bin"
+            install -m 0755 "$RUNNER_TEMP/bun-host/bun-linux-x64/bun" "$HOME/.bun/bin/bun"
           fi
           echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
           echo "BUN_INSTALL=$HOME/.bun" >> "$GITHUB_ENV"
           export PATH="$HOME/.bun/bin:$PATH"
-          test "$(bun --version)" = "$HOST_BUN_VERSION"
+          test "$(bun --version)" = "$OPENCODE_BUN_EMITTER_VERSION"
           echo ready=true >> "$GITHUB_OUTPUT"
-
-      - name: Receive Bun artifact
-        if: steps.validate-opencode.outputs.ready != 'true'
-        uses: actions/download-artifact@v4
-        continue-on-error: ${{ !inputs.require_dependency_artifacts }}
-        with:
-          name: bun-android-aarch64-${{ env.BUN_VERSION }}
-          path: ${{ env.WORK_DIR }}/artifact-bun
 
       - name: Receive OpenTUI artifact
         if: steps.validate-opencode.outputs.ready != 'true'
@@ -285,38 +255,28 @@ jobs:
           fi
 
       # ── Restore Bun binary (required — run build-bun first) ──
-      - name: Restore Bun binary
-        if: steps.validate-opencode.outputs.ready != 'true'
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            ${{ github.workspace }}/bun/build/bun-build/bun
-            ${{ github.workspace }}/bun/build/state/nodes/bun.json
-          key: ${{ steps.contract.outputs.bun }}
-
-      - name: Materialize and verify Bun artifact
+      # The cross-compile base replaces the Bun artifact this lane used to
+      # consume: it is downloaded from the Leonisaurov/bun-android release,
+      # stripped and seeded into the emitter's fetch cache by the shared script,
+      # which is also what build-opencode.sh calls before registering its node.
+      - name: Materialize Bun Android base
         if: steps.validate-opencode.outputs.ready != 'true'
         run: |
           set -euo pipefail
-          BUN="$(find "$WORK_DIR/artifact-bun" -type f -name bun -print -quit 2>/dev/null || true)"
-          if [ -z "$BUN" ] && [ "${{ inputs.require_dependency_artifacts }}" = "true" ]; then
-            echo 'Required Bun artifact is missing or malformed.' >&2
-            exit 1
-          fi
-          if [ -n "$BUN" ]; then
-            mkdir -p "$GITHUB_WORKSPACE/bun/build/bun-build"
-            install -m 0755 "$BUN" "$GITHUB_WORKSPACE/bun/build/bun-build/bun"
-          fi
-          BUN_BINARY="$GITHUB_WORKSPACE/bun/build/bun-build/bun"
-          test -s "$BUN_BINARY"
-          file "$BUN_BINARY"
-          test "$(readelf -h "$BUN_BINARY" | sed -n 's/^ *Class: *//p')" = ELF64
-          test "$(readelf -h "$BUN_BINARY" | sed -n 's/^ *Machine: *//p')" = AArch64
+          BASE="$(bash ci/scripts/materialize-bun-base.sh)"
+          test -s "$BASE"
+          python3 ci/scripts/validate-android-bundle-142.py "$BASE"
 
       # Restore all remaining tools before paying for runner setup.
       - name: Install build dependencies
         if: steps.validate-opencode.outputs.ready != 'true'
-        run: source ci/scripts/setup-runner.sh
+        run: |
+          # setup-runner installs the era-Zig host (1.3.2) by default; this lane
+          # already pinned the 1.4.2 emitter, so hand it that version so it does
+          # not download and overwrite the emitter with the wrong Bun.
+          source ci/scripts/env.sh > /dev/null
+          export HOST_BUN_VERSION="$OPENCODE_BUN_EMITTER_VERSION"
+          source ci/scripts/setup-runner.sh
 
       # ── Build libopentui.so ───────────────────────────────────
       - name: Build libopentui.so
@@ -372,13 +332,12 @@ jobs:
         run: |
           set -euo pipefail
           BINARY="${WORK_DIR}/dist/opencode"
+          LIBOPENTUI="$GITHUB_WORKSPACE/opentui/src/opencode/packages/native/lib/aarch64-linux-android.24/libopentui.so"
           ready=false
           if test -s "$BINARY" \
              && python3 ci/scripts/build-state.py verify --root "$GITHUB_WORKSPACE" \
                   --state-dir "$WORK_DIR/state" --node opencode >/dev/null 2>&1 \
-             && test "$(readelf -h "$BINARY" | sed -n 's/^ *Class: *//p')" = ELF64 \
-             && test "$(readelf -h "$BINARY" | sed -n 's/^ *Machine: *//p')" = AArch64 \
-             && python3 ci/scripts/validate-android-bundle.py opencode "$BINARY" >/dev/null 2>&1; then
+             && python3 ci/scripts/validate-android-bundle-142.py "$BINARY" --lib "$LIBOPENTUI"; then
             ready=true
           fi
           echo "ready=$ready" >> "$GITHUB_OUTPUT"
@@ -479,7 +438,7 @@ jobs:
         uses: ./ci/actions/incremental-cache
         with:
           mode: save-checkpoint
-          checkpoint-prefix: ci-cache-v2-recovery-opencode-${{ runner.os }}-${{ runner.arch }}-version-${{ env.OPENCODE_VERSION }}-bun-${{ env.BUN_VERSION }}-opentui-${{ env.OPENTUI_REF }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-source-${{ hashFiles('ci/source-manifest.json', 'opencode/src/package.json', 'opencode/src/bun.lock') }}-
+          checkpoint-prefix: ci-cache-v2-recovery-opencode-${{ runner.os }}-${{ runner.arch }}-version-${{ env.OPENCODE_VERSION }}-bun142-${{ hashFiles('ci/external-sources.lock') }}-opentui-${{ env.OPENTUI_REF }}-api-${{ env.ANDROID_API }}-ndk-${{ env.ANDROID_NDK_VERSION }}-source-${{ hashFiles('ci/source-manifest.json', 'opencode/src/package.json', 'opencode/src/bun.lock') }}-
           checkpoint-path: |
             ${{ github.workspace }}/opencode/src
             ${{ env.WORK_DIR }}

@@ -16,6 +16,8 @@ from __future__ import annotations
 import pathlib
 import re
 
+import yaml
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 WORKFLOWS = ROOT / ".github/workflows"
 
@@ -55,9 +57,12 @@ def main() -> None:
             assert other[product][0] == paths, f"{product}: path contract mismatch"
             assert other[product][1] == values, f"{product}: value contract mismatch"
 
-    same("bun-core", core, [bun, opencode])
-    same("bun", bun, [opencode])
+    same("bun-core", core, [bun])
+    # The OpenCode lane no longer computes a Bun key: it consumes the released
+    # Leonisaurov/bun-android runtime pinned in ci/external-sources.lock, so the
+    # only shared product key it must reproduce is OpenTUI's.
     same("opentui", opentui, [opencode])
+    assert "bun" not in opencode, "build-opencode.yml still derives an era-Zig Bun cache key"
 
     # The value parity above compares option *names*, so two workflows can share
     # a contract and still compute different digests: cache-contract.py embeds
@@ -74,12 +79,7 @@ def main() -> None:
         "build-opencode.yml: OpenTUI consumed with a different Zig than its producer"
     bun_zig = zig_versions("build-core.yml")["ZIG_VERSION"]
     assert zig_versions("build-bun.yml")["ZIG_VERSION"] == bun_zig, "core and bun Zig diverged"
-    assert zig_versions("build-opencode.yml")["BUN_ZIG_VERSION"] == bun_zig, \
-        "build-opencode.yml: BUN_ZIG_VERSION does not match the bun producers"
     assert bun_zig != opentui_zig, "Bun and OpenTUI must pin distinct Zig versions"
-    # The consumer overrides the env only for the products rebuilt by Bun/core.
-    assert 'ZIG_VERSION="$BUN_ZIG_VERSION" python3 ci/scripts/cache-contract.py' in (
-        WORKFLOWS / "build-opencode.yml").read_text(encoding="utf-8"), "core/bun keys: no Zig override"
     assert 'UPSTREAM_COMMIT="$OPENTUI_COMMIT" python3 ci/scripts/cache-contract.py' in (
         WORKFLOWS / "build-opencode.yml").read_text(encoding="utf-8"), "opentui_key: unexpected Zig override"
 
@@ -101,7 +101,14 @@ def main() -> None:
     assert "KILO_OPENTUI_SOURCE_TREE" in kilo["kilo"][1]
     opcode_paths, opcode_values = opencode["opencode"]
     assert "ci/scripts/patch-opentui-core-runtime.py" in opcode_paths
-    assert "ci/scripts/module-graph-patch.ts" in opcode_paths
+    # The key must follow the external runtime pins, not the era-Zig tree.
+    assert "ci/external-sources.lock" in opcode_paths
+    assert "ci/scripts/materialize-bun-base.sh" in opcode_paths
+    assert "ci/scripts/validate-android-bundle-142.py" in opcode_paths
+    assert "ci/scripts/module-graph-patch.ts" not in opcode_paths
+    assert "BUN_ANDROID_SHA256" in opcode_values
+    assert "BUN_EMITTER_VERSION" in opcode_values
+    assert "BUN_VERSION" not in opcode_values
     assert "OPENCODE_SOURCE_COMMIT" in opcode_values
     # ci/source-manifest.json aggregates every product commit. Including it in a
     # per-product key makes an unrelated product change invalidate this cache,
@@ -142,6 +149,21 @@ def main() -> None:
     assert "codex" not in android, "build-android.yml: Codex re-wired into the stack"
     assert "for product in core opentui bun opencode kilo; do" in android
     assert "needs: [detect, bun, opentui, opencode, kilo]" in android
+
+    # The standalone entry point is a second copy of the producer graph, so it
+    # drifts silently unless tied to the coordinator: OpenCode's only producer is
+    # OpenTUI, and forwarding the retired bun_version input would break parsing
+    # of a workflow_call that no longer declares it.
+    docker = (WORKFLOWS / "build-opencode-docker.yml").read_text(encoding="utf-8")
+    docker_jobs = yaml.safe_load(docker)["jobs"]
+    assert "bun_version" not in docker, "build-opencode-docker.yml: era-Zig Bun input forwarded"
+    assert docker_jobs["opencode"]["needs"] == ["opentui"], "build-opencode-docker.yml: producer edge drift"
+    declared = yaml.safe_load((WORKFLOWS / "build-opencode.yml").read_text(encoding="utf-8"))
+    # PyYAML reads the `on:` key as the boolean True, so the trigger map lives
+    # under the truthy key of the parsed document.
+    declared_inputs = set(declared[True]["workflow_call"]["inputs"])
+    forwarded = set(docker_jobs["opencode"]["with"])
+    assert forwarded <= declared_inputs, f"build-opencode-docker.yml: undeclared inputs {forwarded - declared_inputs}"
 
 
 if __name__ == "__main__":

@@ -50,8 +50,19 @@ commits in the product cache contract; do not rely on a dirty checkout.
 ## Version pins and patch compatibility
 
 Las versiones de Bun y OpenCode están fijadas deliberadamente por los parches
-Android existentes. Actualmente son Bun Android `1.2.13` (con el grafo standalone
-emitido por el host Bun `1.3.2`) y OpenCode `2.0.24`.
+Android existentes. Desde B7 hay **dos linajes**:
+
+- **OpenCode**: cross-compila con el host Bun `1.4.2` oficial (emisor) contra el
+  runtime Bionic parcheado de la release externa `v1.4.2-android.1` de
+  `Leonisaurov/bun-android`. Ambos pins, incluido el sha256 y el marcador de
+  revisión que demuestra el linaje, viven solo en `ci/external-sources.lock` y
+  los lee `ci/scripts/env.sh`. Este lane ya no produce ni consume el Bun del
+  workspace y su piso de Android es **API 28**, no 24.
+- **`bun/` y Kilo**: siguen con el Bun Android era-Zig `1.2.13` (grafo emitido por
+  el host `1.3.2` y trasplantado al EOF), que es lo único que
+  `ci/scripts/module-graph-patch.ts` sabe reparar.
+
+OpenCode sigue fijado en `2.0.24`.
 
 - No subir, reemplazar ni "alinear" estas versiones por inferencia, aunque haya
   versiones más nuevas en otros workflows, manifiestos o upstream.
@@ -66,13 +77,22 @@ del enlace. Los cambios del checkout local deben convertirse en commits
 rastreados por `ci/source-manifest.json` y publicarse en el remoto declarado
 antes de compilar; no se debe confiar en modificaciones sucias del submódulo ni
 en un fallback musl. El target fijado para los artefactos Android de OpenTUI es
-`aarch64-linux-android.24`, salvo autorización explícita para cambiarlo.
+`aarch64-linux-android.24`, salvo autorización explícita para cambiarlo; ese `.so`
+es forward-compatible y lo consume también el runtime API 28 de OpenCode sin
+recompilar.
 - Los workflows, scripts, manifiestos y nombres de artifacts deben consumir los
   inputs/versiones fijados; no deben introducir defaults contradictorios.
 - Las adaptaciones de fuentes deben vivir en los commits indicados por
   `ci/source-manifest.json` o en fuentes externas fijadas por
   `ci/external-sources.lock`. CI debe validar el commit y el árbol limpio; no
   debe clonar una rama y mutarla con parches de build.
+- OpenTUI 0.5.14 no conoce la plataforma `android`: su guard de assets nativos
+  lanza antes de cualquier `import`. La adaptación no parchea el checkout sino el
+  grafo, como plugin `onLoad` de `opencode/scripts/build-opencode-android.ts` (el
+  mismo seam de `opencodePtyPlugin`), y deja el slot nativo como import
+  **incondicional** porque el DCE de `--target` recorta las ramas del texto
+  original. El paquete que resuelve es `@opentui/core-linux-arm64` y sobre sus
+  bytes se aplica el swap del `.so` Bionic.
 
 ## Conventions
 
