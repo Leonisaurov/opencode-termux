@@ -30,8 +30,12 @@ These values are deliberate port compatibility constraints:
 
 - Target: `aarch64-linux-android`, Android API 24, ABI `arm64-v8a`
 - Android NDK: `28.1.13356709` (r28b)
-- Bun target: `1.2.13`
-- Bun host for standalone bundling: `1.3.2`
+- Bun target era-Zig (`bun/` y Kilo): `1.2.13`
+- Bun host emisor era-Zig: `1.3.2`
+- Bun de OpenCode (B7): runtime Bionic `1.4.2` de la release externa
+  `v1.4.2-android.1` de `Leonisaurov/bun-android`, emitido por el host oficial
+  `1.4.2`; ambos pins viven solo en `ci/external-sources.lock` y el runtime
+  sube su piso a **API 28**
 - WebKit/JSC: commit `017930ebf915121f8f593bef61cbbca82d78132d`
 - ICU: `75.1`
 - Zig: `0.15.2`
