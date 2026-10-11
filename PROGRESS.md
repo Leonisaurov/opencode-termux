@@ -1276,3 +1276,47 @@ se inyecta y **sí** corre en el teléfono:
 y reescritura `onLoad` con import incondicional. El OpenTUI plegado mide 93.845.248–94.435.072 B,
 lo que deja margen para el grafo real de OpenCode dentro del presupuesto de P4 (130–170 MB).
 
+#### P3 · validación local del mecanismo, en el teléfono (2026-10-11)
+
+Sin CI: los archivos pinneados ya están en la máquina del porteo y `llvm-strip`/`readelf`
+existen en Termux, así que las partes deterministas se pueden medir aquí.
+
+- **El pin del lock es el binario que corre el teléfono**: `sha256sum ~/.local/bin/bun` =
+  `3c61913c9420c578536225e4f11a85ecf9619a26f6c0094d06b06bff30de31f9`, idéntico al
+  `bun-aarch64-android` pineado ⇒ `materialize-bun-base.sh` no está fijando una variante
+  distinta de la que ya se validó en G3.
+- **`materialize-bun-base.sh` corre de punta a punta con rc=0** (`--dir $TMPDIR/b7-base`,
+  con el crudo como enlace simbólico para no volver a descargar): strip → 102.294.152 B,
+  las siete puertas `readelf` en verde (ELF64/AArch64/ET_DYN/`libc.so`/`.bun`/`.dynsym`,
+  0 secciones `.debug_*`) y el marcador `1.4.2-canary.1+0c087fdb9` presente. Difiere en
+  744 B del stripeado de CI (102.294.896 B) porque Termux usa su propio `llvm-strip`:
+  el sha del crudo es el que se fija, el del stripped no puede pinnearse.
+- **El `--target` android lo acepta también el runtime android**, no solo el emisor linux-x64
+  (medición local, rc=0): `hello` compilado en el teléfono con la grafía elegida mide
+  291.330.104 B, lleva la sección `.bun` y **ejecuta** imprimiendo
+  `{"p":"android","a":"arm64","v":"1.4.2"}`. Un target inventado da rc=1 ⇒ el flag no se
+  ignora. No es la vía de producción: con host == target bun embute su propio ELF sin strip
+  (+187 MB); el emisor sigue siendo el host linux-x64 con la base sembrada.
+- **Las grafías `bun-aarch64-linux-android` y `bun-linux-aarch64-android` también dan rc=0
+  sobre el host android.** Aquí no se puede afirmar lo contrario de CI: en el runner oficial
+  solo se probó la grafía elegida, que es la que queda fijada.
+- **La reescritura de OpenTUI se probó contra los chunks publicados reales**
+  (`@opentui/core@0.5.14`: `chunk-bun-sjw2d9bq.js`, `chunk-node-80p7e6t6.js`,
+  `chunk-bun-j2z63cdy.js`) con el código extraído del bundler: el chunk *bun* se reescribe
+  (709.709 → 708.746 B, ramas de plataforma fuera, import incondicional del slot, objetivo
+  re-mapeado, helper `getOpenTUILib` intacto), los otros dos devuelven `null` y la operación
+  es idempotente. **Hallazgo que habría roto el build:** el chunk *node* también define
+  `resolveNativeLibraryPath` pero sin la rama ni el `throw` final; el filtro del plugin lo
+  cargaba y el rewrite lanzaba. Se discrimina por contenido (presencia del `throw` de
+  plataforma), no por nombre de archivo.
+- **La validación del standalone ya no toca el grafo.** `extractAndroidModuleGraph`
+  (trailer al EOF) es imposible sobre un binario 1.4.2, así que el bundler afirma ELF64 +
+  AArch64 + ET_DYN + linaje de la base + **una ventana de 4 KiB del `.so` Bionic
+  intercambiado presente byte a byte en el binario**. Esa última es la prueba de que el swap llegó al
+  grafo; sin ella un slot mal resuelto embarcaría la librería glibc del host.
+
+**Restante antes del cutover.** El ensamble real (P4) sigue siendo el que mide si el grafo
+completo de OpenCode entra en el presupuesto y si el teléfono levanta la TUI (G5); las
+mediciones de arriba validan mecanismo y puertas, no el artefacto final.
+
+

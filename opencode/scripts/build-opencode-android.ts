@@ -2,32 +2,50 @@
 /**
  * Build OpenCode v2 for Android (aarch64)
  *
- * This script:
- * 1. Bundles packages/cli with Bun.build() --compile for the host platform
- * 2. Extracts the module graph from the compiled binary
- * 3. Repairs it for the Android runtime and appends it to our Android bun
- *    binary to create the final standalone
+ * One step: `Bun.build({ compile: { target: "bun-linux-arm64-android" } })`.
+ * Bun 1.4.2 cross-compiles the standalone by embedding the target's own bun
+ * ELF, so the module graph is linked into the `.bun` section instead of being
+ * appended to the EOF of a separately built binary. The base that gets
+ * embedded is the patched Android runtime materialized and seeded into Bun's
+ * fetch cache by ci/scripts/materialize-bun-base.sh, which is what makes the
+ * emitted standalone carry the Leonisaurov/bun-android lineage.
  *
  * The v2 tree is the authority for what travels in the graph: the models
  * snapshot and the SQLite migrations are versioned sources imported by
  * packages/core, and @opentui/core 0.5.x resolves its tree-sitter worker as
- * a bundled file asset. No generated snapshot defines and no separate worker
- * entrypoint are needed anymore.
+ * a bundled file asset.
  */
 
 import fs from "fs"
 import path from "path"
 import { createSolidTransformPlugin } from "@opentui/solid/bun-plugin"
-import { patchAndroidModuleGraph, validateAndroidModuleGraph, validateAndroidStandalone } from "./module-graph-patch"
+
+function requireEnv(name: string): string {
+  const value = process.env[name]
+  if (!value) throw new Error(`${name} env var not set`)
+  return value
+}
 
 // These are set by the build-opencode.sh wrapper script
-const OPENCODE_DIR = process.env.OPENCODE_DIR || (() => { throw new Error("OPENCODE_DIR env var not set") })()
-const ANDROID_BUN = process.env.ANDROID_BUN || (() => { throw new Error("ANDROID_BUN env var not set") })()
-const OUTPUT_DIR = process.env.OUTPUT_DIR || (() => { throw new Error("OUTPUT_DIR env var not set") })()
+const OPENCODE_DIR = requireEnv("OPENCODE_DIR")
+const BUN_BASE = requireEnv("OPENCODE_BUN_BASE")
+const OUTPUT_DIR = requireEnv("OUTPUT_DIR")
+const TARGET = process.env.OPENCODE_BUN_TARGET || "bun-linux-arm64-android"
+// Lineage of the patched base, read from ci/external-sources.lock by the
+// wrapper. The standalone embeds the base ELF verbatim, so this marker is the
+// only proof that the graph was emitted against the Android runtime and not
+// against the official glibc build.
+const REVISION_MARKER = requireEnv("OPENCODE_BUN_REVISION_MARKER")
+// The Bionic library that build-opencode.sh swapped into the arm64 slot; the
+// standalone must carry exactly these bytes.
+const NATIVE_LIBRARY = requireEnv("OPENCODE_LIBOPENTUI")
 
-// Validate Android bun exists
-if (!fs.existsSync(ANDROID_BUN)) {
-  console.error("Android bun binary not found at:", ANDROID_BUN)
+// Validate the patched base exists: seeding the fetch cache is the caller's
+// job, and silently falling back to the official ELF would ship a glibc-less
+// Bionic runtime without any error.
+if (!fs.existsSync(BUN_BASE)) {
+  console.error("Bun Android base not found at:", BUN_BASE)
+  console.error("Run ci/scripts/materialize-bun-base.sh first.")
   process.exit(1)
 }
 
@@ -36,7 +54,7 @@ process.chdir(OPENCODE_DIR)
 const VERSION = process.env.OPENCODE_VERSION || "2.0.24"
 const CHANNEL = process.env.OPENCODE_CHANNEL || "latest"
 
-console.log(`Building OpenCode v${VERSION} (channel: ${CHANNEL}) for Android aarch64`)
+console.log(`Building OpenCode v${VERSION} (channel: ${CHANNEL}) for Android aarch64 (target ${TARGET})`)
 
 // The Android release ships without the web UI: an empty embedded asset map
 // makes the server answer 404 on browser routes (non-local channel), while
@@ -56,7 +74,7 @@ const appAssetsPlugin: BunPlugin = {
   },
 }
 
-// persistent-pty resolves its native binary through @opencode-ai/pty, whose
+// persistent-pty resolves its native binary through @opentui-ai/pty, whose
 // runtime require of the platform package crashes on Bionic. Upstream embeds
 // per-target binaries and falls back to `undefined` (PATH lookup for an
 // "opencode-pty" executable) where none exists; Android has no published
@@ -84,31 +102,149 @@ const parcelWatcherPlugin: BunPlugin = {
   },
 }
 
-console.log("\n=== Step 1: Bundling OpenCode CLI ===")
+// OpenTUI has no idea Android exists. Two facts measured on the CI probe
+// (run 38115779161) and the reason this plugin rewrites published text:
+//
+//   1. getNativeAssetDescriptor() throws on platform "android" before the
+//      OTUI_ASSET_ROOT seam is ever consulted, so no alias package can help.
+//   2. --target specializes process.platform at bundle time, so every
+//      `if (process.platform === "linux")` branch in resolveNativeLibraryPath
+//      is dead-code eliminated: the graph would carry no libopentui.so at all
+//      (probe F: a branched import yields 0 embeddings, an unconditional one
+//      yields 1).
+//
+// So the rewrite maps android onto the linux/arm64 asset descriptor and makes
+// the import unconditional. The bytes actually embedded are whatever lives in
+// node_modules/@opentui/core-linux-arm64/libopentui.so, which
+// build-opencode.sh swaps for the Bionic library built by this workspace.
+const ANDROID_NATIVE_SLOT = "@opentui/core-linux-arm64"
+
+const TARGET_HEADER = "function getCurrentNodeAssetTarget() {"
+const TARGET_ORIGINAL = `  return {
+    platform: process.platform,
+    arch: process.arch,
+`
+const TARGET_REPLACEMENT = `  const android = process.platform === "android";
+  return {
+    platform: android ? "linux" : process.platform,
+    arch: android ? "arm64" : process.arch,
+`
+
+const RESOLVE_HEADER = "async function resolveNativeLibraryPath() {"
+const RESOLVE_TAIL = 'throw new Error(`OpenTUI is not supported on the current platform: ${asset.packageName}`);'
+const RESOLVE_REPLACEMENT = `${RESOLVE_HEADER}
+  const asset = getNativeAssetDescriptor(getCurrentNodeAssetTarget());
+  const configuredPath = resolveAssetRootPath(asset.key);
+  if (configuredPath !== undefined) {
+    return configuredPath;
+  }
+  return (await import("${ANDROID_NATIVE_SLOT}")).default;
+}
+`
+
+function countOccurrences(haystack: string, needle: string): number {
+  if (needle === "") return 0
+  let n = 0
+  let at = 0
+  for (;;) {
+    const found = haystack.indexOf(needle, at)
+    if (found < 0) return n
+    n += 1
+    at = found + needle.length
+  }
+}
+
+// Returns the rewritten chunk text, or null when the file is not the bun
+// flavored runtime chunk. The package ships several chunks with the same
+// function name; only the bun one carries the platform branch and the
+// unsupported-platform throw, while the node one resolves
+// `import(asset.packageName)` dynamically and has nothing to fix. Throws when
+// the bun chunk drifted from what the rewrite knows how to repair: a silent
+// no-op here would ship a standalone whose TUI cannot load its native library,
+// and CI could not tell.
+function rewriteOpenTuiForAndroid(text: string): string | null {
+  if (!text.includes(RESOLVE_HEADER)) return null
+  if (text.includes(RESOLVE_REPLACEMENT)) return text // already rewritten
+  if (!text.includes(RESOLVE_TAIL)) return null // node-flavored chunk: no branch to map
+
+  if (countOccurrences(text, RESOLVE_HEADER) !== 1) {
+    throw new Error(`opentui-android: expected exactly one ${RESOLVE_HEADER}, found ${countOccurrences(text, RESOLVE_HEADER)}`)
+  }
+  const tailAt = text.indexOf(RESOLVE_TAIL)
+  const bodyEnd = text.indexOf("\n}", tailAt)
+  if (bodyEnd < 0) throw new Error("opentui-android: cannot find the end of resolveNativeLibraryPath")
+
+  let out = text.slice(0, text.indexOf(RESOLVE_HEADER)) + RESOLVE_REPLACEMENT + text.slice(bodyEnd + 2)
+
+  if (countOccurrences(out, TARGET_HEADER) !== 1) {
+    throw new Error(`opentui-android: expected exactly one ${TARGET_HEADER}, found ${countOccurrences(out, TARGET_HEADER)}`)
+  }
+  if (!out.includes(TARGET_ORIGINAL)) throw new Error("opentui-android: getCurrentNodeAssetTarget layout changed; refusing to guess")
+  out = out.replace(TARGET_ORIGINAL, TARGET_REPLACEMENT)
+  return out
+}
+
+const opentuiAndroidPlugin: BunPlugin = {
+  name: "opentui-android-native-slot",
+  setup(build) {
+    build.onLoad({ filter: /[\\/]@opentui[\\/]core[\\/][A-Za-z0-9_.-]+\.js$/ }, async (args) => {
+      const text = await Bun.file(args.path).text()
+      const rewritten = rewriteOpenTuiForAndroid(text)
+      if (rewritten === null) return undefined
+      console.log(`[opentui-android] native slot -> ${ANDROID_NATIVE_SLOT} in ${path.basename(args.path)}`)
+      return { loader: "js", contents: rewritten }
+    })
+  },
+}
+
+// In 1.4.2 the module graph is linked into the binary, so there is no EOF
+// trailer to parse: the checks are the ELF identity of an Android PIE plus the
+// base lineage, which together prove the runtime is the patched Bionic ELF.
+function assertAndroidStandalone(binary: Uint8Array, nativeLib: Uint8Array): void {
+  const view = new DataView(binary.buffer, binary.byteOffset, binary.byteLength)
+  if (String.fromCharCode(binary[0], binary[1], binary[2], binary[3]) !== "\x7fELF") {
+    throw new Error("not an ELF binary")
+  }
+  if (binary[4] !== 2) throw new Error(`expected ELFCLASS64, got ${binary[4]}`)
+  const type = view.getUint16(16, true)
+  if (type !== 3) throw new Error(`expected ET_DYN (PIE) for Android, got ${type}`)
+  const machine = view.getUint16(18, true)
+  if (machine !== 183) throw new Error(`expected EM_AARCH64, got ${machine}`)
+  const asBuf = Buffer.from(binary.buffer, binary.byteOffset, binary.byteLength)
+  if (asBuf.indexOf(Buffer.from(REVISION_MARKER, "utf8")) < 0) {
+    throw new Error(`base lineage marker ${REVISION_MARKER} not embedded: the official glibc bun was used`)
+  }
+  // Prove the Bionic library reached the graph: a window of its bytes must be
+  // present verbatim. Without this, a runtime that silently selected another
+  // package (or a swap that found no slot) would ship an arm64-glibc library
+  // that the phone cannot dlopen.
+  const window = nativeLib.subarray(Math.floor(nativeLib.length / 2), Math.floor(nativeLib.length / 2) + 4096)
+  if (asBuf.indexOf(Buffer.from(window)) < 0) {
+    throw new Error(`libopentui.so bytes not embedded from ${NATIVE_LIBRARY}`)
+  }
+}
+
+console.log("\n=== Bundling and compiling for Android ===")
 
 const solidPlugin = createSolidTransformPlugin()
 
 await Bun.$`rm -rf ${OUTPUT_DIR}`
 await Bun.$`mkdir -p ${OUTPUT_DIR}`
 
-// Build with --compile for the HOST platform to get a standalone binary;
-// we'll extract the module graph from it. No bytecode/minify/splitting: the
-// graph bytes as emitted (plain, unsplit) are what the pinned Android Bun and
-// module-graph-patch.ts are proven to consume.
-const hostBinaryPath = path.join(OUTPUT_DIR, "opencode-host")
+const outputPath = path.join(OUTPUT_DIR, "opencode")
 
-console.log("Building standalone binary for host platform...")
 const result = await Bun.build({
   conditions: ["bun", "node"],
   tsconfig: "./tsconfig.json",
   external: ["node-gyp"],
-  plugins: [appAssetsPlugin, solidPlugin, parcelWatcherPlugin, opencodePtyPlugin],
+  plugins: [appAssetsPlugin, solidPlugin, parcelWatcherPlugin, opencodePtyPlugin, opentuiAndroidPlugin],
   compile: {
+    target: TARGET,
     autoloadBunfig: false,
     autoloadDotenv: false,
     autoloadTsconfig: true,
     autoloadPackageJson: true,
-    outfile: hostBinaryPath,
+    outfile: outputPath,
     execArgv: [`--user-agent=opencode/${VERSION}`, "--use-system-ca", "--"],
   },
   entrypoints: ["./src/index.ts"],
@@ -132,159 +268,12 @@ if (!result.success) {
   process.exit(1)
 }
 
-console.log(`Host standalone binary: ${hostBinaryPath}`)
+const bytes = new Uint8Array(await Bun.file(outputPath).arrayBuffer())
+console.log(`\nAndroid standalone binary: ${outputPath}`)
+console.log(`Size: ${(bytes.length / 1024 / 1024).toFixed(1)} MB`)
 
-// Step 2: Extract module graph from host binary
-console.log("\n=== Step 2: Extracting module graph ===")
-
-const hostBinary = await Bun.file(hostBinaryPath).arrayBuffer()
-const hostBytes = new Uint8Array(hostBinary)
-
-// Standalone binary format (ELF):
-//   [bun binary (seek_pos bytes)]
-//   [module_graph bytes]
-//   [total_byte_count as u64 LE (8 bytes)]
-//
-// Module graph internal layout:
-//   [string data] [module list] [offsets (32 bytes)] [trailer "\n---- Bun! ----\n" (16 bytes)]
-//
-// offsets.byte_count = len(string_data) + len(module_list)
-// total_byte_count = seek_pos + len(module_graph) + 8 = file_size
-//
-// We derive the module graph size from the trailer and offsets struct,
-// WITHOUT relying on process.execPath (which may differ from the bun
-// binary that was embedded during --compile).
-
-const TRAILER_STR = "\n---- Bun! ----\n"
-const TRAILER_LEN = TRAILER_STR.length // 16
-const OFFSETS_SIZE_CONST = 32
-
-const trailerBuf = Buffer.from(TRAILER_STR)
-const searchBuf = Buffer.from(hostBytes.buffer, hostBytes.byteOffset, hostBytes.length)
-const trailerEnd = hostBytes.length - 8 // trailer must end here
-const expectedTrailerStart = trailerEnd - TRAILER_LEN
-
-const foundTrailer = searchBuf.compare(
-  trailerBuf, 0, TRAILER_LEN,
-  expectedTrailerStart, trailerEnd
-) === 0
-
-if (!foundTrailer) {
-  console.error("ERROR: Bun standalone trailer not found at expected position")
-  console.error("       The standalone binary format may have changed.")
-  process.exit(1)
-}
-
-const offsetsStart = expectedTrailerStart - OFFSETS_SIZE_CONST
-const offsetsByteCount = Number(searchBuf.readBigUInt64LE(offsetsStart))
-
-const moduleGraphSize = offsetsByteCount + OFFSETS_SIZE_CONST + TRAILER_LEN
-const hostBunSize = hostBytes.length - 8 - moduleGraphSize
-
-console.log(`Host standalone size: ${hostBytes.length}`)
-console.log(`Derived host bun size: ${hostBunSize}`)
-console.log(`Module graph size: ${moduleGraphSize}`)
-
-if (hostBunSize <= 0) {
-  console.error(`ERROR: Derived host bun size is ${hostBunSize} — something is wrong`)
-  process.exit(1)
-}
-
-const moduleGraphBytes = hostBytes.slice(hostBunSize, hostBytes.length - 8)
-console.log(`Module graph extracted: ${moduleGraphBytes.length} bytes`)
-console.log(`Trailer verified: OK`)
-
-// Step 3: Preserve the module graph emitted by the pinned host Bun
-console.log("\n=== Step 3: Preserving the versioned module graph ===")
-
-// The module graph format (from StandaloneModuleGraph.zig):
-//   [string data: all file names, contents, sourcemaps, bytecodes concatenated]
-//   [CompiledModuleGraphFile array]
-//   [Offsets struct: 32 bytes]
-//   [trailer: "\n---- Bun! ----\n"]
-//
-// Offsets struct layout (32 bytes, little-endian, unchanged across Bun versions):
-//   byte_count:              u64  (8 bytes) - size of everything before the Offsets struct
-//   modules_ptr.offset:      u32  (4 bytes)
-//   modules_ptr.length:      u32  (4 bytes)
-//   entry_point_id:          u32  (4 bytes)
-//   compile_exec_argv.offset:u32  (4 bytes)
-//   compile_exec_argv.length:u32  (4 bytes)
-//   flags:                   u32  (4 bytes)
-//
-// NOTE: CompiledModuleGraphFile layout varies between Bun versions. The
-// versioned OpenCode source and the pinned host Bun are the authority for the
-// graph; this assembly step must not rewrite its bytes or offsets.
-
-const mgTrailer = "\n---- Bun! ----\n"
-const mgTrailerBuf = Buffer.from(mgTrailer)
-const OFFSETS_SIZE = 32
-
-const mgBuf = Buffer.from(moduleGraphBytes)
-const trailerPosInMg = mgBuf.lastIndexOf(mgTrailerBuf)
-if (trailerPosInMg < 0) throw new Error("Trailer not found in module graph!")
-
-const mgOffsetsStart = trailerPosInMg - OFFSETS_SIZE
-const byteCount = Number(mgBuf.readBigUInt64LE(mgOffsetsStart))
-const modOff = mgBuf.readUInt32LE(mgOffsetsStart + 8)
-const modLen = mgBuf.readUInt32LE(mgOffsetsStart + 12)
-const entryId = mgBuf.readUInt32LE(mgOffsetsStart + 16)
-const argvOff = mgBuf.readUInt32LE(mgOffsetsStart + 20)
-const argvLen = mgBuf.readUInt32LE(mgOffsetsStart + 24)
-const flags = mgBuf.readUInt32LE(mgOffsetsStart + 28)
-
-console.log(`Module graph: trailer at ${trailerPosInMg}, offsets at ${mgOffsetsStart}`)
-console.log(`byte_count=${byteCount}, modules_ptr=(${modOff},${modLen}), entry_id=${entryId}`)
-console.log(`String data region: [0, ${modOff}), Module list: [${modOff}, ${modOff + modLen})`)
-
-const patchedModuleGraph = patchAndroidModuleGraph(
-  mgBuf.slice(0, trailerPosInMg + mgTrailerBuf.length),
-  "opencode",
-)
-validateAndroidModuleGraph(patchedModuleGraph.graph, "opencode")
-const finalModuleGraph = patchedModuleGraph.graph
-console.log(`Module graph size: ${finalModuleGraph.length} bytes; undici repairs: ${patchedModuleGraph.patchCount}`)
-
-// Step 4: Create Android standalone binary
-console.log("\n=== Step 4: Creating Android standalone binary ===")
-
-const androidBunBytes = new Uint8Array(await Bun.file(ANDROID_BUN).arrayBuffer())
-const androidBunSize = androidBunBytes.length
-console.log(`Android bun size: ${androidBunSize}`)
-
-// New total_byte_count = android_bun_size + module_graph.length + 8
-const newTotalByteCount = androidBunSize + finalModuleGraph.length + 8
-
-const outputSize = androidBunSize + finalModuleGraph.length + 8
-const output = new Uint8Array(outputSize)
-
-output.set(androidBunBytes, 0)
-
-// Copy the module graph emitted by the pinned host Bun
-output.set(new Uint8Array(finalModuleGraph.buffer, finalModuleGraph.byteOffset, finalModuleGraph.length), androidBunSize)
-
-// Write new total_byte_count as u64 LE
-const totalView = new DataView(output.buffer, outputSize - 8, 8)
-totalView.setUint32(0, newTotalByteCount & 0xFFFFFFFF, true)
-totalView.setUint32(4, Math.floor(newTotalByteCount / 0x100000000), true)
-
-const androidOutputPath = path.join(OUTPUT_DIR, "opencode")
-await Bun.write(androidOutputPath, output)
-fs.chmodSync(androidOutputPath, 0o755)
-
-console.log(`\nAndroid standalone binary: ${androidOutputPath}`)
-console.log(`Size: ${(outputSize / 1024 / 1024).toFixed(1)} MB`)
-
-// Verify
-const verifyBytes = new Uint8Array(await Bun.file(androidOutputPath).arrayBuffer())
-const verifyView = new DataView(verifyBytes.buffer, verifyBytes.length - 8, 8)
-const verifyTotal = verifyView.getUint32(0, true) + verifyView.getUint32(4, true) * 0x100000000
-console.log(`Verification: total_byte_count=${verifyTotal}, file_size=${verifyBytes.length}, match=${verifyTotal === verifyBytes.length}`)
-
-const elfMagic = String.fromCharCode(verifyBytes[0], verifyBytes[1], verifyBytes[2], verifyBytes[3])
-console.log(`ELF magic: ${elfMagic === "\x7fELF" ? "OK" : "INVALID"}`)
-validateAndroidStandalone(verifyBytes, "opencode")
-console.log("Module graph validation: OK")
+assertAndroidStandalone(bytes, new Uint8Array(await Bun.file(NATIVE_LIBRARY).arrayBuffer()))
+console.log(`Standalone validation: OK (base lineage ${REVISION_MARKER})`)
 
 console.log("\n=== Build complete! ===")
-console.log(`Output: ${androidOutputPath}`)
+console.log(`Output: ${outputPath}`)
