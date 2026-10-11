@@ -1151,7 +1151,7 @@ Cleanup pre-merge: retiradas las sondas desechables (`v2-probe-bun1213.yml`,
 verdes tras el retiro. Tag `opencode-v2.0.24-android` sobre `5abfad6` (commit del que se
 publicó el asset). Merge a `main` ejecutado con B6 verde.
 
-### B7 · OpenCode compila con el Bun de `../bun` (1.4.2) por cross-compile nativo (2026-10-10, abierto)
+### B7 · OpenCode compila con el Bun de `../bun` (1.4.2) por cross-compile nativo (2026-10-10 → 2026-10-11, cerrado)
 
 **Motivo.** `../bun` (`Leonisaurov/bun-android`) publicó `v1.4.2-android.1`: Bun 1.4.2
 (rewrite Rust), API 28, batería `a8-full` de 157 casos (148 PASS / 0 FAIL / 9 KNOWN) y
@@ -1315,8 +1315,43 @@ existen en Termux, así que las partes deterministas se pueden medir aquí.
   intercambiado presente byte a byte en el binario**. Esa última es la prueba de que el swap llegó al
   grafo; sin ella un slot mal resuelto embarcaría la librería glibc del host.
 
-**Restante antes del cutover.** El ensamble real (P4) sigue siendo el que mide si el grafo
-completo de OpenCode entra en el presupuesto y si el teléfono levanta la TUI (G5); las
-mediciones de arriba validan mecanismo y puertas, no el artefacto final.
+#### P4 · ensamble real y dispositivo — G4 y G5 (2026-10-11, run `38128420105`)
+
+El lane de OpenCode ya no depende del artifact de Bun, así que `build-opencode.yml`
+corre solo en la rama (con su fallback de OpenTUI) y **es** el ensamble real, no
+una sonda aparte.
+
+- **Primer intento en rojo, con causa exacta (run `38128025993`).** El mecanismo ya
+  estaba medido, pero el producto murió en
+  `Bun.build({ compile: { target: "bun-linux-arm64-android" } })` con
+  `TypeError: Unknown compile target` bajo `Bun v1.3.2`: `setup-runner.sh` instala
+  por defecto el host era-Zig `1.3.2`, y `env.sh` había bautizado el pin del lock
+  (1.4.2) con el **mismo** nombre `HOST_BUN_VERSION`, así que al sourcearlo el lane
+  perdía la variable y `setup-runner` bajaba 1.3.2 encima del emisor 1.4.2 del paso
+  anterior. Fix `18c3ad7`: el pin del lock pasa a `OPENCODE_BUN_EMITTER_*`,
+  `HOST_BUN_VERSION` queda como el host era-Zig de `bun/` y Kilo, y
+  `build-opencode.sh` **afirma el emisor** antes de instalar/bundlear (falla
+  temprano y nombrando el binario en vez de a mitad de `Bun.build`).
+- **G4 (run `38128420105`, verde).** `materialize-bun-base.sh` → base stripeada
+  102.294.152 B con el marcador `1.4.2-canary.1+0c087fdb9`; swap del `.so` sobre
+  `.bun/@opentui+core-linux-arm64@0.5.14/node_modules/@opentui/core-linux-arm64`;
+  `Bun.build` emite **168.189.880 B (160,4 MiB)**, dentro del presupuesto 130–170 MB;
+  el bundler imprime `Standalone validation: OK (base lineage 1.4.2-canary.1+0c087fdb9)`
+  y `readelf` da ELF64 `DYN (PIE)`, AArch64, `interpreter /system/bin/linker64`,
+  **for Android 28, built by NDK r27c**; `validate-android-bundle-142.py` verde
+  (marcador + sección `.bun` + ventana de 4 KiB del `.so` Bionic).
+- **G5 (teléfono, el mismo artifact del run, 168.189.880 B).** `opencode --version`
+  ⇒ `opencode v2.0.24` rc=0; el binario lleva el marcador `1.4.2-canary.1+0c087fdb9`
+  ×2; TUI completa renderizada en tmux 120x32 (logo OpenCode, prompt, modelo,
+  status bar, `2.0.24`); `opencode.db` con **48 migraciones**, `session_v2` y
+  `event_sequence` presentes; y sesión real
+  `opencode run -m opencode/mimo-v2.6-flash-free` ⇒ `TERMUXOK` rc=0. Que la TUI
+  cargue `libopentui.so` desde el slot arm64 es la prueba de que el swap llegó al
+  grafo: cierra R2/U4 de punta a punta, no solo en el mecanismo.
+
+**Cierre.** Sonda desechable `spike-bun142-native.yml` retirada antes del cutover
+(precedente B6, `51e4510`). El PR atómico a `main` lleva lock + scripts + workflows
++ guardias + docs; el tag `era-zig-opencode-pipeline-2026-10-10` sobre `7fe23dd` es
+el ancla de rollback y Kilo conserva vivo el trasplante.
 
 
