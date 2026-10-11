@@ -82,9 +82,15 @@ def main() -> None:
     assert 'module graph still contains' in module_graph_patch
     assert 'total_byte_count does not match file size' in module_graph_patch
     assert 'module graph contains vulnerable' in bundle_validator
-    assert 'python3 ci/scripts/validate-android-bundle.py' in (ROOT / ".github/workflows/build-opencode.yml").read_text(encoding="utf-8")
     assert 'python3 ci/scripts/validate-android-bundle.py' in (ROOT / ".github/workflows/build-kilo.yml").read_text(encoding="utf-8")
-    for workflow in ("build-bun.yml", "build-bun-target.yml", "build-opencode.yml"):
+    opencode_workflow = (ROOT / ".github/workflows/build-opencode.yml").read_text(encoding="utf-8")
+    assert 'python3 ci/scripts/validate-android-bundle-142.py' in opencode_workflow
+    assert 'validate-android-bundle.py' not in opencode_workflow
+    assert 'ci/scripts/materialize-bun-base.sh' in opencode_workflow
+    assert 'Leonisaurov/bun-android' in (ROOT / "ci/external-sources.lock").read_text(encoding="utf-8")
+    # Heap tagging is a property of the era-Zig Bun this workspace compiles;
+    # the OpenCode lane consumes a released runtime and no longer produces one.
+    for workflow in ("build-bun.yml", "build-bun-target.yml"):
         workflow_text = (ROOT / ".github/workflows" / workflow).read_text(encoding="utf-8")
         assert "ci/scripts/test-android-heap-tagging.py" in workflow_text
 
